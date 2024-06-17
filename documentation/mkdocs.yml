@@ -1,0 +1,62 @@
+# Project information
+site_name: Connectome-based Predictive Modeling in Python
+repo_name: 'cpm_python'
+repo_url: 'https://github.com/wwu-mmll/cpm_python'
+site_dir: '../docs'
+edit_uri: 'edit/master/documentation/docs'
+
+# Theme configuration
+theme:
+  name: 'material'
+  palette:
+    primary: 'teal'
+    accent: 'teal'
+  font: false
+  logo: assets/img/photonai-01.png
+  favicon: assets/img/photonai-02.png
+  features:
+     - toc.integrate
+
+# Latex
+extra_javascript:
+  - assets/javascript/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+# extensions
+markdown_extensions:
+  - pymdownx.arithmatex:
+        generic: true
+  - pymdownx.highlight:
+      auto_title: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - codehilite
+  - admonition
+  - pymdownx.details
+
+# Site structure
+nav:
+- Home: 'index.md'
+- Installation: 'installation.md'
+- Getting Started: 'getting_started.md'
+
+extra_css:
+  - assets/stylesheets/material.css
+  - assets/stylesheets/fonts.css
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          selection:
+            docstring_style: numpy
+          rendering:
+            show_source: false
+  - mkdocs-jupyter:
+      execute: True
