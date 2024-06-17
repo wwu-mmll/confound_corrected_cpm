@@ -14,11 +14,14 @@ X = X[~df['BDI_Sum'].isna()]
 df = df[~df['BDI_Sum'].isna()]
 covs = df[['Alter', 'Geschlecht']].to_numpy()
 y = df['BDI_Sum'].to_numpy()
+#covs = df[['Geschlecht']].to_numpy()
+#y = df['Alter'].to_numpy()
 
 cpm = CPMAnalysis(results_directory='./tmp/macs_demo',
                   cv=KFold(n_splits=10, shuffle=True, random_state=42))
 results = cpm.fit(X=X, y=y, covariates=covs)
 print(results)
-cpm.permutation_test(n_perms=1000)
+p_pos, p_neg = cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=30)
 
-print()
+print(p_pos)
+print(p_neg)
