@@ -7,6 +7,7 @@ from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit
 
 from cpm.models import LinearCPMModel
 from cpm.utils import score_regression, score_classification
+from cpm.edge_selection import partial_correlation
 
 
 class CPMAnalysis:
@@ -102,8 +103,9 @@ class CPMAnalysis:
     def _edge_statistics(X: Union[pd.DataFrame, np.ndarray],
                          y: Union[pd.Series, pd.DataFrame, np.ndarray],
                          covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
-        r_edges = np.random.randn(X.shape[0])
-        p_edges = np.random.randn(X.shape[0])
+        p_edges = partial_correlation(X=X, y=y, covariates=covariates)
+        r_edges = np.random.randn(X.shape[1])
+        #p_edges = np.random.randn(X.shape[0])
         return r_edges, p_edges
 
     @staticmethod
