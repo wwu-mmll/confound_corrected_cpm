@@ -3,8 +3,9 @@ from sklearn.linear_model import LinearRegression
 
 
 class LinearCPMModel:
-    def __init__(self, significant_edges):
+    def __init__(self, significant_edges, use_covariates=True):
         self.lm = None
+        self.use_covariates = use_covariates
         self.significant_edges = significant_edges
 
     def fit(self, X, y, covariates):

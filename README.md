@@ -12,3 +12,23 @@ to implement a nested CV.
 If the edge statistic is a multivariate model (e.g. Lasso), then edge statistic and edge selection is one step. Maybe
 it might be could to merge these steps to one edge selection step and some methods also allow for a threshold parameter
 to be optimized.
+
+### Hyperparameters
+- edge statistic and selection
+    - univariate
+        - correlation (pearson, spearman, semi-partial)
+        - mutual information
+        - simple p-value, FDR, FWE, FPR, k-best, percentile
+            - absolute p-threshold (p)
+            - corrected p-threshold: FDR, FWE, FPR
+            - relative (k-best, percentile)
+    - multivariate
+        - lasso (L1)
+        - tree-based
+        - recursive feature elimination
+    - use stability over inner CV folds (only those edges that are selected for within all inner CV folds)
+        - could apply for both multivariate and univariate
+
+- predictive model
+    - use covariates: yes/no
+    -
