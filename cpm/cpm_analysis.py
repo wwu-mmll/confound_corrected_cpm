@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit
 
 from cpm.models import LinearCPMModel
+from cpm.edge_selection import UnivariateEdgeSelection
 from cpm.utils import score_regression, score_classification
 from cpm.edge_selection import partial_correlation
 
@@ -14,12 +15,17 @@ class CPMAnalysis:
     def __init__(self,
                  results_directory: str,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit],
-                 stat_method: str = 'pearson',
-                 stat_threshold: float = 0.5):
+                 cv_edge_selection: Union[BaseCrossValidator, BaseShuffleSplit],
+                 edge_selection: UnivariateEdgeSelection,
+                 estimate_model_increments: bool = True,
+                 add_edge_filter: bool = True):
         self.results_directory = results_directory
         self.cv = cv
-        self.stat_method = stat_method
-        self.stat_threshold = stat_threshold
+        self.inner_cv = cv_edge_selection
+        self.edge_selection = edge_selection
+        self.estimate_model_increments = estimate_model_increments
+        self.add_edge_filter = add_edge_filter
+
         self.res_pos = None
         self.res_neg = None
 
@@ -34,12 +40,41 @@ class CPMAnalysis:
         for train, test in self.cv.split(X, y):
             X_train, X_test, y_train, y_test, cov_train, cov_test = (X[train], X[test], y[train], y[test],
                                                                      covariates[train], covariates[test])
+            n_hps = len(self.edge_selection.param_grid)
+            n_inner_folds = self.inner_cv.n_splits
+            inner_cv_results = pd.DataFrame({
+                'fold': list(np.arange(n_inner_folds)) * n_hps,
+                'params': list(self.edge_selection.param_grid) * n_inner_folds,
+                'param_id': np.repeat(np.arange(n_hps), n_inner_folds),
+                'mean_absolute_error': np.empty(n_hps * n_inner_folds),
+                'pearson_score': np.empty(n_hps * n_inner_folds)}).set_index(['fold', 'param_id'])
+
+            for param_id, param in enumerate(self.edge_selection.param_grid):
+                self.edge_selection.set_params(**param)
+                for inner_fold, (nested_train, nested_test) in enumerate(self.inner_cv.split(X_train, y_train)):
+                    X_train_nested, X_test_nested, y_train_nested, y_test_nested, cov_train_nested, cov_test_nested = (X[nested_train], X[nested_test], y[nested_train], y[nested_test],
+                                                                             covariates[nested_train], covariates[nested_test])
+                    pos_edges, neg_edges = self.edge_selection.fit_transform(X=X_train_nested, y=y_train_nested, covariates=cov_train_nested)
+                    # build linear models using positive and negative edges (training data)
+                    pos_model = LinearCPMModel(significant_edges=pos_edges).fit(X_train_nested, y_train_nested, cov_train_nested)
+                    neg_model = LinearCPMModel(significant_edges=neg_edges).fit(X_train_nested, y_train_nested, cov_train_nested)
+
+                    # predict on test set
+                    y_pred_pos_test_nested = pos_model.predict(X_test_nested, cov_test_nested)
+                    y_pred_neg_test_nested = neg_model.predict(X_test_nested, cov_test_nested)
+
+                    # score metrics (how well do the predictions fit the test data?)
+                    metrics_positive = score_regression(y_true=y_test_nested, y_pred=y_pred_pos_test_nested)
+                    metrics_negative = score_regression(y_true=y_test_nested, y_pred=y_pred_neg_test_nested)
+
+                    inner_cv_results.loc[(inner_fold, param_id)] = metrics_positive
+                    inner_cv_results.loc[(inner_fold, param_id)] = metrics_negative
 
             # calculate edge statistics (e.g. Pearson correlation, Spearman correlation, partial correlation)
-            r, p = self._edge_statistics(X=X_train, y=y_train, covariates=cov_train)
+            #r, p = self._edge_statistics(X=X_train, y=y_train, covariates=cov_train)
 
             # select significant edges based on specified threshold
-            pos_edges, neg_edges = self._edge_selection(r, p, threshold=self.stat_threshold)
+            #pos_edges, neg_edges = self._edge_selection(r, p, threshold=self.stat_threshold)
 
             # build linear models using positive and negative edges (training data)
             pos_model = LinearCPMModel(significant_edges=pos_edges).fit(X_train, y_train, cov_train)
