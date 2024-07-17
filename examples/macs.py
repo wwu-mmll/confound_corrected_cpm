@@ -26,7 +26,7 @@ from cpm.edge_selection import PThreshold, SelectPercentile, SelectKBest, Univar
 p_threshold = PThreshold(threshold=[0.05], correction=[None, 'FWE', 'FPR', 'FDR'])
 select_percentile = SelectPercentile(percentile=[0.5])
 select_kbest = SelectKBest(k=[5])
-univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson'],
+univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson_partial'],
                                                     edge_selection=[p_threshold, select_percentile, select_kbest])
 from cpm.models import LinearCPMModel
 

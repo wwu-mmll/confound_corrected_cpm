@@ -1,9 +1,14 @@
 import pandas as pd
 import numpy as np
-from scipy.stats import ttest_1samp
+from scipy.stats import ttest_1samp, pearsonr, t, rankdata
 from pingouin import partial_corr
 
+from typing import Union
 from sklearn.base import BaseEstimator
+from sklearn.utils.metaestimators import _BaseComposition
+from sklearn.model_selection import ParameterGrid
+from sklearn.linear_model import LinearRegression
+
 
 class BaseEdgeSelector(BaseEstimator):
     def transform(self):
@@ -31,8 +36,131 @@ def partial_correlation(X, y, covariates, method: str = 'pearson'):
     return np.asarray(p_values)
 
 
+def pearson_correlation(x, Y):
+    correlations = np.apply_along_axis(lambda col: pearsonr(x, col), 0, Y)
+    return correlations[0, :], correlations[1, :]
 
-from typing import Union
+
+def pearson_correlation_with_pvalues(x, Y):
+    n = len(x)
+
+    # Ensure x is a 1D array
+    x = np.ravel(x)
+
+    # Mean-centering x and Y
+    x_centered = x - np.mean(x)
+    Y_centered = Y - np.mean(Y, axis=0)
+
+    # Correlation calculation
+    corr_numerator = np.dot(Y_centered.T, x_centered)
+    corr_denominator = (np.sqrt(np.sum(Y_centered ** 2, axis=0)) * np.sqrt(np.sum(x_centered ** 2)))
+
+    correlations = corr_numerator / corr_denominator
+
+    # Calculate t-statistics
+    t_stats = correlations * np.sqrt((n - 2) / (1 - correlations ** 2))
+
+    # Calculate p-values
+    p_values = 2 * t.sf(np.abs(t_stats), df=n - 2)
+
+    return correlations, p_values
+
+
+def spearman_correlation_with_pvalues(x, Y):
+    n = len(x)
+
+    # Rank the input data
+    x_ranked = rankdata(x)
+    Y_ranked = np.apply_along_axis(rankdata, axis=0, arr=Y)
+
+    # Mean-centering the ranked data
+    x_ranked_centered = x_ranked - np.mean(x_ranked)
+    Y_ranked_centered = Y_ranked - np.mean(Y_ranked, axis=0)
+
+    # Correlation calculation
+    corr_numerator = np.dot(Y_ranked_centered.T, x_ranked_centered)
+    corr_denominator = (np.sqrt(np.sum(Y_ranked_centered ** 2, axis=0)) * np.sqrt(np.sum(x_ranked_centered ** 2)))
+
+    spearman_corr = corr_numerator / corr_denominator
+
+    # Calculate t-statistics
+    t_stats = spearman_corr * np.sqrt((n - 2) / (1 - spearman_corr ** 2))
+
+    # Calculate p-values
+    p_values = 2 * t.sf(np.abs(t_stats), df=n - 2)
+
+    return spearman_corr, p_values
+
+
+def get_residuals(X, Z):
+    # Add a column of ones to Z for the intercept
+    Z = np.hstack([Z, np.ones((Z.shape[0], 1))])
+
+    # Compute the coefficients using the normal equation
+    B = np.linalg.lstsq(Z, X, rcond=None)[0]
+
+    # Predict X from Z
+    X_hat = Z.dot(B)
+
+    # Compute residuals
+    residuals = X - X_hat
+
+    return residuals
+
+
+def semi_partial_correlation_pearson(x, Y, Z):
+    # Calculate residuals for x and each column in Y
+    x_residuals = get_residuals(x.reshape(-1, 1), Z).ravel()
+    Y_residuals = get_residuals(Y, Z)
+
+    # Mean-centering the residuals
+    x_centered = x_residuals - np.mean(x_residuals)
+    Y_centered = Y_residuals - np.mean(Y_residuals, axis=0)
+
+    # Correlation calculation
+    corr_numerator = np.dot(Y_centered.T, x_centered)
+    corr_denominator = (np.sqrt(np.sum(Y_centered ** 2, axis=0)) * np.sqrt(np.sum(x_centered ** 2)))
+
+    partial_corr = corr_numerator / corr_denominator
+
+    # Calculate t-statistics
+    n = len(x)
+    t_stats = partial_corr * np.sqrt((n - 2) / (1 - partial_corr ** 2))
+
+    # Calculate p-values
+    p_values = 2 * t.sf(np.abs(t_stats), df=n - 2)
+
+    return partial_corr, p_values
+
+
+def semi_partial_correlation_spearman(x, Y, Z):
+    # Calculate residuals for x and each column in Y
+    x_residuals = get_residuals(x.reshape(-1, 1), Z).ravel()
+    Y_residuals = get_residuals(Y, Z)
+
+    # Rank the residuals
+    x_ranked = rankdata(x_residuals)
+    Y_ranked = np.apply_along_axis(rankdata, axis=0, arr=Y_residuals)
+
+    # Mean-centering the ranked residuals
+    x_centered = x_ranked - np.mean(x_ranked)
+    Y_centered = Y_ranked - np.mean(Y_ranked, axis=0)
+
+    # Correlation calculation
+    corr_numerator = np.dot(Y_centered.T, x_centered)
+    corr_denominator = (np.sqrt(np.sum(Y_centered ** 2, axis=0)) * np.sqrt(np.sum(x_centered ** 2)))
+
+    partial_corr = corr_numerator / corr_denominator
+
+    # Calculate t-statistics
+    n = len(x)
+    t_stats = partial_corr * np.sqrt((n - 2) / (1 - partial_corr ** 2))
+
+    # Calculate p-values
+    p_values = 2 * t.sf(np.abs(t_stats), df=n - 2)
+
+    return partial_corr, p_values
+
 
 class PThreshold(BaseEdgeSelector):
     def __init__(self, threshold: Union[float, list] = 0.05, correction: Union[float, list] = None):
@@ -48,8 +176,6 @@ class SelectPercentile(BaseEdgeSelector):
 class SelectKBest(BaseEdgeSelector):
     def __init__(self, k: Union[int, list] = None):
         self.k = k
-
-from sklearn.utils.metaestimators import _BaseComposition
 
 
 class CPMPipeline(_BaseComposition):
@@ -91,9 +217,6 @@ class CPMPipeline(_BaseComposition):
         return dict(self.elements)
 
 
-from sklearn.model_selection import ParameterGrid
-
-
 class UnivariateEdgeSelection(BaseEstimator):
     def __init__(self,
                  edge_statistic: Union[str, list] = 'pearson',
@@ -114,17 +237,24 @@ class UnivariateEdgeSelection(BaseEstimator):
         return ParameterGrid(grid_elements)
 
     def fit_transform(self, X, y=None, covariates=None):
-        r_edges, p_edges = self._partial_correlation(X=X, y=y, covariates=covariates)
+        r_edges, p_edges = self._correlation(X=X, y=y, covariates=covariates)
         pos_edges, neg_edges = self._edge_selection(r=r_edges, p=p_edges, threshold=0.01)
         return pos_edges, neg_edges
 
-    @staticmethod
-    def _partial_correlation(X: Union[pd.DataFrame, np.ndarray],
+    def _correlation(self, X: Union[pd.DataFrame, np.ndarray],
                          y: Union[pd.Series, pd.DataFrame, np.ndarray],
                          covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
-        #p_edges = partial_correlation(X=X, y=y, covariates=covariates)
-        r_edges = np.random.randn(X.shape[1])
-        p_edges = np.random.randn(X.shape[1])
+        if self.edge_statistic == 'pearson':
+            r_edges, p_edges = pearson_correlation_with_pvalues(y, X)
+        elif self.edge_statistic == 'spearman':
+            r_edges, p_edges = spearman_correlation_with_pvalues(y, X)
+        elif self.edge_statistic == 'pearson_partial':
+            r_edges, p_edges = semi_partial_correlation_pearson(y, X, covariates)
+        elif self.edge_statistic == 'spearman_partial':
+            r_edges, p_edges = semi_partial_correlation_spearman(y, X, covariates)
+        else:
+            raise NotImplemented("Unsupported edge selection method")
+
         return r_edges, p_edges
 
     @staticmethod

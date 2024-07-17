@@ -45,6 +45,8 @@ class CPMAnalysis:
                 'params': [{}] * n_outer_folds * 3 * 3
                 }).set_index(['fold', 'network', 'model'])
         cv_results.sort_index(inplace=True)
+        positive_edges = np.zeros((n_outer_folds, X.shape[1]))
+        negative_edges = np.zeros((n_outer_folds, X.shape[1]))
 
         for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
             print(f"Running fold {outer_fold}")
@@ -99,6 +101,9 @@ class CPMAnalysis:
             # build model using best hyperparameters
             pos_edges, neg_edges = self.edge_selection.fit_transform(X=X_train, y=y_train,
                                                                      covariates=cov_train)
+            positive_edges[outer_fold, pos_edges] = 1
+            negative_edges[outer_fold, neg_edges] = 1
+
             # build linear models using positive and negative edges (training data)
             model = LinearCPMModelv2(positive_edges=pos_edges,
                                      negative_edges=neg_edges).fit(X_train, y_train, cov_train)
@@ -121,7 +126,21 @@ class CPMAnalysis:
         self.results_outer_cv = cv_results
         cv_results.to_csv(os.path.join(self.results_directory, 'cv_results.csv'))
         agg_results = cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
-        agg_results.to_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'))
+        agg_results.to_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
+
+        np.save(os.path.join(self.results_directory, 'positive_edges.npy'), positive_edges)
+        np.save(os.path.join(self.results_directory, 'negative_edges.npy'), negative_edges)
+
+        weights_positive_edges = np.sum(positive_edges, axis=0) / positive_edges.shape[0]
+        weights_negative_edges = np.sum(negative_edges, axis=0) / negative_edges.shape[0]
+
+        overlap_positive_edges = weights_positive_edges == 1
+        overlap_negative_edges = weights_negative_edges == 1
+        np.save(os.path.join(self.results_directory, 'weights_positive_edges.npy'), weights_positive_edges)
+        np.save(os.path.join(self.results_directory, 'weights_negative_edges.npy'), weights_negative_edges)
+        np.save(os.path.join(self.results_directory, 'overlap_positive_edges.npy'), overlap_positive_edges)
+        np.save(os.path.join(self.results_directory, 'overlap_negative_edges.npy'), overlap_negative_edges)
+
         return agg_results
 
     def permutation_test(self,
