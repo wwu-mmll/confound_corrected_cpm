@@ -47,6 +47,19 @@ class CPMAnalysis:
         cv_results.sort_index(inplace=True)
         positive_edges = np.zeros((n_outer_folds, X.shape[1]))
         negative_edges = np.zeros((n_outer_folds, X.shape[1]))
+        predictions = pd.DataFrame({'index': np.arange(X.shape[0]),
+                                    'fold_id': np.zeros(X.shape[0]),
+                                    'y_true': y,
+                                    'y_pred_full_positive': np.zeros(X.shape[0]),
+                                    'y_pred_covariates_positive': np.zeros(X.shape[0]),
+                                    'y_pred_connectome_positive': np.zeros(X.shape[0]),
+                                    'y_pred_full_negative': np.zeros(X.shape[0]),
+                                    'y_pred_covariates_negative': np.zeros(X.shape[0]),
+                                    'y_pred_connectome_negative': np.zeros(X.shape[0]),
+                                    'y_pred_full_both': np.zeros(X.shape[0]),
+                                    'y_pred_covariates_both': np.zeros(X.shape[0]),
+                                    'y_pred_connectome_both': np.zeros(X.shape[0])
+                                    })
 
         for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
             print(f"Running fold {outer_fold}")
@@ -108,10 +121,14 @@ class CPMAnalysis:
             model = LinearCPMModelv2(positive_edges=pos_edges,
                                      negative_edges=neg_edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
+
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
             for model_type in ['full', 'covariates', 'connectome']:
                 for network in ['positive', 'negative', 'both']:
+                    predictions.loc[test, f'y_pred_{model_type}_{network}'] = y_pred[model_type][network]
+                    predictions.loc[test, 'fold_id'] = outer_fold
+
                     cv_results.loc[(outer_fold, network, model_type), regression_metrics] = metrics[model_type][network]
                     cv_results.loc[(outer_fold, network, model_type), 'params'] = [best_params]
 
@@ -127,6 +144,8 @@ class CPMAnalysis:
         cv_results.to_csv(os.path.join(self.results_directory, 'cv_results.csv'))
         agg_results = cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
         agg_results.to_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
+
+        predictions.to_csv(os.path.join(self.results_directory, 'predictions.csv'))
 
         np.save(os.path.join(self.results_directory, 'positive_edges.npy'), positive_edges)
         np.save(os.path.join(self.results_directory, 'negative_edges.npy'), negative_edges)

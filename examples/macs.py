@@ -18,23 +18,12 @@ y = df['BDI_Sum'].to_numpy()
 #y = df['Alter'].to_numpy()
 
 
-"""
-pipeline.set_params(**{'univariate_edge_selection': select_percentile,
-                     'univariate_edge_selection__percentile': 0.5})
-"""
 from cpm.edge_selection import PThreshold, SelectPercentile, SelectKBest, UnivariateEdgeSelection
 p_threshold = PThreshold(threshold=[0.05], correction=[None, 'FWE', 'FPR', 'FDR'])
 select_percentile = SelectPercentile(percentile=[0.5])
 select_kbest = SelectKBest(k=[5])
-univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson_partial'],
+univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson'],
                                                     edge_selection=[p_threshold, select_percentile, select_kbest])
-from cpm.models import LinearCPMModel
-
-#pipeline = CPMPipeline(elements=[('univariate_edge_selection', univariate_edge_selection),
-#                                 ('linear_model', LinearCPMModel())])
-
-
-#p_threshold.get_params()
 
 cpm = CPMAnalysis(results_directory='./tmp/macs_demo',
                   cv=KFold(n_splits=5, shuffle=True, random_state=42),
