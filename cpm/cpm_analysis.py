@@ -1,3 +1,4 @@
+import os
 from typing import Union
 
 import numpy as np
@@ -5,9 +6,9 @@ import pandas as pd
 
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit
 
-from cpm.models import LinearCPMModel
+from cpm.models import LinearCPMModel, LinearCPMModelv2
 from cpm.edge_selection import UnivariateEdgeSelection
-from cpm.utils import score_regression, score_classification
+from cpm.utils import score_regression, score_classification, score_regression_models, regression_metrics
 from cpm.edge_selection import partial_correlation
 
 
@@ -26,72 +27,102 @@ class CPMAnalysis:
         self.estimate_model_increments = estimate_model_increments
         self.add_edge_filter = add_edge_filter
 
-        self.res_pos = None
-        self.res_neg = None
+        self.results_outer_cv = None
+        self.results_inner_cv = list()
+
+        os.makedirs(results_directory, exist_ok=True)
 
     def fit(self,
             X: Union[pd.DataFrame, np.ndarray],
             y: Union[pd.Series, pd.DataFrame, np.ndarray],
             covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
 
-        results_positive = pd.DataFrame()
-        results_negative = pd.DataFrame()
+        n_outer_folds = self.cv.n_splits
+        cv_results = pd.DataFrame({
+                'fold': list(np.arange(n_outer_folds)) * 3 * 3,
+                'network': (['positive'] * n_outer_folds + ['negative'] * n_outer_folds + ['both'] * n_outer_folds) * 3,
+                'model': ['full'] * n_outer_folds * 3 + ['covariates'] * n_outer_folds * 3 + ['connectome'] * n_outer_folds * 3,
+                'params': [{}] * n_outer_folds * 3 * 3
+                }).set_index(['fold', 'network', 'model'])
+        cv_results.sort_index(inplace=True)
 
-        for train, test in self.cv.split(X, y):
+        for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
+            print(f"Running fold {outer_fold}")
+            fold_dir = os.path.join(self.results_directory, f'fold_{outer_fold}')
+            os.makedirs(fold_dir, exist_ok=True)
             X_train, X_test, y_train, y_test, cov_train, cov_test = (X[train], X[test], y[train], y[test],
                                                                      covariates[train], covariates[test])
             n_hps = len(self.edge_selection.param_grid)
             n_inner_folds = self.inner_cv.n_splits
             inner_cv_results = pd.DataFrame({
-                'fold': list(np.arange(n_inner_folds)) * n_hps,
-                'params': list(self.edge_selection.param_grid) * n_inner_folds,
-                'param_id': np.repeat(np.arange(n_hps), n_inner_folds),
-                'mean_absolute_error': np.empty(n_hps * n_inner_folds),
-                'pearson_score': np.empty(n_hps * n_inner_folds)}).set_index(['fold', 'param_id'])
+                'fold': list(np.arange(n_inner_folds)) * n_hps * 3 * 3,
+                'param_id': list(np.repeat(np.arange(n_hps), n_inner_folds)) * 3 * 3,
+                'network': (['positive'] * n_hps * n_inner_folds + ['negative'] * n_hps * n_inner_folds + ['both'] * n_hps * n_inner_folds) * 3,
+                'model': ['full'] * n_hps * n_inner_folds * 3 + ['covariates'] * n_hps * n_inner_folds * 3 + ['connectome'] * n_hps * n_inner_folds * 3,
+                'params': list(np.repeat(list(self.edge_selection.param_grid), n_inner_folds * 3 * 3))
+                }).set_index(['fold', 'param_id', 'network', 'model'])
 
             for param_id, param in enumerate(self.edge_selection.param_grid):
+                print("   Optimizing hyperparameters using nested CV")
                 self.edge_selection.set_params(**param)
                 for inner_fold, (nested_train, nested_test) in enumerate(self.inner_cv.split(X_train, y_train)):
                     X_train_nested, X_test_nested, y_train_nested, y_test_nested, cov_train_nested, cov_test_nested = (X[nested_train], X[nested_test], y[nested_train], y[nested_test],
                                                                              covariates[nested_train], covariates[nested_test])
                     pos_edges, neg_edges = self.edge_selection.fit_transform(X=X_train_nested, y=y_train_nested, covariates=cov_train_nested)
-                    # build linear models using positive and negative edges (training data)
-                    pos_model = LinearCPMModel(significant_edges=pos_edges).fit(X_train_nested, y_train_nested, cov_train_nested)
-                    neg_model = LinearCPMModel(significant_edges=neg_edges).fit(X_train_nested, y_train_nested, cov_train_nested)
 
-                    # predict on test set
-                    y_pred_pos_test_nested = pos_model.predict(X_test_nested, cov_test_nested)
-                    y_pred_neg_test_nested = neg_model.predict(X_test_nested, cov_test_nested)
+                    model = LinearCPMModelv2(positive_edges=pos_edges,
+                                             negative_edges=neg_edges).fit(X_train_nested, y_train_nested, cov_train_nested)
+                    y_pred = model.predict(X_test_nested, cov_test_nested)
+                    metrics = score_regression_models(y_true=y_test_nested, y_pred=y_pred)
 
-                    # score metrics (how well do the predictions fit the test data?)
-                    metrics_positive = score_regression(y_true=y_test_nested, y_pred=y_pred_pos_test_nested)
-                    metrics_negative = score_regression(y_true=y_test_nested, y_pred=y_pred_neg_test_nested)
+                    for model_type in ['full', 'covariates', 'connectome']:
+                        for network in ['positive', 'negative', 'both']:
+                            inner_cv_results.loc[(inner_fold, param_id, network, model_type), metrics[model_type][network].keys()] = metrics[model_type][network]
 
-                    inner_cv_results.loc[(inner_fold, param_id)] = metrics_positive
-                    inner_cv_results.loc[(inner_fold, param_id)] = metrics_negative
 
-            # calculate edge statistics (e.g. Pearson correlation, Spearman correlation, partial correlation)
-            #r, p = self._edge_statistics(X=X_train, y=y_train, covariates=cov_train)
+            # find best params
+            increments = inner_cv_results[regression_metrics].xs(key='full', level='model') - \
+                         inner_cv_results[regression_metrics].xs(key='covariates', level='model')
+            increments['params'] = inner_cv_results.xs(key='full', level='model')['params']
+            increments['model'] = 'increment'
+            increments = increments.set_index('model', append=True)
+            inner_cv_results = pd.concat([inner_cv_results, increments])
+            inner_cv_results.sort_index(inplace=True)
+            inner_cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
+            agg_results = inner_cv_results.groupby(['network', 'param_id', 'model'])[regression_metrics].agg(['mean', 'std'])
+            agg_results.to_csv(os.path.join(fold_dir, 'inner_cv_results_mean_std.csv'))
 
-            # select significant edges based on specified threshold
-            #pos_edges, neg_edges = self._edge_selection(r, p, threshold=self.stat_threshold)
+            best_params_ids = agg_results['mean_absolute_error'].groupby(['network', 'model'])['mean'].idxmin()
+            best_params = inner_cv_results.loc[(0, best_params_ids.loc[('both', 'full')][1], 'both', 'full'), 'params']
+            self.edge_selection.set_params(**best_params)
 
+            # build model using best hyperparameters
+            pos_edges, neg_edges = self.edge_selection.fit_transform(X=X_train, y=y_train,
+                                                                     covariates=cov_train)
             # build linear models using positive and negative edges (training data)
-            pos_model = LinearCPMModel(significant_edges=pos_edges).fit(X_train, y_train, cov_train)
-            neg_model = LinearCPMModel(significant_edges=neg_edges).fit(X_train, y_train, cov_train)
+            model = LinearCPMModelv2(positive_edges=pos_edges,
+                                     negative_edges=neg_edges).fit(X_train, y_train, cov_train)
+            y_pred = model.predict(X_test, cov_test)
+            metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
-            # predict on test set
-            y_pred_pos_test = pos_model.predict(X_test, cov_test)
-            y_pred_neg_test = neg_model.predict(X_test, cov_test)
+            for model_type in ['full', 'covariates', 'connectome']:
+                for network in ['positive', 'negative', 'both']:
+                    cv_results.loc[(outer_fold, network, model_type), regression_metrics] = metrics[model_type][network]
+                    cv_results.loc[(outer_fold, network, model_type), 'params'] = [best_params]
 
-            # score metrics (how well do the predictions fit the test data?)
-            metrics_positive = score_regression(y_true=y_test, y_pred=y_pred_pos_test)
-            metrics_negative = score_regression(y_true=y_test, y_pred=y_pred_neg_test)
-            results_positive = pd.concat([results_positive, pd.DataFrame(metrics_positive, index=[0])], ignore_index=True)
-            results_negative = pd.concat([results_negative, pd.DataFrame(metrics_negative, index=[0])], ignore_index=True)
-        self.res_pos = results_positive.mean()
-        self.res_neg = results_negative.mean()
-        return self.res_pos, self.res_neg
+        increments = cv_results[regression_metrics].xs(key='full', level='model') - \
+                     cv_results[regression_metrics].xs(key='covariates', level='model')
+        increments['params'] = cv_results.xs(key='full', level='model')['params']
+        increments['model'] = 'increment'
+        increments = increments.set_index('model', append=True)
+        cv_results = pd.concat([cv_results, increments])
+        cv_results.sort_index(inplace=True)
+
+        self.results_outer_cv = cv_results
+        cv_results.to_csv(os.path.join(self.results_directory, 'cv_results.csv'))
+        agg_results = cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
+        agg_results.to_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'))
+        return agg_results
 
     def permutation_test(self,
                          X,

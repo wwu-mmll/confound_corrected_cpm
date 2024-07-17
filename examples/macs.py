@@ -23,10 +23,10 @@ pipeline.set_params(**{'univariate_edge_selection': select_percentile,
                      'univariate_edge_selection__percentile': 0.5})
 """
 from cpm.edge_selection import PThreshold, SelectPercentile, SelectKBest, UnivariateEdgeSelection
-p_threshold = PThreshold(threshold=[0.05, 0.01, 0.001], correction=[None, 'FWE', 'FPR', 'FDR'])
-select_percentile = SelectPercentile(percentile=[0.5, 0.25])
-select_kbest = SelectKBest(k=[5, 10, 15])
-univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson', 'semi-partial'],
+p_threshold = PThreshold(threshold=[0.05], correction=[None, 'FWE', 'FPR', 'FDR'])
+select_percentile = SelectPercentile(percentile=[0.5])
+select_kbest = SelectKBest(k=[5])
+univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson'],
                                                     edge_selection=[p_threshold, select_percentile, select_kbest])
 from cpm.models import LinearCPMModel
 
@@ -37,14 +37,12 @@ from cpm.models import LinearCPMModel
 #p_threshold.get_params()
 
 cpm = CPMAnalysis(results_directory='./tmp/macs_demo',
-                  cv=KFold(n_splits=10, shuffle=True, random_state=42),
+                  cv=KFold(n_splits=5, shuffle=True, random_state=42),
                   edge_selection=univariate_edge_selection,
-                  cv_edge_selection=KFold(n_splits=10, shuffle=True, random_state=42),
+                  cv_edge_selection=KFold(n_splits=5, shuffle=True, random_state=42),
                   estimate_model_increments=True,
                   add_edge_filter=True)
 results = cpm.fit(X=X, y=y, covariates=covs)
 print(results)
-p_pos, p_neg = cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=30)
+#p_pos, p_neg = cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=30)
 
-print(p_pos)
-print(p_neg)

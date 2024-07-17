@@ -122,9 +122,9 @@ class UnivariateEdgeSelection(BaseEstimator):
     def _partial_correlation(X: Union[pd.DataFrame, np.ndarray],
                          y: Union[pd.Series, pd.DataFrame, np.ndarray],
                          covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
-        p_edges = partial_correlation(X=X, y=y, covariates=covariates)
+        #p_edges = partial_correlation(X=X, y=y, covariates=covariates)
         r_edges = np.random.randn(X.shape[1])
-        #p_edges = np.random.randn(X.shape[0])
+        p_edges = np.random.randn(X.shape[1])
         return r_edges, p_edges
 
     @staticmethod
