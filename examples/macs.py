@@ -10,10 +10,14 @@ X = np.load('/spm-data/vault-data3/mmll/projects/macs_datahub_example/AnalysisRe
 df = pd.read_csv('/spm-data/vault-data3/mmll/projects/macs_datahub_example/AnalysisReady/all/'
                  'FunctionalConnectome/sample.csv',
                  na_values=-99)
-X = X[~df['BDI_Sum'].isna()]
-df = df[~df['BDI_Sum'].isna()]
+X = X[~df['CTQ_Sum'].isna()]
+df = df[~df['CTQ_Sum'].isna()]
+
+#X = X[~df['BDI_Sum'].isna()]
+#df = df[~df['BDI_Sum'].isna()]
 covs = df[['Alter', 'Geschlecht']].to_numpy()
-y = df['BDI_Sum'].to_numpy()
+#y = df['BDI_Sum'].to_numpy()
+y = df['CTQ_Sum'].to_numpy()
 #covs = df[['Geschlecht']].to_numpy()
 #y = df['Alter'].to_numpy()
 
