@@ -23,11 +23,11 @@ y = df['CTQ_Sum'].to_numpy()
 
 
 from cpm.edge_selection import PThreshold, SelectPercentile, SelectKBest, UnivariateEdgeSelection
-p_threshold = PThreshold(threshold=[0.05], correction=[None, 'FWE', 'FPR', 'FDR'])
+p_threshold = PThreshold(threshold=[0.05], correction=[None])
 select_percentile = SelectPercentile(percentile=[0.5])
 select_kbest = SelectKBest(k=[5])
 univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson'],
-                                                    edge_selection=[p_threshold, select_percentile, select_kbest])
+                                                    edge_selection=[p_threshold])
 
 cpm = CPMAnalysis(results_directory='./tmp/macs_demo',
                   cv=KFold(n_splits=5, shuffle=True, random_state=42),
@@ -35,7 +35,7 @@ cpm = CPMAnalysis(results_directory='./tmp/macs_demo',
                   cv_edge_selection=KFold(n_splits=5, shuffle=True, random_state=42),
                   estimate_model_increments=True,
                   add_edge_filter=True)
-results = cpm.fit(X=X, y=y, covariates=covs)
-print(results)
-#p_pos, p_neg = cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=30)
+#results = cpm.fit(X=X, y=y, covariates=covs)
+#print(results)
+cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=50)
 

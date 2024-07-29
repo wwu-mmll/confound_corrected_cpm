@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 
 
-class LinearCPMModel:
+class LinearCPMModelOld:
     def __init__(self, significant_edges, use_covariates=True):
         self.lm = None
         self.use_covariates = use_covariates
@@ -16,7 +16,7 @@ class LinearCPMModel:
         return self.lm.predict(np.sum(X[:, self.significant_edges], axis=1).reshape(-1, 1))
 
 
-class LinearCPMModelv2:
+class LinearCPMModel:
     def __init__(self, positive_edges, negative_edges, calculate_increments=True):
         self.full_lm = dict()
         self.connectome_lm = dict()

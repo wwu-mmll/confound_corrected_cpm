@@ -32,3 +32,7 @@ def score_classification(y_true, y_pred):
     return {'accuracy_score': accuracy_score(y_true, y_pred),
             'balanced accuracy_score': balanced_accuracy_score(y_true, y_pred),
             'roc_auc_score': roc_auc_score(y_true, y_pred)}
+
+
+def train_test_split(train, test, X, y, covariates):
+    return X[train], X[test], y[train], y[test], covariates[train], covariates[test]

@@ -6,10 +6,10 @@ import pandas as pd
 
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit
 
-from cpm.models import LinearCPMModel, LinearCPMModelv2
+from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection
-from cpm.utils import score_regression, score_classification, score_regression_models, regression_metrics
-from cpm.edge_selection import partial_correlation
+from cpm.utils import score_regression, score_classification, score_regression_models, regression_metrics, train_test_split
+from cpm.fold import compute_inner_folds
 
 
 class CPMAnalysis:
@@ -35,7 +35,9 @@ class CPMAnalysis:
     def fit(self,
             X: Union[pd.DataFrame, np.ndarray],
             y: Union[pd.Series, pd.DataFrame, np.ndarray],
-            covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
+            covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
+            save_memory: bool = False):
+        os.makedirs(self.results_directory, exist_ok=True)
 
         n_outer_folds = self.cv.n_splits
         n_hps = len(self.edge_selection.param_grid)
@@ -51,43 +53,36 @@ class CPMAnalysis:
         for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
             print(f"Running fold {outer_fold}")
             fold_dir = os.path.join(self.results_directory, f'fold_{outer_fold}')
-            os.makedirs(fold_dir, exist_ok=True)
+            if not save_memory:
+                os.makedirs(fold_dir, exist_ok=True)
 
-            X_train, X_test, y_train, y_test, cov_train, cov_test = self._train_test_split(train, test, X, y, covariates)
+            X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 
-            inner_cv_results = self._initialize_inner_cv_results(n_inner_folds=n_inner_folds,
-                                                                 n_hyperparameters=n_hps,
-                                                                 param_grid=self.edge_selection.param_grid)
-
+            inner_cv_results = list()
+            print("   Optimizing hyperparameters using nested CV")
             for param_id, param in enumerate(self.edge_selection.param_grid):
-                print("   Optimizing hyperparameters using nested CV")
-                self.edge_selection.set_params(**param)
-                for inner_fold, (nested_train, nested_test) in enumerate(self.inner_cv.split(X_train, y_train)):
-                    (X_train_nested, X_test_nested, y_train_nested,
-                     y_test_nested, cov_train_nested, cov_test_nested) = self._train_test_split(nested_train, nested_test,
-                                                                                                X_train, y_train, cov_train)
+                print("       Parameter {}".format(param_id))
 
-                    pos_edges, neg_edges = self.edge_selection.fit_transform(X=X_train_nested, y=y_train_nested, covariates=cov_train_nested)
+                inner_cv_results.append(compute_inner_folds(X_train, y_train, cov_train, self.inner_cv,
+                                                            self.edge_selection, param, param_id))
+            inner_cv_results = pd.concat(inner_cv_results)
 
-                    model = LinearCPMModelv2(positive_edges=pos_edges,
-                                             negative_edges=neg_edges).fit(X_train_nested, y_train_nested, cov_train_nested)
-                    y_pred = model.predict(X_test_nested, cov_test_nested)
-                    metrics = score_regression_models(y_true=y_test_nested, y_pred=y_pred)
-
-                    for model_type in ['full', 'covariates', 'connectome']:
-                        for network in ['positive', 'negative', 'both']:
-                            inner_cv_results.loc[(inner_fold, param_id, network, model_type), metrics[model_type][network].keys()] = metrics[model_type][network]
-
-            # find best params
+            # model increments
             inner_cv_results = self._calculate_model_increments(cv_results=inner_cv_results,
                                                                 metrics=regression_metrics)
-            inner_cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
 
+            # aggregate over folds to calculate mean and std
             agg_results = inner_cv_results.groupby(['network', 'param_id', 'model'])[regression_metrics].agg(['mean', 'std'])
-            agg_results.to_csv(os.path.join(fold_dir, 'inner_cv_results_mean_std.csv'))
 
+            if not save_memory:
+                inner_cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
+                agg_results.to_csv(os.path.join(fold_dir, 'inner_cv_results_mean_std.csv'))
+
+            # find parameters that perform best
             best_params_ids = agg_results['mean_absolute_error'].groupby(['network', 'model'])['mean'].idxmin()
             best_params = inner_cv_results.loc[(0, best_params_ids.loc[('both', 'full')][1], 'both', 'full'), 'params']
+
+            # use best parameters to estimate performance on outer fold test set
             self.edge_selection.set_params(**best_params)
 
             # build model using best hyperparameters
@@ -97,8 +92,8 @@ class CPMAnalysis:
             negative_edges[outer_fold, neg_edges] = 1
 
             # build linear models using positive and negative edges (training data)
-            model = LinearCPMModelv2(positive_edges=pos_edges,
-                                     negative_edges=neg_edges).fit(X_train, y_train, cov_train)
+            model = LinearCPMModel(positive_edges=pos_edges,
+                                   negative_edges=neg_edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
 
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
@@ -112,6 +107,7 @@ class CPMAnalysis:
                     cv_results.loc[(outer_fold, network, model_type), 'params'] = [best_params]
 
         cv_results = self._calculate_model_increments(cv_results=cv_results, metrics=regression_metrics)
+
         cv_results.to_csv(os.path.join(self.results_directory, 'cv_results.csv'))
 
         self.results_outer_cv = cv_results
@@ -121,24 +117,16 @@ class CPMAnalysis:
 
         predictions.to_csv(os.path.join(self.results_directory, 'predictions.csv'))
 
-        np.save(os.path.join(self.results_directory, 'positive_edges.npy'), positive_edges)
-        np.save(os.path.join(self.results_directory, 'negative_edges.npy'), negative_edges)
+        for sign, edges in [('positive', positive_edges), ('negative', negative_edges)]:
+            np.save(os.path.join(self.results_directory, f'{sign}_edges.npy'), edges)
 
-        weights_positive_edges = np.sum(positive_edges, axis=0) / positive_edges.shape[0]
-        weights_negative_edges = np.sum(negative_edges, axis=0) / negative_edges.shape[0]
+            weights_edges = np.sum(edges, axis=0) / edges.shape[0]
+            overlap_edges = weights_edges == 1
 
-        overlap_positive_edges = weights_positive_edges == 1
-        overlap_negative_edges = weights_negative_edges == 1
-        np.save(os.path.join(self.results_directory, 'weights_positive_edges.npy'), weights_positive_edges)
-        np.save(os.path.join(self.results_directory, 'weights_negative_edges.npy'), weights_negative_edges)
-        np.save(os.path.join(self.results_directory, 'overlap_positive_edges.npy'), overlap_positive_edges)
-        np.save(os.path.join(self.results_directory, 'overlap_negative_edges.npy'), overlap_negative_edges)
+            np.save(os.path.join(self.results_directory, f'weights_{sign}_edges.npy'), weights_edges)
+            np.save(os.path.join(self.results_directory, f'overlap_{sign}_edges.npy'), overlap_edges)
 
         return agg_results
-
-    @staticmethod
-    def _train_test_split(train, test, X, y, covariates):
-        return X[train], X[test], y[train], y[test], covariates[train], covariates[test]
 
     @staticmethod
     def _initialize_outer_cv_results(n_outer_folds):
@@ -208,21 +196,75 @@ class CPMAnalysis:
                          random_state: int = 42,
                          ):
         np.random.seed(random_state)
-        perms_pos = list()
-        perms_neg = list()
+        original_results_directory = self.results_directory
+        true_results = pd.read_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), header=[0, 1], index_col=[0, 1])
+        true_results = true_results.loc[:, true_results.columns.get_level_values(1) == 'mean']
+        true_results.columns = true_results.columns.droplevel(1)
+
+        perm_results = list()
         for i in range(n_perms):
             print(i)
             y_perm = np.random.permutation(y)
-            pos, neg = self.fit(X, y_perm, covariates)
-            perms_pos.append(pos)
-            perms_neg.append(neg)
-        perms_pos = pd.DataFrame(perms_pos)
-        perms_neg = pd.DataFrame(perms_neg)
-        p_pos = self._calculate_p_value(pd.DataFrame(self.res_pos).transpose(), perms_pos)
-        p_neg = self._calculate_p_value(pd.DataFrame(self.res_neg).transpose(), perms_neg)
-        return p_pos, p_neg
+            self.results_directory = os.path.join(original_results_directory, 'permutation', f'{i}')
+            if not os.path.exists(self.results_directory):
+                self.fit(X, y_perm, covariates, save_memory=True)
+            res = pd.read_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), header=[0, 1], index_col=[0, 1])
+            res = res.loc[:, res.columns.get_level_values(1) == 'mean']
+            res.columns = res.columns.droplevel(1)
+            res['permutation'] = i
+            res = res.set_index('permutation', append=True)
 
-    def _calculate_p_value(self, true_results, perms):
+            perm_results.append(res)
+        concatenated_df = pd.concat(perm_results)
+        p_values = self.calculate_p_values(true_results, concatenated_df)
+        p_values.to_csv(os.path.join(original_results_directory, 'p_values.csv'))
+
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        def plot_histogram_with_line(data, **kwargs):
+            true_value = data['true_value'].values[0]
+            sns.histplot(data['permuted_value'], kde=False, **kwargs)
+            plt.axvline(true_value, color='red', linestyle='dashed', linewidth=1)
+
+        # Assuming true_results and perms are previously defined
+
+        # Melt the permutation dataframe (make it long-form)
+        long_perms = concatenated_df.reset_index().melt(id_vars=['network', 'model'], var_name='metric',
+                                              value_name='permuted_value')
+
+        # Merge true results into the long-form dataframe
+        true_melted = true_results.reset_index().melt(id_vars=['network', 'model'], var_name='metric',
+                                                      value_name='true_value')
+        merged = pd.merge(long_perms, true_melted, on=['network', 'model', 'metric'])
+
+        # Get the unique metrics
+        metrics = merged['metric'].unique()
+
+        # Create individual figures for each metric
+        for metric in metrics:
+            fig, ax = plt.subplots()
+            metric_data = merged[merged['metric'] == metric]
+
+            # Create FacetGrid with rows as 'network' and columns as 'model' for the current metric
+            g = sns.FacetGrid(metric_data, row='network', col='model', margin_titles=True, sharex=False, sharey=False)
+            g.map_dataframe(plot_histogram_with_line)
+
+            # Set axis labels and titles
+            g.set_axis_labels(metric, 'Count')
+            g.set_titles(col_template='{col_name}', row_template='{row_name}')
+
+            # Add a main title for the figure
+            plt.subplots_adjust(top=0.9)
+            g.fig.suptitle(f'Distribution of Permutations for {metric}', fontsize=16)
+
+            # Adjust the layout
+            plt.tight_layout()
+            plt.show()
+        return
+
+    @staticmethod
+    def _calculate_p_value(true_results, perms):
         result_dict = {}
 
         # Iterate over each column in self.res_pos
@@ -242,20 +284,34 @@ class CPMAnalysis:
         return pd.DataFrame(result_dict)
 
     @staticmethod
-    def _edge_statistics(X: Union[pd.DataFrame, np.ndarray],
-                         y: Union[pd.Series, pd.DataFrame, np.ndarray],
-                         covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
-        p_edges = partial_correlation(X=X, y=y, covariates=covariates)
-        r_edges = np.random.randn(X.shape[1])
-        #p_edges = np.random.randn(X.shape[0])
-        return r_edges, p_edges
+    def _calculate_group_p_value(true_group, perms_group):
+        result_dict = {}
 
-    @staticmethod
-    def _edge_selection(r: np.ndarray,
-                        p: np.ndarray,
-                        threshold: float):
-        pos_edges = np.where((p < threshold) & (r > 0))[0]
-        neg_edges = np.where((p < threshold) & (r < 0))[0]
-        return pos_edges, neg_edges
+        # Iterate over each column (metric) in true_group
+        for column in true_group.columns:
+            condition_count = 0
+            if column.endswith('error'):
+                condition_count = (true_group[column].values[0] > perms_group[column]).sum()
+            elif column.endswith('score'):
+                condition_count = (true_group[column].values[0] < perms_group[column]).sum()
 
+            result_dict[column] = condition_count / (len(perms_group[column]) + 1)
 
+        return pd.Series(result_dict)
+
+    def calculate_p_values(self, true_results, perms):
+        # Group by 'network' and 'model'
+        grouped_true = true_results.groupby(['network', 'model'])
+        grouped_perms = perms.groupby(['network', 'model'])
+
+        p_values = []
+
+        for (name, true_group), (_, perms_group) in zip(grouped_true, grouped_perms):
+            p_value_series = self._calculate_group_p_value(true_group, perms_group)
+            p_values.append(pd.DataFrame(p_value_series).T.assign(network=name[0], model=name[1]))
+
+        # Concatenate all the p-values DataFrames into a single DataFrame
+        p_values_df = pd.concat(p_values).reset_index(drop=True)
+        p_values_df = p_values_df.set_index(['network', 'model'])
+
+        return p_values_df
