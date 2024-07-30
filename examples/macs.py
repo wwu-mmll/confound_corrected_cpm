@@ -35,7 +35,7 @@ cpm = CPMAnalysis(results_directory='./tmp/macs_demo',
                   cv_edge_selection=KFold(n_splits=5, shuffle=True, random_state=42),
                   estimate_model_increments=True,
                   add_edge_filter=True)
-#results = cpm.fit(X=X, y=y, covariates=covs)
+results = cpm.fit(X=X, y=y, covariates=covs)
 #print(results)
 cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=50)
 

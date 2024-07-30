@@ -38,6 +38,7 @@ class CPMAnalysis:
             covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
             save_memory: bool = False):
         os.makedirs(self.results_directory, exist_ok=True)
+        self._write_info()
 
         n_outer_folds = self.cv.n_splits
         n_hps = len(self.edge_selection.param_grid)
@@ -48,7 +49,8 @@ class CPMAnalysis:
         cv_results = self._initialize_outer_cv_results(n_outer_folds=n_outer_folds)
         positive_edges = self._initialize_edges(n_outer_folds=n_outer_folds, n_features=n_features)
         negative_edges = self._initialize_edges(n_outer_folds=n_outer_folds, n_features=n_features)
-        predictions = self._initialize_predictions(n_samples=n_samples, y_true=y)
+        #predictions = self._initialize_predictions(n_samples=n_samples, y_true=y)
+        predictions = pd.DataFrame()
 
         for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
             print(f"Running fold {outer_fold}")
@@ -100,11 +102,21 @@ class CPMAnalysis:
 
             for model_type in ['full', 'covariates', 'connectome']:
                 for network in ['positive', 'negative', 'both']:
-                    predictions.loc[test, f'y_pred_{model_type}_{network}'] = y_pred[model_type][network]
-                    predictions.loc[test, 'fold_id'] = outer_fold
+                    n_test_set = y_pred[model_type][network].shape[0]
+                    preds = {}
+                    preds['y_pred'] = y_pred[model_type][network]
+                    preds['y_true'] = y_test
+                    preds['model'] = [model_type] * n_test_set
+                    preds['network'] = [network] * n_test_set
+                    preds['fold'] = [outer_fold] * n_test_set
+                    preds['params'] = [best_params] * n_test_set
+                    predictions = pd.concat([predictions, pd.DataFrame(preds)], ignore_index=True)
 
                     cv_results.loc[(outer_fold, network, model_type), regression_metrics] = metrics[model_type][network]
                     cv_results.loc[(outer_fold, network, model_type), 'params'] = [best_params]
+
+        predictions.set_index(['fold', 'network', 'model'], inplace=True)
+        predictions.sort_index(inplace=True)
 
         cv_results = self._calculate_model_increments(cv_results=cv_results, metrics=regression_metrics)
 
@@ -115,7 +127,8 @@ class CPMAnalysis:
         agg_results = cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
         agg_results.to_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
 
-        predictions.to_csv(os.path.join(self.results_directory, 'predictions.csv'))
+        if not save_memory:
+            predictions.to_csv(os.path.join(self.results_directory, 'predictions.csv'))
 
         for sign, edges in [('positive', positive_edges), ('negative', negative_edges)]:
             np.save(os.path.join(self.results_directory, f'{sign}_edges.npy'), edges)
@@ -127,6 +140,9 @@ class CPMAnalysis:
             np.save(os.path.join(self.results_directory, f'overlap_{sign}_edges.npy'), overlap_edges)
 
         return agg_results
+
+    def _write_info(self):
+        pass
 
     @staticmethod
     def _initialize_outer_cv_results(n_outer_folds):
