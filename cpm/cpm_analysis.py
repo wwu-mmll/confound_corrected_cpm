@@ -8,7 +8,8 @@ from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit
 
 from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection
-from cpm.utils import score_regression, score_classification, score_regression_models, regression_metrics, train_test_split
+from cpm.utils import (score_regression, score_classification, score_regression_models, regression_metrics,
+                       train_test_split, vector_to_upper_triangular_matrix)
 from cpm.fold import compute_inner_folds
 
 
@@ -131,13 +132,13 @@ class CPMAnalysis:
             predictions.to_csv(os.path.join(self.results_directory, 'predictions.csv'))
 
         for sign, edges in [('positive', positive_edges), ('negative', negative_edges)]:
-            np.save(os.path.join(self.results_directory, f'{sign}_edges.npy'), edges)
+            np.save(os.path.join(self.results_directory, f'{sign}_edges.npy'), vector_to_upper_triangular_matrix(edges[0]))
 
             weights_edges = np.sum(edges, axis=0) / edges.shape[0]
             overlap_edges = weights_edges == 1
 
-            np.save(os.path.join(self.results_directory, f'weights_{sign}_edges.npy'), weights_edges)
-            np.save(os.path.join(self.results_directory, f'overlap_{sign}_edges.npy'), overlap_edges)
+            np.save(os.path.join(self.results_directory, f'weights_{sign}_edges.npy'), vector_to_upper_triangular_matrix(weights_edges))
+            np.save(os.path.join(self.results_directory, f'overlap_{sign}_edges.npy'), vector_to_upper_triangular_matrix(overlap_edges))
 
         return agg_results
 

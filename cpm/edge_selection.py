@@ -8,6 +8,7 @@ from sklearn.base import BaseEstimator
 from sklearn.utils.metaestimators import _BaseComposition
 from sklearn.model_selection import ParameterGrid
 from sklearn.linear_model import LinearRegression
+import statsmodels.stats.multitest as multitest
 
 
 class BaseEdgeSelector(BaseEstimator):
@@ -163,9 +164,31 @@ def semi_partial_correlation_spearman(x, Y, Z):
 
 
 class PThreshold(BaseEdgeSelector):
-    def __init__(self, threshold: Union[float, list] = 0.05, correction: Union[float, list] = None):
+    def __init__(self, threshold: Union[float, list] = 0.05, correction: Union[str, list] = None):
+        """
+
+        :param threshold:
+        :param correction: can be one of statsmodels methods
+                            bonferroni : one-step correction
+                            sidak : one-step correction
+                            holm-sidak : step down method using Sidak adjustments
+                            holm : step-down method using Bonferroni adjustments
+                            simes-hochberg : step-up method (independent)
+                            hommel : closed method based on Simes tests (non-negative)
+                            fdr_bh : Benjamini/Hochberg (non-negative)
+                            fdr_by : Benjamini/Yekutieli (negative)
+                            fdr_tsbh : two stage fdr correction (non-negative)
+                            fdr_tsbky : two stage fdr correction (non-negative)
+        """
         self.threshold = threshold
         self.correction = correction
+
+    def select(self, r, p):
+        if self.correction is not None:
+            _, p, _, _ = multitest.multipletests(p, alpha=0.05, method=self.correction)
+        pos_edges = np.where((p < self.threshold) & (r > 0))[0]
+        neg_edges = np.where((p < self.threshold) & (r < 0))[0]
+        return pos_edges, neg_edges
 
 
 class SelectPercentile(BaseEdgeSelector):
@@ -238,7 +261,9 @@ class UnivariateEdgeSelection(BaseEstimator):
 
     def fit_transform(self, X, y=None, covariates=None):
         r_edges, p_edges = self._correlation(X=X, y=y, covariates=covariates)
-        pos_edges, neg_edges = self._edge_selection(r=r_edges, p=p_edges, threshold=0.01)
+        #pos_edges, neg_edges = self._edge_selection(r=r_edges, p=p_edges, threshold=0.01)
+        pos_edges, neg_edges = self.edge_selection.select(r=r_edges, p=p_edges)
+
         return pos_edges, neg_edges
 
     def _correlation(self, X: Union[pd.DataFrame, np.ndarray],

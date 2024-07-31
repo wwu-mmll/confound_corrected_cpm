@@ -15,11 +15,12 @@ df = df[~df['CTQ_Sum'].isna()]
 
 #X = X[~df['BDI_Sum'].isna()]
 #df = df[~df['BDI_Sum'].isna()]
-covs = df[['Alter', 'Geschlecht']].to_numpy()
+#covs = df[['Alter', 'Geschlecht']].to_numpy()
+covs = df[['Geschlecht']].to_numpy()
 #y = df['BDI_Sum'].to_numpy()
 y = df['CTQ_Sum'].to_numpy()
 #covs = df[['Geschlecht']].to_numpy()
-#y = df['Alter'].to_numpy()
+y = df['Alter'].to_numpy()
 
 
 from cpm.edge_selection import PThreshold, SelectPercentile, SelectKBest, UnivariateEdgeSelection
@@ -29,13 +30,13 @@ select_kbest = SelectKBest(k=[5])
 univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson'],
                                                     edge_selection=[p_threshold])
 
-cpm = CPMAnalysis(results_directory='./tmp/macs_demo',
+cpm = CPMAnalysis(results_directory='./tmp/macs_demo_age',
                   cv=KFold(n_splits=5, shuffle=True, random_state=42),
                   edge_selection=univariate_edge_selection,
-                  cv_edge_selection=KFold(n_splits=5, shuffle=True, random_state=42),
+                  cv_edge_selection=KFold(n_splits=2, shuffle=True, random_state=42),
                   estimate_model_increments=True,
                   add_edge_filter=True)
 results = cpm.fit(X=X, y=y, covariates=covs)
 #print(results)
-cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=50)
+cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=100)
 
