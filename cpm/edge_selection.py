@@ -188,7 +188,7 @@ class PThreshold(BaseEdgeSelector):
             _, p, _, _ = multitest.multipletests(p, alpha=0.05, method=self.correction)
         pos_edges = np.where((p < self.threshold) & (r > 0))[0]
         neg_edges = np.where((p < self.threshold) & (r < 0))[0]
-        return pos_edges, neg_edges
+        return {'positive': pos_edges, 'negative': neg_edges}
 
 
 class SelectPercentile(BaseEdgeSelector):
@@ -261,10 +261,8 @@ class UnivariateEdgeSelection(BaseEstimator):
 
     def fit_transform(self, X, y=None, covariates=None):
         r_edges, p_edges = self._correlation(X=X, y=y, covariates=covariates)
-        #pos_edges, neg_edges = self._edge_selection(r=r_edges, p=p_edges, threshold=0.01)
-        pos_edges, neg_edges = self.edge_selection.select(r=r_edges, p=p_edges)
-
-        return pos_edges, neg_edges
+        edges = self.edge_selection.select(r=r_edges, p=p_edges)
+        return edges
 
     def _correlation(self, X: Union[pd.DataFrame, np.ndarray],
                          y: Union[pd.Series, pd.DataFrame, np.ndarray],
@@ -281,11 +279,3 @@ class UnivariateEdgeSelection(BaseEstimator):
             raise NotImplemented("Unsupported edge selection method")
 
         return r_edges, p_edges
-
-    @staticmethod
-    def _edge_selection(r: np.ndarray,
-                        p: np.ndarray,
-                        threshold: float):
-        pos_edges = np.where((p < threshold) & (r > 0))[0]
-        neg_edges = np.where((p < threshold) & (r < 0))[0]
-        return pos_edges, neg_edges

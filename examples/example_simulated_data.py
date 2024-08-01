@@ -5,7 +5,10 @@ from cpm.simulate_data import simulate_data
 from cpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 
-X, y, covariates = simulate_data(n_features=1225, n_informative_features=100)
+X, y, covariates = simulate_data(n_features=1225, n_informative_features=20,
+                                 covariate_effect_size=50,
+                                 feature_effect_size=0.01,
+                                 noise_level=5)
 
 univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson'],
                                                     edge_selection=[PThreshold(threshold=[0.1],

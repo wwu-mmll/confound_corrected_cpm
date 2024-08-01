@@ -30,7 +30,7 @@ plt.rcParams['font.size'] = 10
 st.set_page_config(layout="wide")
 
 # Hardcoded default folder path for debugging
-DEFAULT_FOLDER_PATH = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/example_simulated_data/'
+DEFAULT_FOLDER_PATH = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/macs_demo_ctq/'
 
 
 def style_apa(df):
@@ -193,7 +193,7 @@ def bar_plot(df, selected_metric, results_folder):
 
     # Left plot for connectome, covariates, and full
     sns.pointplot(
-        data=df[df['model'].isin(['connectome', 'covariates', 'full'])],
+        data=df[df['model'].isin(['connectome', 'covariates', 'residuals', 'full'])],
         x="network", y=selected_metric, hue="model",
         dodge=0.4, linestyle="none", errorbar="sd", capsize=.1,
         ax=axes[0]

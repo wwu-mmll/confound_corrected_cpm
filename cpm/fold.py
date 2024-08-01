@@ -11,15 +11,13 @@ def compute_inner_folds(X, y, covariates, cv, edge_selection, param, param_id):
         (X_train, X_test, y_train,
          y_test, cov_train, cov_test) = train_test_split(nested_train, nested_test, X, y, covariates)
 
-        pos_edges, neg_edges = edge_selection.fit_transform(X=X_train, y=y_train,
-                                                                 covariates=cov_train)
+        edges = edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train)
 
-        model = LinearCPMModel(positive_edges=pos_edges,
-                               negative_edges=neg_edges).fit(X_train, y_train, cov_train)
+        model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
         y_pred = model.predict(X_test, cov_test)
         metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
-        for model_type in ['full', 'covariates', 'connectome']:
+        for model_type in ['full', 'covariates', 'connectome', 'residuals']:
             for network in ['positive', 'negative', 'both']:
                 res = metrics[model_type][network]
                 res['model'] = model_type

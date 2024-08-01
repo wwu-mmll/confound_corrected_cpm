@@ -103,7 +103,7 @@ for idx, network in enumerate(unique_networks):
 # If the filepath is left None, the chord diagram can be opened in a matplotlib with plt.show()
 fp_chord = 'ex0_chord.png'
 plot_chord(idx_to_label, edges, edge_weights=edge_weights, fp_chord=fp_chord,
-           linewidths=15, alphas=0.9, do_ROI_circles=True, label_fontsize=70,
+           linewidths=5, alphas=0.9, do_ROI_circles=True, label_fontsize=70,
            # July 2023 update allows changing label fontsize
            do_ROI_circles_specific=True, ROI_circle_radius=0.02)
 
@@ -123,5 +123,4 @@ plot_and_combine(dir_out, fn, idx_to_label, edges,
                  edge_weights=edge_weights, coords=coords, network_colors=network_colors,
                  glass_kwargs=glass_kwargs,
                  chord_kwargs=chord_kwargs, network_order=network_order, cmap='coolwarm')
-
 """

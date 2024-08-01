@@ -15,22 +15,22 @@ df = df[~df['CTQ_Sum'].isna()]
 
 #X = X[~df['BDI_Sum'].isna()]
 #df = df[~df['BDI_Sum'].isna()]
-#covs = df[['Alter', 'Geschlecht']].to_numpy()
-covs = df[['Geschlecht']].to_numpy()
+covs = df[['Alter', 'Geschlecht']].to_numpy()
+#covs = df[['Geschlecht']].to_numpy()
 #y = df['BDI_Sum'].to_numpy()
 y = df['CTQ_Sum'].to_numpy()
 #covs = df[['Geschlecht']].to_numpy()
-y = df['Alter'].to_numpy()
+#y = df['Alter'].to_numpy()
 
 
 from cpm.edge_selection import PThreshold, SelectPercentile, SelectKBest, UnivariateEdgeSelection
 p_threshold = PThreshold(threshold=[0.05], correction=[None])
 select_percentile = SelectPercentile(percentile=[0.5])
 select_kbest = SelectKBest(k=[5])
-univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson'],
+univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson_partial'],
                                                     edge_selection=[p_threshold])
 
-cpm = CPMAnalysis(results_directory='./tmp/macs_demo_age',
+cpm = CPMAnalysis(results_directory='./tmp/macs_demo_ctq',
                   cv=KFold(n_splits=5, shuffle=True, random_state=42),
                   edge_selection=univariate_edge_selection,
                   cv_edge_selection=KFold(n_splits=2, shuffle=True, random_state=42),

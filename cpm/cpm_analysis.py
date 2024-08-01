@@ -8,7 +8,7 @@ from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit
 
 from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection
-from cpm.utils import (score_regression, score_classification, score_regression_models, regression_metrics,
+from cpm.utils import (score_regression, score_regression_models, regression_metrics,
                        train_test_split, vector_to_upper_triangular_matrix)
 from cpm.fold import compute_inner_folds
 
@@ -89,19 +89,17 @@ class CPMAnalysis:
             self.edge_selection.set_params(**best_params)
 
             # build model using best hyperparameters
-            pos_edges, neg_edges = self.edge_selection.fit_transform(X=X_train, y=y_train,
-                                                                     covariates=cov_train)
-            positive_edges[outer_fold, pos_edges] = 1
-            negative_edges[outer_fold, neg_edges] = 1
+            edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train)
+            positive_edges[outer_fold, edges['positive']] = 1
+            negative_edges[outer_fold, edges['negative']] = 1
 
             # build linear models using positive and negative edges (training data)
-            model = LinearCPMModel(positive_edges=pos_edges,
-                                   negative_edges=neg_edges).fit(X_train, y_train, cov_train)
+            model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
 
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
-            for model_type in ['full', 'covariates', 'connectome']:
+            for model_type in ['full', 'covariates', 'connectome', 'residuals']:
                 for network in ['positive', 'negative', 'both']:
                     n_test_set = y_pred[model_type][network].shape[0]
                     preds = {}
@@ -148,10 +146,10 @@ class CPMAnalysis:
     @staticmethod
     def _initialize_outer_cv_results(n_outer_folds):
         cv_results = pd.DataFrame({
-                'fold': list(np.arange(n_outer_folds)) * 3 * 3,
-                'network': (['positive'] * n_outer_folds + ['negative'] * n_outer_folds + ['both'] * n_outer_folds) * 3,
-                'model': ['full'] * n_outer_folds * 3 + ['covariates'] * n_outer_folds * 3 + ['connectome'] * n_outer_folds * 3,
-                'params': [{}] * n_outer_folds * 3 * 3
+                'fold': list(np.arange(n_outer_folds)) * 4 * 3,
+                'network': (['positive'] * n_outer_folds + ['negative'] * n_outer_folds + ['both'] * n_outer_folds) * 4,
+                'model': ['full'] * n_outer_folds * 3 + ['covariates'] * n_outer_folds * 3 + ['connectome'] * n_outer_folds * 3 + ['residuals'] * n_outer_folds * 3,
+                'params': [{}] * n_outer_folds * 4 * 3
                 }).set_index(['fold', 'network', 'model'])
         cv_results.sort_index(inplace=True)
         return cv_results
