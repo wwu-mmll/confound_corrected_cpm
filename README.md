@@ -1,3 +1,8 @@
+[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/wwu-mmll/cpm_python/cpm/python-test)](https://github.com/wwu-mmll/cpm_python/actions)
+[![Coverage Status](https://coveralls.io/repos/github/wwu-mmll/cpm_python/badge.svg?branch=main)](https://coveralls.io/github/wwu-mmll/cpm_python?branch=main)
+[![Github Contributors](https://img.shields.io/github/contributors-anon/wwu-mmll/cpm_python?color=blue)](https://github.com/wwu-mmll/cpm_python/graphs/contributors)
+[![Github Commits](https://img.shields.io/github/commit-activity/y/wwu-mmll/cpm_python)](https://github.com/wwu-mmll/cpm_python/commits/main)
+
 # Connectome-Based Predictive Modelling (The right way)
 Python version of the Connectome-based Predictive Modelling framework
 
