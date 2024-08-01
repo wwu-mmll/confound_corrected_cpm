@@ -1,0 +1,50 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: CPM test and test deploy
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 10 5 * *'
+
+jobs:
+  coverage:
+    name: Run CPM tests and publish test coverage
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install scikit-learn pandas numpy pingouin pytest pytest-cov
+    - name: Test with pytest
+      run: |
+        PYTHONPATH=./ pytest ./tests --cov=./cpm_python --full-trace
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - uses: actions/checkout@v3
+      name: Checkout code
+      with:
+        fetch-depth: 0
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    - name: Install pypa/build
+      run: pip install build pbr wheel
+    - name: Build a binary wheel and a source tarball
+      run: python -m build -n --sdist --wheel --outdir dist/
+    - name: List built artifacts
+      run: ls -al dist/
