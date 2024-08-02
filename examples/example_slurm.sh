@@ -16,4 +16,4 @@ module load Miniconda3
 eval "$(conda shell.bash hook)"
 conda activate cpm
 
-python cpm_analysis.py --results_directory "" --data_directory "" --config_file "" perm_run $SLURM_ARRAY_TASK_ID
+python cpm_analysis.py --results_directory "./tmp/slurm" --data_directory "./simulated_data/" --config_file "./config.pkl" perm_run $SLURM_ARRAY_TASK_ID
