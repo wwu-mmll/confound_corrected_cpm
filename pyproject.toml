@@ -16,7 +16,7 @@ dependencies = [
     "pingouin",
     "streamlit",
     "nilearn",
-    "typer"
+    "typer",
     "pytest"
 ]
 
