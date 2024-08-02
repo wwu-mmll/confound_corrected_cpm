@@ -7,6 +7,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cpm_python"
 version = "0.1.0"
+dynamic = ["description", "readme", "authors", "classifiers"]
+requires-python = ">=3.6"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "pingouin",
+    "streamlit",
+    "nilearn",
+    "typer"
+]
 
 [tool.setuptools.packages.find]
 where = ["cpm"]
