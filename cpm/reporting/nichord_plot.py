@@ -3,7 +3,7 @@ from nichord.coord_labeler import get_idx_to_label
 from nichord.convert import convert_matrix
 from nichord.chord import plot_chord
 from nichord.combine import plot_and_combine
-from cpm.simulate_data import simulate_data
+from cpm.simulate_data import simulate_regression_data
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import numpy as np
 import matplotlib.pyplot as plt
@@ -63,7 +63,7 @@ def vector_to_matrix_3d(vector_2d, shape):
     return matrix_3d
 
 
-X, y, covariates = simulate_data(n_features=4950, n_informative_features=100)
+X, y, covariates = simulate_regression_data(n_features=4950, n_informative_features=100)
 atlas = fetch_atlas_schaefer_2018(n_rois=100)
 networks = [str(roi).split("_")[-2] for roi in list(atlas["labels"])]
 regions = [str(roi).split("b'7Networks_")[1] for roi in list(atlas["labels"])]

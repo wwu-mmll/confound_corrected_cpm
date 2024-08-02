@@ -1,1 +1,1 @@
-from cpm.cpm_analysis import CPMAnalysis
+from cpm.cpm_analysis import CPMRegression

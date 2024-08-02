@@ -20,5 +20,8 @@ cpm = CPMRegression(results_directory='./tmp/example_simulated_data2',
                     cv_edge_selection=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
                     add_edge_filter=True,
                     n_permutations=100)
-cpm.estimate(X=X, y=y, covariates=covariates)
+cpm.save_configuration(config_filename='./tmp/config.pkl')
 
+cpm_remote = CPMRegression(results_directory='./tmp/example_simulated_data2')
+cpm_remote.load_configuration(results_directory='./tmp/example_simulated_data3',
+                              config_filename='./tmp/config.pkl')

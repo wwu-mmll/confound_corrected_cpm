@@ -1,44 +1,85 @@
 import os
+import typer
+import pickle
 from typing import Union
 
 import numpy as np
 import pandas as pd
 
-from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit
+from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
 
 from cpm.models import LinearCPMModel
-from cpm.edge_selection import UnivariateEdgeSelection
-from cpm.utils import (score_regression, score_regression_models, regression_metrics,
+from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cpm.utils import (score_regression_models, regression_metrics,
                        train_test_split, vector_to_upper_triangular_matrix)
 from cpm.fold import compute_inner_folds
 
 
-class CPMAnalysis:
+class CPMRegression:
     def __init__(self,
                  results_directory: str,
-                 cv: Union[BaseCrossValidator, BaseShuffleSplit],
-                 cv_edge_selection: Union[BaseCrossValidator, BaseShuffleSplit],
-                 edge_selection: UnivariateEdgeSelection,
-                 estimate_model_increments: bool = True,
-                 add_edge_filter: bool = True):
+                 cv: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
+                 cv_edge_selection: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
+                 edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(edge_statistic=['pearson'],
+                                                                                   edge_selection=[PThreshold(threshold=[0.05],
+                                                                                        correction=[None])]),
+                 add_edge_filter: bool = True,
+                 n_permutations: int = 0):
         self.results_directory = results_directory
         self.cv = cv
         self.inner_cv = cv_edge_selection
         self.edge_selection = edge_selection
-        self.estimate_model_increments = estimate_model_increments
         self.add_edge_filter = add_edge_filter
+        self.n_permutations = n_permutations
 
         self.results_outer_cv = None
         self.results_inner_cv = list()
 
-        os.makedirs(results_directory, exist_ok=True)
+    def save_configuration(self, config_filename: str):
+        with open(os.path.splitext(config_filename)[0] + '.pkl', 'wb') as file:
+            pickle.dump({'cv': self.cv,
+                         'inner_cv': self.inner_cv,
+                         'edge_selection': self.edge_selection,
+                         'add_edge_filter': self.add_edge_filter,
+                         'n_permutations': self.n_permutations}, file)
 
-    def fit(self,
-            X: Union[pd.DataFrame, np.ndarray],
-            y: Union[pd.Series, pd.DataFrame, np.ndarray],
-            covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
-            save_memory: bool = False):
-        os.makedirs(self.results_directory, exist_ok=True)
+    def load_configuration(self, results_directory, config_filename):
+        with open(config_filename, 'rb') as file:
+            loaded_config = pickle.load(file)
+
+        self.results_directory = results_directory
+        self.cv = loaded_config['cv']
+        self.inner_cv = loaded_config['inner_cv']
+        self.edge_selection = loaded_config['edge_selection']
+        self.add_edge_filter = loaded_config['add_edge_filter']
+        self.n_permutations = loaded_config['n_permutations']
+
+    def estimate(self,
+                 X: Union[pd.DataFrame, np.ndarray],
+                 y: Union[pd.Series, pd.DataFrame, np.ndarray],
+                 covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
+
+        np.random.seed(42)
+
+        # estimate models
+        self._estimate(X=X, y=y, covariates=covariates, perm_run=0)
+
+        # run permutation test
+        for perm_id in range(1, self.n_permutations + 1):
+            self._estimate(X=X, y=y, covariates=covariates, perm_run=perm_id)
+
+    def _estimate(self,
+                  X: Union[pd.DataFrame, np.ndarray],
+                  y: Union[pd.Series, pd.DataFrame, np.ndarray],
+                  covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
+                  perm_run: int = 0):
+        np.random.seed(42)
+        if perm_run > 0:
+            y = np.random.permutation(y)
+            current_results_directory = os.path.join(self.results_directory, 'permutation', f'{perm_run}')
+        else:
+            current_results_directory = self.results_directory
+        os.makedirs(current_results_directory, exist_ok=True)
         self._write_info()
 
         n_outer_folds = self.cv.n_splits
@@ -56,7 +97,7 @@ class CPMAnalysis:
         for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
             print(f"Running fold {outer_fold}")
             fold_dir = os.path.join(self.results_directory, f'fold_{outer_fold}')
-            if not save_memory:
+            if not perm_run:
                 os.makedirs(fold_dir, exist_ok=True)
 
             X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
@@ -77,7 +118,7 @@ class CPMAnalysis:
             # aggregate over folds to calculate mean and std
             agg_results = inner_cv_results.groupby(['network', 'param_id', 'model'])[regression_metrics].agg(['mean', 'std'])
 
-            if not save_memory:
+            if not perm_run:
                 inner_cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
                 agg_results.to_csv(os.path.join(fold_dir, 'inner_cv_results_mean_std.csv'))
 
@@ -119,24 +160,24 @@ class CPMAnalysis:
 
         cv_results = self._calculate_model_increments(cv_results=cv_results, metrics=regression_metrics)
 
-        cv_results.to_csv(os.path.join(self.results_directory, 'cv_results.csv'))
+        cv_results.to_csv(os.path.join(current_results_directory, 'cv_results.csv'))
 
         self.results_outer_cv = cv_results
 
         agg_results = cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
-        agg_results.to_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
+        agg_results.to_csv(os.path.join(current_results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
 
-        if not save_memory:
-            predictions.to_csv(os.path.join(self.results_directory, 'predictions.csv'))
+        if not perm_run:
+            predictions.to_csv(os.path.join(current_results_directory, 'predictions.csv'))
 
         for sign, edges in [('positive', positive_edges), ('negative', negative_edges)]:
-            np.save(os.path.join(self.results_directory, f'{sign}_edges.npy'), vector_to_upper_triangular_matrix(edges[0]))
+            np.save(os.path.join(current_results_directory, f'{sign}_edges.npy'), vector_to_upper_triangular_matrix(edges[0]))
 
             weights_edges = np.sum(edges, axis=0) / edges.shape[0]
             overlap_edges = weights_edges == 1
 
-            np.save(os.path.join(self.results_directory, f'weights_{sign}_edges.npy'), vector_to_upper_triangular_matrix(weights_edges))
-            np.save(os.path.join(self.results_directory, f'overlap_{sign}_edges.npy'), vector_to_upper_triangular_matrix(overlap_edges))
+            np.save(os.path.join(current_results_directory, f'weights_{sign}_edges.npy'), vector_to_upper_triangular_matrix(weights_edges))
+            np.save(os.path.join(current_results_directory, f'overlap_{sign}_edges.npy'), vector_to_upper_triangular_matrix(overlap_edges))
 
         return agg_results
 
@@ -222,7 +263,7 @@ class CPMAnalysis:
             y_perm = np.random.permutation(y)
             self.results_directory = os.path.join(original_results_directory, 'permutation', f'{i}')
             if not os.path.exists(self.results_directory):
-                self.fit(X, y_perm, covariates, save_memory=True)
+                self.estimate(X, y_perm, covariates, save_memory=True)
             res = pd.read_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), header=[0, 1], index_col=[0, 1])
             res = res.loc[:, res.columns.get_level_values(1) == 'mean']
             res.columns = res.columns.droplevel(1)
@@ -330,3 +371,36 @@ class CPMAnalysis:
         p_values_df = p_values_df.set_index(['network', 'model'])
 
         return p_values_df
+
+
+def main(results_directory: str = typer.Option(...,
+                                               exists=True,
+                                               file_okay=False,
+                                               dir_okay=True,
+                                               writable=True,
+                                               readable=True,
+                                               resolve_path=True,
+                                               help="Define results folder for analysis"),
+         data_directory: str = typer.Option(
+             ...,
+             exists=True,
+             file_okay=False,
+             dir_okay=True,
+             writable=True,
+             readable=True,
+             resolve_path=True,
+             help="Path to input data containing targets.csv and data.csv."),
+         config_file: str = typer.Option(..., help="Absolute path to config file"),
+         perm_run: int = typer.Option(default=0, help="Current permutation run.")):
+
+    X = np.load(os.path.join(data_directory, 'X.npy'))
+    y = np.load(os.path.join(data_directory, 'y.npy'))
+    covariates = np.load(os.path.join(data_directory, 'covariates.npy'))
+
+    cpm = CPMRegression(results_directory=results_directory)
+    cpm.load_configuration(results_directory=results_directory, config_filename=config_file)
+    cpm._estimate(X=X, y=y, covariates=covariates, perm_run=perm_run)
+
+
+if __name__ == "__main__":
+    typer.run(main)

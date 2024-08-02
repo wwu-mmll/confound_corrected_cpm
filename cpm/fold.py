@@ -1,6 +1,6 @@
 import pandas as pd
 
-from cpm.models import LinearCPMModel
+from cpm.models import LinearCPMModel, NetworkDict, ModelDict
 from cpm.utils import score_regression_models, train_test_split
 
 
@@ -17,8 +17,8 @@ def compute_inner_folds(X, y, covariates, cv, edge_selection, param, param_id):
         y_pred = model.predict(X_test, cov_test)
         metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
-        for model_type in ['full', 'covariates', 'connectome', 'residuals']:
-            for network in ['positive', 'negative', 'both']:
+        for model_type in ModelDict().keys():
+            for network in NetworkDict().keys():
                 res = metrics[model_type][network]
                 res['model'] = model_type
                 res['network'] = network

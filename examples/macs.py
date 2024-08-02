@@ -3,7 +3,7 @@ import pandas as pd
 
 from sklearn.model_selection import KFold
 
-from cpm import CPMAnalysis
+from cpm import CPMRegression
 
 
 X = np.load('/spm-data/vault-data3/mmll/projects/macs_datahub_example/AnalysisReady/all/FunctionalConnectome/X.npy')
@@ -30,13 +30,12 @@ select_kbest = SelectKBest(k=[5])
 univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=['pearson_partial'],
                                                     edge_selection=[p_threshold])
 
-cpm = CPMAnalysis(results_directory='./tmp/macs_demo_ctq',
-                  cv=KFold(n_splits=5, shuffle=True, random_state=42),
-                  edge_selection=univariate_edge_selection,
-                  cv_edge_selection=KFold(n_splits=2, shuffle=True, random_state=42),
-                  estimate_model_increments=True,
-                  add_edge_filter=True)
-results = cpm.fit(X=X, y=y, covariates=covs)
+cpm = CPMRegression(results_directory='./tmp/macs_demo_ctq',
+                    cv=KFold(n_splits=5, shuffle=True, random_state=42),
+                    edge_selection=univariate_edge_selection,
+                    cv_edge_selection=KFold(n_splits=2, shuffle=True, random_state=42),
+                    add_edge_filter=True)
+results = cpm.estimate(X=X, y=y, covariates=covs)
 #print(results)
 cpm.permutation_test(X=X, y=y, covariates=covs, n_perms=100)
 

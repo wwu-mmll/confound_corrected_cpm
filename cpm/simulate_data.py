@@ -3,14 +3,14 @@ from sklearn.datasets import make_regression
 from sklearn.preprocessing import StandardScaler
 
 
-def simulate_data(n_samples: int = 500,
-                  n_features: int = 4950,
-                  n_informative_features: int = 200,
-                  n_covariates: int = 5,
-                  noise_level: float = 0.1,
-                  feature_effect_size: float = 0.2,  # Reduced effect size for features
-                  covariate_effect_size: float = 5.0,
-                  random_state: int = 42):
+def simulate_regression_data(n_samples: int = 500,
+                             n_features: int = 4950,
+                             n_informative_features: int = 200,
+                             n_covariates: int = 5,
+                             noise_level: float = 0.1,
+                             feature_effect_size: float = 0.2,  # Reduced effect size for features
+                             covariate_effect_size: float = 5.0,
+                             random_state: int = 42):
     """
     Simulates data with specified parameters for regression problems.
 
