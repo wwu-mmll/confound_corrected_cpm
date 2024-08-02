@@ -42,13 +42,26 @@ def pearson_correlation(x, Y):
     return correlations[0, :], correlations[1, :]
 
 
-def pearson_correlation_with_pvalues(x, Y):
+import numpy as np
+from scipy.stats import t, rankdata
+
+
+def compute_t_and_p_values(correlations, df):
+    # Calculate t-statistics
+    t_stats = correlations * np.sqrt(df / (1 - correlations ** 2))
+    # Calculate p-values
+    p_values = 2 * t.sf(np.abs(t_stats), df=df)
+    return t_stats, p_values
+
+
+def compute_correlation_and_pvalues(x, Y, rank=False):
     n = len(x)
 
-    # Ensure x is a 1D array
-    x = np.ravel(x)
+    if rank:
+        x = rankdata(x)
+        Y = np.apply_along_axis(rankdata, axis=0, arr=Y)
 
-    # Mean-centering x and Y
+    # Mean-centering
     x_centered = x - np.mean(x)
     Y_centered = Y - np.mean(Y, axis=0)
 
@@ -58,39 +71,18 @@ def pearson_correlation_with_pvalues(x, Y):
 
     correlations = corr_numerator / corr_denominator
 
-    # Calculate t-statistics
-    t_stats = correlations * np.sqrt((n - 2) / (1 - correlations ** 2))
-
-    # Calculate p-values
-    p_values = 2 * t.sf(np.abs(t_stats), df=n - 2)
+    # Calculate t-statistics and p-values
+    _, p_values = compute_t_and_p_values(correlations, n - 2)
 
     return correlations, p_values
 
 
+def pearson_correlation_with_pvalues(x, Y):
+    return compute_correlation_and_pvalues(x, Y, rank=False)
+
+
 def spearman_correlation_with_pvalues(x, Y):
-    n = len(x)
-
-    # Rank the input data
-    x_ranked = rankdata(x)
-    Y_ranked = np.apply_along_axis(rankdata, axis=0, arr=Y)
-
-    # Mean-centering the ranked data
-    x_ranked_centered = x_ranked - np.mean(x_ranked)
-    Y_ranked_centered = Y_ranked - np.mean(Y_ranked, axis=0)
-
-    # Correlation calculation
-    corr_numerator = np.dot(Y_ranked_centered.T, x_ranked_centered)
-    corr_denominator = (np.sqrt(np.sum(Y_ranked_centered ** 2, axis=0)) * np.sqrt(np.sum(x_ranked_centered ** 2)))
-
-    spearman_corr = corr_numerator / corr_denominator
-
-    # Calculate t-statistics
-    t_stats = spearman_corr * np.sqrt((n - 2) / (1 - spearman_corr ** 2))
-
-    # Calculate p-values
-    p_values = 2 * t.sf(np.abs(t_stats), df=n - 2)
-
-    return spearman_corr, p_values
+    return compute_correlation_and_pvalues(x, Y, rank=True)
 
 
 def get_residuals(X, Z):
@@ -109,10 +101,14 @@ def get_residuals(X, Z):
     return residuals
 
 
-def semi_partial_correlation_pearson(x, Y, Z):
+def semi_partial_correlation(x, Y, Z, rank=False):
     # Calculate residuals for x and each column in Y
     x_residuals = get_residuals(x.reshape(-1, 1), Z).ravel()
     Y_residuals = get_residuals(Y, Z)
+
+    if rank:
+        x_residuals = rankdata(x_residuals)
+        Y_residuals = np.apply_along_axis(rankdata, axis=0, arr=Y_residuals)
 
     # Mean-centering the residuals
     x_centered = x_residuals - np.mean(x_residuals)
@@ -124,43 +120,20 @@ def semi_partial_correlation_pearson(x, Y, Z):
 
     partial_corr = corr_numerator / corr_denominator
 
-    # Calculate t-statistics
+    # Calculate t-statistics and p-values
     n = len(x)
-    t_stats = partial_corr * np.sqrt((n - 2) / (1 - partial_corr ** 2))
-
-    # Calculate p-values
-    p_values = 2 * t.sf(np.abs(t_stats), df=n - 2)
+    k = Z.shape[1]
+    _, p_values = compute_t_and_p_values(partial_corr, n - 2 - k)
 
     return partial_corr, p_values
+
+
+def semi_partial_correlation_pearson(x, Y, Z):
+    return semi_partial_correlation(x, Y, Z, rank=False)
 
 
 def semi_partial_correlation_spearman(x, Y, Z):
-    # Calculate residuals for x and each column in Y
-    x_residuals = get_residuals(x.reshape(-1, 1), Z).ravel()
-    Y_residuals = get_residuals(Y, Z)
-
-    # Rank the residuals
-    x_ranked = rankdata(x_residuals)
-    Y_ranked = np.apply_along_axis(rankdata, axis=0, arr=Y_residuals)
-
-    # Mean-centering the ranked residuals
-    x_centered = x_ranked - np.mean(x_ranked)
-    Y_centered = Y_ranked - np.mean(Y_ranked, axis=0)
-
-    # Correlation calculation
-    corr_numerator = np.dot(Y_centered.T, x_centered)
-    corr_denominator = (np.sqrt(np.sum(Y_centered ** 2, axis=0)) * np.sqrt(np.sum(x_centered ** 2)))
-
-    partial_corr = corr_numerator / corr_denominator
-
-    # Calculate t-statistics
-    n = len(x)
-    t_stats = partial_corr * np.sqrt((n - 2) / (1 - partial_corr ** 2))
-
-    # Calculate p-values
-    p_values = 2 * t.sf(np.abs(t_stats), df=n - 2)
-
-    return partial_corr, p_values
+    return semi_partial_correlation(x, Y, Z, rank=True)
 
 
 class PThreshold(BaseEdgeSelector):
