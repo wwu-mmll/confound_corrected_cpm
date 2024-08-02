@@ -17,6 +17,7 @@ dependencies = [
     "streamlit",
     "nilearn",
     "typer"
+    "pytest"
 ]
 
 [tool.setuptools.packages.find]
