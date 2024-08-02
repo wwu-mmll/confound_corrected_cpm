@@ -42,10 +42,6 @@ def pearson_correlation(x, Y):
     return correlations[0, :], correlations[1, :]
 
 
-import numpy as np
-from scipy.stats import t, rankdata
-
-
 def compute_t_and_p_values(correlations, df):
     # Calculate t-statistics
     t_stats = correlations * np.sqrt(df / (1 - correlations ** 2))
@@ -77,14 +73,6 @@ def compute_correlation_and_pvalues(x, Y, rank=False):
     return correlations, p_values
 
 
-def pearson_correlation_with_pvalues(x, Y):
-    return compute_correlation_and_pvalues(x, Y, rank=False)
-
-
-def spearman_correlation_with_pvalues(x, Y):
-    return compute_correlation_and_pvalues(x, Y, rank=True)
-
-
 def get_residuals(X, Z):
     # Add a column of ones to Z for the intercept
     Z = np.hstack([Z, np.ones((Z.shape[0], 1))])
@@ -102,13 +90,14 @@ def get_residuals(X, Z):
 
 
 def semi_partial_correlation(x, Y, Z, rank=False):
+    if rank:
+        x = rankdata(x)
+        Y = np.apply_along_axis(rankdata, 0, Y)
+        Z = np.apply_along_axis(rankdata, 0, Z)
+
     # Calculate residuals for x and each column in Y
     x_residuals = get_residuals(x.reshape(-1, 1), Z).ravel()
     Y_residuals = get_residuals(Y, Z)
-
-    if rank:
-        x_residuals = rankdata(x_residuals)
-        Y_residuals = np.apply_along_axis(rankdata, axis=0, arr=Y_residuals)
 
     # Mean-centering the residuals
     x_centered = x_residuals - np.mean(x_residuals)
@@ -117,15 +106,22 @@ def semi_partial_correlation(x, Y, Z, rank=False):
     # Correlation calculation
     corr_numerator = np.dot(Y_centered.T, x_centered)
     corr_denominator = (np.sqrt(np.sum(Y_centered ** 2, axis=0)) * np.sqrt(np.sum(x_centered ** 2)))
-
     partial_corr = corr_numerator / corr_denominator
 
     # Calculate t-statistics and p-values
     n = len(x)
     k = Z.shape[1]
-    _, p_values = compute_t_and_p_values(partial_corr, n - 2 - k)
+    _, p_values = compute_t_and_p_values(partial_corr, n - k - 2)
 
     return partial_corr, p_values
+
+
+def pearson_correlation_with_pvalues(x, Y):
+    return compute_correlation_and_pvalues(x, Y, rank=False)
+
+
+def spearman_correlation_with_pvalues(x, Y):
+    return compute_correlation_and_pvalues(x, Y, rank=True)
 
 
 def semi_partial_correlation_pearson(x, Y, Z):

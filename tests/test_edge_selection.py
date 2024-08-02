@@ -68,6 +68,30 @@ class TestEdgeStatistics(unittest.TestCase):
         # Assert that the p-values results are almost equal between the two methods
         np.testing.assert_almost_equal(p_values, pval_pingouin, decimal=10)
 
+    def test_semi_partial_correlation_spearman(self):
+        # Calculate partial correlation using the provided function
+        partial_corr, p_values = semi_partial_correlation_spearman(self.y, self.X, self.covariates)
+
+        # Calculate partial correlation using pingouin
+        df = pd.DataFrame(np.column_stack([self.y, self.X, self.covariates]),
+                          columns=["y"] + [f"x{i}" for i in range(self.X.shape[1])] + [f"cov{i}" for i in range(self.covariates.shape[1])])
+        pcorr_pingouin = []
+        pval_pingouin = []
+        for i in range(self.X.shape[1]):
+            result = pg.partial_corr(data=df, x="y", y=f"x{i}", covar=[f"cov{j}" for j in range(self.covariates.shape[1])], method='spearman')
+            pcorr_pingouin.append(result['r'].values[0])
+            pval_pingouin.append(result['p-val'].values[0])
+
+        # Convert to numpy arrays for easier comparison
+        pcorr_pingouin = np.array(pcorr_pingouin)
+        pval_pingouin = np.array(pval_pingouin)
+
+        # Assert that the partial correlation results are almost equal between the two methods
+        np.testing.assert_almost_equal(partial_corr, pcorr_pingouin, decimal=10)
+
+        # Assert that the p-values results are almost equal between the two methods
+        np.testing.assert_almost_equal(p_values, pval_pingouin, decimal=10)
+
 
 if __name__ == '__main__':
     unittest.main()
