@@ -25,7 +25,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install scikit-learn pandas numpy pingouin pytest pytest-cov
+        pip install scikit-learn pandas numpy pingouin typer pytest pytest-cov
     - name: Test with pytest
       run: |
         PYTHONPATH=./ pytest ./tests --cov=./cpm_python --full-trace
