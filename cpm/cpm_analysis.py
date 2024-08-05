@@ -1,7 +1,9 @@
 import os
 import typer
 import pickle
+
 from typing import Union
+from glob import glob
 
 import numpy as np
 import pandas as pd
@@ -67,6 +69,8 @@ class CPMRegression:
         # run permutation test
         for perm_id in range(1, self.n_permutations + 1):
             self._estimate(X=X, y=y, covariates=covariates, perm_run=perm_id)
+
+        self.calculate_permutation_results(self.results_directory)
 
     def _estimate(self,
                   X: Union[pd.DataFrame, np.ndarray],
@@ -244,80 +248,32 @@ class CPMRegression:
         cv_results.sort_index(inplace=True)
         return cv_results
 
-    def permutation_test(self,
-                         X,
-                         y,
-                         covariates,
-                         n_perms: int = 1000,
-                         random_state: int = 42,
-                         ):
-        np.random.seed(random_state)
-        original_results_directory = self.results_directory
-        true_results = pd.read_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), header=[0, 1], index_col=[0, 1])
-        true_results = true_results.loc[:, true_results.columns.get_level_values(1) == 'mean']
-        true_results.columns = true_results.columns.droplevel(1)
+    @staticmethod
+    def calculate_permutation_results(results_directory):
+        true_results = CPMRegression._load_cv_results(results_directory)
 
+        perm_dir = os.path.join(results_directory, 'permutation')
+        valid_perms = glob(os.path.join(perm_dir, '*'))
         perm_results = list()
-        for i in range(n_perms):
-            print(i)
-            y_perm = np.random.permutation(y)
-            self.results_directory = os.path.join(original_results_directory, 'permutation', f'{i}')
-            if not os.path.exists(self.results_directory):
-                self.estimate(X, y_perm, covariates, save_memory=True)
-            res = pd.read_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), header=[0, 1], index_col=[0, 1])
-            res = res.loc[:, res.columns.get_level_values(1) == 'mean']
-            res.columns = res.columns.droplevel(1)
-            res['permutation'] = i
-            res = res.set_index('permutation', append=True)
-
-            perm_results.append(res)
+        for perm_run_folder in valid_perms:
+            try:
+                perm_res = CPMRegression._load_cv_results(perm_run_folder)
+                perm_res['permutation'] = os.path.basename(perm_run_folder)
+                perm_res = perm_res.set_index('permutation', append=True)
+                perm_results.append(perm_res)
+            except FileNotFoundError:
+                print(f'No permutation results found for {perm_run_folder}')
         concatenated_df = pd.concat(perm_results)
-        p_values = self.calculate_p_values(true_results, concatenated_df)
-        p_values.to_csv(os.path.join(original_results_directory, 'p_values.csv'))
-
-        import seaborn as sns
-        import matplotlib.pyplot as plt
-
-        def plot_histogram_with_line(data, **kwargs):
-            true_value = data['true_value'].values[0]
-            sns.histplot(data['permuted_value'], kde=False, **kwargs)
-            plt.axvline(true_value, color='red', linestyle='dashed', linewidth=1)
-
-        # Assuming true_results and perms are previously defined
-
-        # Melt the permutation dataframe (make it long-form)
-        long_perms = concatenated_df.reset_index().melt(id_vars=['network', 'model'], var_name='metric',
-                                              value_name='permuted_value')
-
-        # Merge true results into the long-form dataframe
-        true_melted = true_results.reset_index().melt(id_vars=['network', 'model'], var_name='metric',
-                                                      value_name='true_value')
-        merged = pd.merge(long_perms, true_melted, on=['network', 'model', 'metric'])
-
-        # Get the unique metrics
-        metrics = merged['metric'].unique()
-
-        # Create individual figures for each metric
-        for metric in metrics:
-            fig, ax = plt.subplots()
-            metric_data = merged[merged['metric'] == metric]
-
-            # Create FacetGrid with rows as 'network' and columns as 'model' for the current metric
-            g = sns.FacetGrid(metric_data, row='network', col='model', margin_titles=True, sharex=False, sharey=False)
-            g.map_dataframe(plot_histogram_with_line)
-
-            # Set axis labels and titles
-            g.set_axis_labels(metric, 'Count')
-            g.set_titles(col_template='{col_name}', row_template='{row_name}')
-
-            # Add a main title for the figure
-            plt.subplots_adjust(top=0.9)
-            g.fig.suptitle(f'Distribution of Permutations for {metric}', fontsize=16)
-
-            # Adjust the layout
-            plt.tight_layout()
-            plt.show()
+        p_values = CPMRegression.calculate_p_values(true_results, concatenated_df)
+        p_values.to_csv(os.path.join(results_directory, 'p_values.csv'))
         return
+
+    @staticmethod
+    def _load_cv_results(folder):
+        results = pd.read_csv(os.path.join(folder, 'cv_results_mean_std.csv'), header=[0, 1], index_col=[0, 1])
+        results = results.loc[:, results.columns.get_level_values(1) == 'mean']
+        results.columns = results.columns.droplevel(1)
+        return results
 
     @staticmethod
     def _calculate_p_value(true_results, perms):
@@ -355,7 +311,8 @@ class CPMRegression:
 
         return pd.Series(result_dict)
 
-    def calculate_p_values(self, true_results, perms):
+    @staticmethod
+    def calculate_p_values(true_results, perms):
         # Group by 'network' and 'model'
         grouped_true = true_results.groupby(['network', 'model'])
         grouped_perms = perms.groupby(['network', 'model'])
@@ -363,7 +320,7 @@ class CPMRegression:
         p_values = []
 
         for (name, true_group), (_, perms_group) in zip(grouped_true, grouped_perms):
-            p_value_series = self._calculate_group_p_value(true_group, perms_group)
+            p_value_series = CPMRegression._calculate_group_p_value(true_group, perms_group)
             p_values.append(pd.DataFrame(p_value_series).T.assign(network=name[0], model=name[1]))
 
         # Concatenate all the p-values DataFrames into a single DataFrame

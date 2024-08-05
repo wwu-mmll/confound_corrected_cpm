@@ -19,6 +19,8 @@ cpm = CPMRegression(results_directory='./tmp/example_simulated_data2',
                     edge_selection=univariate_edge_selection,
                     cv_edge_selection=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
                     add_edge_filter=True,
-                    n_permutations=100)
-cpm.estimate(X=X, y=y, covariates=covariates)
+                    n_permutations=10)
+#cpm.estimate(X=X, y=y, covariates=covariates)
+
+cpm.calculate_permutation_results('./tmp/example_simulated_data2')
 
