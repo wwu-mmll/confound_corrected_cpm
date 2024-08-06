@@ -85,5 +85,5 @@ def vector_to_upper_triangular_matrix(vector):
     row_indices, col_indices = np.triu_indices(size, k=1)
     # Place the elements into the matrix
     matrix[row_indices, col_indices] = vector
-
+    matrix[col_indices, row_indices] = vector
     return matrix

@@ -30,7 +30,8 @@ plt.rcParams['font.size'] = 10
 st.set_page_config(layout="wide")
 
 # Hardcoded default folder path for debugging
-DEFAULT_FOLDER_PATH = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/macs_demo_ctq/'
+#DEFAULT_FOLDER_PATH = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/macs_demo_ctq/'
+DEFAULT_FOLDER_PATH = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/example_simulated_data2/'
 
 
 def style_apa(df):
@@ -165,9 +166,15 @@ def vector_to_matrix_3d(vector_2d, shape):
 def corr_plot(results_folder):
     selected_metric = st.selectbox("Select a metric to display:", ["positive_edges", "negative_edges",
                                                                     "overlap_positive_edges", "overlap_negative_edges",
-                                                                   "weights_positive_edges", "weights_negative_edges"])
+                                                                   "stability_positive_edges", "stability_negative_edges",
+                                                                   "sig_stability_positive_edges", "sig_stability_negative_edges"])
 
     corr = np.load(os.path.join(results_folder, f"{selected_metric}.npy"))
+    if (selected_metric == "sig_stability_positive_edges") or (selected_metric == "sig_stability_negative_edges"):
+        threshold = 0.05
+        corr_transformed = np.where(corr > threshold, 0, corr)
+        corr_transformed = np.where(corr <= threshold, 1, corr_transformed)
+        corr = corr_transformed
 
     # Generate a mask for the upper triangle
     mask = np.triu(np.ones_like(corr, dtype=bool))
@@ -251,7 +258,7 @@ def permutations_page(original_results_directory, selected_metric):
     true_results.columns = true_results.columns.droplevel(1)
 
     perm_results = []
-    for i in range(50):  # Adjust the range as needed
+    for i in range(1, 10):  # Adjust the range as needed
         res_dir = os.path.join(original_results_directory, 'permutation', f'{i}')
         if not os.path.exists(res_dir):
             os.makedirs(res_dir)

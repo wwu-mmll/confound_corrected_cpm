@@ -144,10 +144,10 @@ class CPMRegression:
         for sign, edges in cv_edges.items():
             np.save(os.path.join(current_results_directory, f'{sign}_edges.npy'), vector_to_upper_triangular_matrix(edges[0]))
 
-            weights_edges = np.sum(edges, axis=0) / edges.shape[0]
-            overlap_edges = weights_edges == 1
+            stability_edges = np.sum(edges, axis=0) / edges.shape[0]
+            overlap_edges = stability_edges == 1
 
-            np.save(os.path.join(current_results_directory, f'weights_{sign}_edges.npy'), vector_to_upper_triangular_matrix(weights_edges))
+            np.save(os.path.join(current_results_directory, f'stability_{sign}_edges.npy'), vector_to_upper_triangular_matrix(stability_edges))
             np.save(os.path.join(current_results_directory, f'overlap_{sign}_edges.npy'), vector_to_upper_triangular_matrix(overlap_edges))
 
         return agg_results
@@ -254,17 +254,34 @@ class CPMRegression:
         perm_dir = os.path.join(results_directory, 'permutation')
         valid_perms = glob(os.path.join(perm_dir, '*'))
         perm_results = list()
+        stability_positive = list()
+        stability_negative = list()
         for perm_run_folder in valid_perms:
             try:
                 perm_res = CPMRegression._load_cv_results(perm_run_folder)
                 perm_res['permutation'] = os.path.basename(perm_run_folder)
                 perm_res = perm_res.set_index('permutation', append=True)
                 perm_results.append(perm_res)
+
+                # load edge stability
+                stability_positive.append(np.load(os.path.join(perm_run_folder, 'stability_positive_edges.npy')))
+                stability_negative.append(np.load(os.path.join(perm_run_folder, 'stability_negative_edges.npy')))
+
             except FileNotFoundError:
                 print(f'No permutation results found for {perm_run_folder}')
         concatenated_df = pd.concat(perm_results)
         p_values = CPMRegression.calculate_p_values(true_results, concatenated_df)
         p_values.to_csv(os.path.join(results_directory, 'p_values.csv'))
+
+        # stability
+        stability_positive = np.stack(stability_positive)
+        stability_negative = np.stack(stability_negative)
+        true_stability_positive = np.load(os.path.join(results_directory, 'stability_positive_edges.npy'))
+        true_stability_negative = np.load(os.path.join(results_directory, 'stability_negative_edges.npy'))
+        sig_stability_positive = np.sum((stability_positive >= np.expand_dims(true_stability_positive, 0)), axis=0) / (len(valid_perms) + 1)
+        sig_stability_negative = np.sum((stability_negative >= np.expand_dims(true_stability_negative, 0)), axis=0) / (len(valid_perms) + 1)
+        np.save(os.path.join(results_directory, 'sig_stability_positive_edges.npy'), sig_stability_positive)
+        np.save(os.path.join(results_directory, 'sig_stability_negative_edges.npy'), sig_stability_negative)
         return
 
     @staticmethod
