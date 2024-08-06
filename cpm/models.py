@@ -7,11 +7,19 @@ class NetworkDict(dict):
         super().__init__(self)
         self.update({'positive': {}, 'negative': {}, 'both': {}})
 
+    @staticmethod
+    def n_networks():
+        return len(NetworkDict().keys())
+
 
 class ModelDict(dict):
     def __init__(self):
         super().__init__(self)
         self.update({'connectome': {}, 'covariates': {}, 'full': {}, 'residuals': {}})
+
+    @staticmethod
+    def n_models():
+        return len(ModelDict().keys())
 
 
 class LinearCPMModel:
@@ -35,8 +43,8 @@ class LinearCPMModel:
         for network in NetworkDict().keys():
             self.models['connectome'][network] = LinearRegression().fit(connectome[network], y)
             self.models['covariates'][network] = LinearRegression().fit(covariates, y)
-            self.models['full'][network] = LinearRegression().fit(np.hstack((connectome[network], covariates)), y)
             self.models['residuals'][network] = LinearRegression().fit(residuals[network], y)
+            self.models['full'][network] = LinearRegression().fit(np.hstack((connectome[network], covariates)), y)
 
         return self
 
@@ -55,7 +63,7 @@ class LinearCPMModel:
         for network in ['positive', 'negative', 'both']:
             predictions['connectome'][network] = self.models['connectome'][network].predict(connectome[network])
             predictions['covariates'][network] = self.models['covariates'][network].predict(covariates)
-            predictions['full'][network] = self.models['full'][network].predict(np.hstack((connectome[network], covariates)))
             predictions['residuals'][network] = self.models['residuals'][network].predict(residuals[network])
+            predictions['full'][network] = self.models['full'][network].predict(np.hstack((connectome[network], covariates)))
 
         return predictions

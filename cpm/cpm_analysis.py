@@ -14,7 +14,8 @@ from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cpm.utils import (score_regression_models, regression_metrics,
                        train_test_split, vector_to_upper_triangular_matrix)
-from cpm.fold import compute_inner_folds
+from cpm.fold import compute_inner_fold
+from cpm.models import NetworkDict, ModelDict
 
 
 class CPMRegression:
@@ -24,7 +25,7 @@ class CPMRegression:
                  cv_edge_selection: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(edge_statistic=['pearson'],
                                                                                    edge_selection=[PThreshold(threshold=[0.05],
-                                                                                        correction=[None])]),
+                                                                                                correction=[None])]),
                  add_edge_filter: bool = True,
                  n_permutations: int = 0):
         self.results_directory = results_directory
@@ -40,10 +41,10 @@ class CPMRegression:
     def save_configuration(self, config_filename: str):
         with open(os.path.splitext(config_filename)[0] + '.pkl', 'wb') as file:
             pickle.dump({'cv': self.cv,
-                         'inner_cv': self.inner_cv,
-                         'edge_selection': self.edge_selection,
-                         'add_edge_filter': self.add_edge_filter,
-                         'n_permutations': self.n_permutations}, file)
+                             'inner_cv': self.inner_cv,
+                             'edge_selection': self.edge_selection,
+                             'add_edge_filter': self.add_edge_filter,
+                             'n_permutations': self.n_permutations}, file)
 
     def load_configuration(self, results_directory, config_filename):
         with open(config_filename, 'rb') as file:
@@ -81,100 +82,66 @@ class CPMRegression:
         if perm_run > 0:
             y = np.random.permutation(y)
             current_results_directory = os.path.join(self.results_directory, 'permutation', f'{perm_run}')
+            print(f"Permutation run {perm_run}")
         else:
             current_results_directory = self.results_directory
         os.makedirs(current_results_directory, exist_ok=True)
         self._write_info()
 
-        n_outer_folds = self.cv.n_splits
         n_hps = len(self.edge_selection.param_grid)
-        n_inner_folds = self.inner_cv.n_splits
         n_features = X.shape[1]
         n_samples = X.shape[0]
 
-        cv_results = self._initialize_outer_cv_results(n_outer_folds=n_outer_folds)
-        positive_edges = self._initialize_edges(n_outer_folds=n_outer_folds, n_features=n_features)
-        negative_edges = self._initialize_edges(n_outer_folds=n_outer_folds, n_features=n_features)
-        #predictions = self._initialize_predictions(n_samples=n_samples, y_true=y)
-        predictions = pd.DataFrame()
+        cv_edges = self._initialize_edges(n_outer_folds=self.cv.get_n_splits(), n_features=n_features)
+        cv_results = pd.DataFrame()
+        cv_predictions = pd.DataFrame()
 
         for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
-            print(f"Running fold {outer_fold}")
+            if perm_run == 0:
+                print(f"Running fold {outer_fold}")
             fold_dir = os.path.join(self.results_directory, f'fold_{outer_fold}')
             if not perm_run:
                 os.makedirs(fold_dir, exist_ok=True)
 
             X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 
-            inner_cv_results = list()
-            print("   Optimizing hyperparameters using nested CV")
-            for param_id, param in enumerate(self.edge_selection.param_grid):
-                print("       Parameter {}".format(param_id))
-
-                inner_cv_results.append(compute_inner_folds(X_train, y_train, cov_train, self.inner_cv,
-                                                            self.edge_selection, param, param_id))
-            inner_cv_results = pd.concat(inner_cv_results)
-
-            # model increments
-            inner_cv_results = self._calculate_model_increments(cv_results=inner_cv_results,
-                                                                metrics=regression_metrics)
-
-            # aggregate over folds to calculate mean and std
-            agg_results = inner_cv_results.groupby(['network', 'param_id', 'model'])[regression_metrics].agg(['mean', 'std'])
-
-            if not perm_run:
-                inner_cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
-                agg_results.to_csv(os.path.join(fold_dir, 'inner_cv_results_mean_std.csv'))
-
-            # find parameters that perform best
-            best_params_ids = agg_results['mean_absolute_error'].groupby(['network', 'model'])['mean'].idxmin()
-            best_params = inner_cv_results.loc[(0, best_params_ids.loc[('both', 'full')][1], 'both', 'full'), 'params']
+            best_params = self._run_inner_folds(X=X_train, y=y_train, covariates=cov_train,
+                                                fold=outer_fold, perm_run=perm_run)
 
             # use best parameters to estimate performance on outer fold test set
             self.edge_selection.set_params(**best_params)
 
             # build model using best hyperparameters
             edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train)
-            positive_edges[outer_fold, edges['positive']] = 1
-            negative_edges[outer_fold, edges['negative']] = 1
+            cv_edges['positive'][outer_fold, edges['positive']] = 1
+            cv_edges['negative'][outer_fold, edges['negative']] = 1
 
             # build linear models using positive and negative edges (training data)
             model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
-
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
-            for model_type in ['full', 'covariates', 'connectome', 'residuals']:
-                for network in ['positive', 'negative', 'both']:
-                    n_test_set = y_pred[model_type][network].shape[0]
-                    preds = {}
-                    preds['y_pred'] = y_pred[model_type][network]
-                    preds['y_true'] = y_test
-                    preds['model'] = [model_type] * n_test_set
-                    preds['network'] = [network] * n_test_set
-                    preds['fold'] = [outer_fold] * n_test_set
-                    preds['params'] = [best_params] * n_test_set
-                    predictions = pd.concat([predictions, pd.DataFrame(preds)], ignore_index=True)
+            y_pred = self._update_predictions(y_pred=y_pred, y_true=y_test, best_params=best_params, fold=outer_fold)
+            cv_predictions = pd.concat([cv_predictions, y_pred], axis=0)
 
-                    cv_results.loc[(outer_fold, network, model_type), regression_metrics] = metrics[model_type][network]
-                    cv_results.loc[(outer_fold, network, model_type), 'params'] = [best_params]
+            metrics = self._update_metrics(metrics, best_params, outer_fold)
+            cv_results = pd.concat([cv_results, metrics], axis=0)
 
-        predictions.set_index(['fold', 'network', 'model'], inplace=True)
-        predictions.sort_index(inplace=True)
+        cv_results.set_index(['fold', 'network', 'model'], inplace=True)
 
         cv_results = self._calculate_model_increments(cv_results=cv_results, metrics=regression_metrics)
-
-        cv_results.to_csv(os.path.join(current_results_directory, 'cv_results.csv'))
-
-        self.results_outer_cv = cv_results
-
         agg_results = cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
+
+        # save results to csv files
+        cv_results.to_csv(os.path.join(current_results_directory, 'cv_results.csv'))
         agg_results.to_csv(os.path.join(current_results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
 
         if not perm_run:
-            predictions.to_csv(os.path.join(current_results_directory, 'predictions.csv'))
+            cv_predictions.reset_index().set_index(['fold', 'network', 'model'], inplace=True)
+            cv_predictions.sort_index(inplace=True)
+            cv_predictions.to_csv(os.path.join(current_results_directory, 'predictions.csv'))
 
-        for sign, edges in [('positive', positive_edges), ('negative', negative_edges)]:
+        for sign, edges in cv_edges.items():
             np.save(os.path.join(current_results_directory, f'{sign}_edges.npy'), vector_to_upper_triangular_matrix(edges[0]))
 
             weights_edges = np.sum(edges, axis=0) / edges.shape[0]
@@ -188,54 +155,86 @@ class CPMRegression:
     def _write_info(self):
         pass
 
-    @staticmethod
-    def _initialize_outer_cv_results(n_outer_folds):
-        cv_results = pd.DataFrame({
-                'fold': list(np.arange(n_outer_folds)) * 4 * 3,
-                'network': (['positive'] * n_outer_folds + ['negative'] * n_outer_folds + ['both'] * n_outer_folds) * 4,
-                'model': ['full'] * n_outer_folds * 3 + ['covariates'] * n_outer_folds * 3 + ['connectome'] * n_outer_folds * 3 + ['residuals'] * n_outer_folds * 3,
-                'params': [{}] * n_outer_folds * 4 * 3
-                }).set_index(['fold', 'network', 'model'])
-        cv_results.sort_index(inplace=True)
-        return cv_results
+    def _run_inner_folds(self, X, y, covariates, fold, perm_run):
+        fold_dir = os.path.join(self.results_directory, f'fold_{fold}')
+        inner_cv_results = list()
+        for param_id, param in enumerate(self.edge_selection.param_grid):
+            if perm_run == 0:
+                print("       Parameter {}".format(param_id))
+
+            inner_cv_results.append(compute_inner_fold(X, y, covariates, self.inner_cv,
+                                                       self.edge_selection, param, param_id))
+        inner_cv_results = pd.concat(inner_cv_results)
+
+        # model increments
+        inner_cv_results = self._calculate_model_increments(cv_results=inner_cv_results,
+                                                            metrics=regression_metrics)
+
+        # aggregate over folds to calculate mean and std
+        agg_results = inner_cv_results.groupby(['network', 'param_id', 'model'])[regression_metrics].agg(
+            ['mean', 'std'])
+
+        if not perm_run:
+            inner_cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
+            agg_results.to_csv(os.path.join(fold_dir, 'inner_cv_results_mean_std.csv'))
+
+        # find parameters that perform best
+        best_params_ids = agg_results['mean_absolute_error'].groupby(['network', 'model'])['mean'].idxmin()
+        best_params = inner_cv_results.loc[(0, best_params_ids.loc[('both', 'full')][1], 'both', 'full'), 'params']
+        return best_params
+
+    def _update_predictions(self, y_pred, y_true, best_params, fold):
+        preds = (pd.DataFrame.from_dict(y_pred).stack()
+                 .explode().reset_index().rename({'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1)
+                 .set_index(['network', 'model']))
+        n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
+        preds['y_true'] = np.repeat(y_true, n_network_model)
+        preds['params'] = [best_params] * y_true.shape[0] * n_network_model
+        preds['fold'] = [fold] * y_true.shape[0] * n_network_model
+        return preds
+
+    def _update_metrics(self, metrics, params, fold):
+        df = pd.DataFrame()
+        for model in ModelDict().keys():
+            d = pd.DataFrame.from_dict(metrics[model], orient='index')
+            d['model'] = [model] * NetworkDict.n_networks()
+            d['params'] = [params] * NetworkDict.n_networks()
+            d['fold'] = [fold] * NetworkDict.n_networks()
+            df = pd.concat([df, d], axis=0)
+        df.reset_index(inplace=True)
+        df.rename(columns={'index': 'network'}, inplace=True)
+        return df
 
     @staticmethod
     def _initialize_edges(n_outer_folds, n_features):
-        return np.zeros((n_outer_folds, n_features))
+        return {'positive': np.zeros((n_outer_folds, n_features)), 'negative': np.zeros((n_outer_folds, n_features))}
 
     @staticmethod
     def _initialize_predictions(n_samples, y_true):
-        predictions = pd.DataFrame({'index': np.arange(n_samples),
-                                    'fold_id': np.zeros(n_samples),
-                                    'y_true': y_true,
-                                    'y_pred_full_positive': np.zeros(n_samples),
-                                    'y_pred_covariates_positive': np.zeros(n_samples),
-                                    'y_pred_connectome_positive': np.zeros(n_samples),
-                                    'y_pred_full_negative': np.zeros(n_samples),
-                                    'y_pred_covariates_negative': np.zeros(n_samples),
-                                    'y_pred_connectome_negative': np.zeros(n_samples),
-                                    'y_pred_full_both': np.zeros(n_samples),
-                                    'y_pred_covariates_both': np.zeros(n_samples),
-                                    'y_pred_connectome_both': np.zeros(n_samples)
-                                    })
-        return predictions
+        networks = list(NetworkDict().keys())
+        models = list(ModelDict().keys())
 
-    @staticmethod
-    def _initialize_inner_cv_results(n_inner_folds, n_hyperparameters, param_grid):
-        n_networks = 3
-        n_models = 3
-        inner_cv_results = pd.DataFrame({
-            'fold': list(np.arange(n_inner_folds)) * n_hyperparameters * n_networks * n_models,
-            'param_id': list(np.repeat(np.arange(n_hyperparameters), n_inner_folds)) * n_networks * n_models,
-            'network': (['positive'] * n_hyperparameters * n_inner_folds +
-                        ['negative'] * n_hyperparameters * n_inner_folds +
-                        ['both'] * n_hyperparameters * n_inner_folds) * n_models,
-            'model': ['full'] * n_hyperparameters * n_inner_folds * n_networks +
-                     ['covariates'] * n_hyperparameters * n_inner_folds * n_networks +
-                     ['connectome'] * n_hyperparameters * n_inner_folds * n_networks,
-            'params': list(np.repeat(list(param_grid), n_inner_folds * n_networks * n_models))
-        }).set_index(['fold', 'param_id', 'network', 'model'])
-        return inner_cv_results
+        subject_index_list, fold_list, network_list, model_list, y_true_list, y_pred_list = [], [], [], [], [], []
+        for network in networks:
+            for model in models:
+                network_list.extend([network] * n_samples)
+                model_list.extend([model] * n_samples)
+                subject_index_list.extend(list(np.arange(n_samples)))
+                fold_list.extend(np.zeros(n_samples))
+                y_true_list.extend(y_true)
+                y_pred_list.extend(np.zeros(n_samples))
+
+        # put everything in a pandas dataframe and sort index
+        predictions = pd.DataFrame({'index': subject_index_list,
+                                    'fold_id': fold_list,
+                                    'y_true': y_true_list,
+                                    'y_pred': y_pred_list,
+                                    'network': network_list,
+                                    'model': model_list})
+        predictions.set_index(['fold', 'network', 'model'], inplace=True)
+        predictions.sort_index(inplace=True)
+
+        return predictions
 
     @staticmethod
     def _calculate_model_increments(cv_results, metrics):
@@ -274,26 +273,6 @@ class CPMRegression:
         results = results.loc[:, results.columns.get_level_values(1) == 'mean']
         results.columns = results.columns.droplevel(1)
         return results
-
-    @staticmethod
-    def _calculate_p_value(true_results, perms):
-        result_dict = {}
-
-        # Iterate over each column in self.res_pos
-        for column in true_results.columns:
-            condition_count = 0
-            if column.endswith('error'):
-                # Count occurrences where the value in self.res_pos is larger than perms_pos values
-                condition_count = (true_results[column].values[0] > perms[column]).sum()
-            elif column.endswith('score'):
-                # Count occurrences where the value in self.res_pos is smaller than perms_pos values
-                condition_count = (true_results[column].values[0] < perms[column]).sum()
-
-            # Divide the resulting sum by 1001 and add to the result dictionary
-            result_dict[column] = [condition_count / (len(perms.iloc[:, 0]) + 1)]
-
-        # Convert the result dictionary to a dataframe
-        return pd.DataFrame(result_dict)
 
     @staticmethod
     def _calculate_group_p_value(true_group, perms_group):
