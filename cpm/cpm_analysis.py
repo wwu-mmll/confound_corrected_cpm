@@ -22,7 +22,7 @@ class CPMRegression:
     def __init__(self,
                  results_directory: str,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
-                 cv_edge_selection: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
+                 cv_edge_selection: Union[BaseCrossValidator, BaseShuffleSplit] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(edge_statistic=['pearson'],
                                                                                    edge_selection=[PThreshold(threshold=[0.05],
                                                                                                 correction=[None])]),
@@ -35,8 +35,7 @@ class CPMRegression:
         self.add_edge_filter = add_edge_filter
         self.n_permutations = n_permutations
 
-        self.results_outer_cv = None
-        self.results_inner_cv = list()
+        np.random.seed(42)
 
     def save_configuration(self, config_filename: str):
         with open(os.path.splitext(config_filename)[0] + '.pkl', 'wb') as file:
@@ -62,8 +61,6 @@ class CPMRegression:
                  y: Union[pd.Series, pd.DataFrame, np.ndarray],
                  covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
 
-        np.random.seed(42)
-
         # estimate models
         self._estimate(X=X, y=y, covariates=covariates, perm_run=0)
 
@@ -78,35 +75,27 @@ class CPMRegression:
                   y: Union[pd.Series, pd.DataFrame, np.ndarray],
                   covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
                   perm_run: int = 0):
-        np.random.seed(42)
+
         if perm_run > 0:
-            y = np.random.permutation(y)
-            current_results_directory = os.path.join(self.results_directory, 'permutation', f'{perm_run}')
             print(f"Permutation run {perm_run}")
-        else:
-            current_results_directory = self.results_directory
-        os.makedirs(current_results_directory, exist_ok=True)
-        self._write_info()
+            y = np.random.permutation(y)
 
-        n_hps = len(self.edge_selection.param_grid)
-        n_features = X.shape[1]
-        n_samples = X.shape[0]
-
-        cv_edges = self._initialize_edges(n_outer_folds=self.cv.get_n_splits(), n_features=n_features)
+        current_results_directory = self._update_results_directory(perm_run=perm_run)
+        cv_edges = self._initialize_edges(n_outer_folds=self.cv.get_n_splits(), n_features=X.shape[1])
         cv_results = pd.DataFrame()
         cv_predictions = pd.DataFrame()
 
         for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
-            if perm_run == 0:
-                print(f"Running fold {outer_fold}")
-            fold_dir = os.path.join(self.results_directory, f'fold_{outer_fold}')
             if not perm_run:
-                os.makedirs(fold_dir, exist_ok=True)
+                print(f"Running fold {outer_fold}")
 
             X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 
-            best_params = self._run_inner_folds(X=X_train, y=y_train, covariates=cov_train,
-                                                fold=outer_fold, perm_run=perm_run)
+            if self.inner_cv is not None:
+                best_params = self._run_inner_folds(X=X_train, y=y_train, covariates=cov_train,
+                                                    fold=outer_fold, perm_run=perm_run)
+            else:
+                best_params = self.edge_selection.param_grid[0]
 
             # use best parameters to estimate performance on outer fold test set
             self.edge_selection.set_params(**best_params)
@@ -136,24 +125,41 @@ class CPMRegression:
         cv_results.to_csv(os.path.join(current_results_directory, 'cv_results.csv'))
         agg_results.to_csv(os.path.join(current_results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
 
-        if not perm_run:
-            cv_predictions.reset_index().set_index(['fold', 'network', 'model'], inplace=True)
-            cv_predictions.sort_index(inplace=True)
-            cv_predictions.to_csv(os.path.join(current_results_directory, 'predictions.csv'))
+        self._calculate_edge_stability(cv_edges=cv_edges, results_directory=current_results_directory)
 
+        if not perm_run:
+            self._save_predictions(cv_predictions=cv_predictions, results_directory=current_results_directory)
+
+        return
+
+    def _write_info(self):
+        pass
+
+    def _calculate_edge_stability(self, cv_edges, results_directory):
         for sign, edges in cv_edges.items():
-            np.save(os.path.join(current_results_directory, f'{sign}_edges.npy'), vector_to_upper_triangular_matrix(edges[0]))
+            np.save(os.path.join(results_directory, f'{sign}_edges.npy'),
+                    vector_to_upper_triangular_matrix(edges[0]))
 
             stability_edges = np.sum(edges, axis=0) / edges.shape[0]
             overlap_edges = stability_edges == 1
 
-            np.save(os.path.join(current_results_directory, f'stability_{sign}_edges.npy'), vector_to_upper_triangular_matrix(stability_edges))
-            np.save(os.path.join(current_results_directory, f'overlap_{sign}_edges.npy'), vector_to_upper_triangular_matrix(overlap_edges))
+            np.save(os.path.join(results_directory, f'stability_{sign}_edges.npy'),
+                    vector_to_upper_triangular_matrix(stability_edges))
+            np.save(os.path.join(results_directory, f'overlap_{sign}_edges.npy'),
+                    vector_to_upper_triangular_matrix(overlap_edges))
 
-        return agg_results
+    def _save_predictions(self, cv_predictions, results_directory):
+        cv_predictions.reset_index().set_index(['fold', 'network', 'model'], inplace=True)
+        cv_predictions.sort_index(inplace=True)
+        cv_predictions.to_csv(os.path.join(results_directory, 'predictions.csv'))
 
-    def _write_info(self):
-        pass
+    def _update_results_directory(self, perm_run: int):
+        if perm_run > 0:
+            current_results_directory = os.path.join(self.results_directory, 'permutation', f'{perm_run}')
+        else:
+            current_results_directory = self.results_directory
+        os.makedirs(current_results_directory, exist_ok=True)
+        return current_results_directory
 
     def _run_inner_folds(self, X, y, covariates, fold, perm_run):
         fold_dir = os.path.join(self.results_directory, f'fold_{fold}')
