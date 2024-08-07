@@ -1,33 +1,76 @@
 import os
-import typer
 import pickle
-
+import logging
+import typer
 from typing import Union
 from glob import glob
 
 import numpy as np
 import pandas as pd
-
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
 
 from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
-from cpm.utils import (score_regression_models, regression_metrics,
-                       train_test_split, vector_to_upper_triangular_matrix)
+from cpm.utils import (
+    score_regression_models, regression_metrics,
+    train_test_split, vector_to_upper_triangular_matrix
+)
 from cpm.fold import compute_inner_fold
 from cpm.models import NetworkDict, ModelDict
 
 
+def setup_logging(log_file: str = "analysis_log.txt"):
+    # Console handler: logs all levels (DEBUG and above) to the console
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+    console_handler.setFormatter(SimpleFormatter())
+
+    # File handler: logs only INFO level logs to the file
+    file_handler = logging.FileHandler(log_file, mode='w')
+    file_handler.setLevel(logging.INFO)
+    file_handler.addFilter(lambda record: record.levelno == logging.INFO)
+    file_handler.setFormatter(SimpleFormatter())
+
+    # Create a logger and set the base level to DEBUG so both handlers can operate independently
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)  # This ensures all messages are passed to handlers
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+
+class SimpleFormatter(logging.Formatter):
+    def format(self, record):
+        log_fmt = "%(message)s"
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
+
+
 class CPMRegression:
+    """
+    This class handles the process of performing CPM Regression with cross-validation and permutation testing.
+    """
+
     def __init__(self,
                  results_directory: str,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
                  cv_edge_selection: Union[BaseCrossValidator, BaseShuffleSplit] = None,
-                 edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(edge_statistic=['pearson'],
-                                                                                   edge_selection=[PThreshold(threshold=[0.05],
-                                                                                                correction=[None])]),
+                 edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
+                     edge_statistic=['pearson'],
+                     edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
+                 ),
                  add_edge_filter: bool = True,
                  n_permutations: int = 0):
+        """
+        Initialize the CPMRegression object.
+
+        :param results_directory: Directory to save results.
+        :param cv: Outer cross-validation strategy.
+        :param cv_edge_selection: Inner cross-validation strategy for edge selection.
+        :param edge_selection: Method for edge selection.
+        :param add_edge_filter: Whether to add an edge filter.
+        :param n_permutations: Number of permutations to run for permutation testing.
+        :param log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        """
         self.results_directory = results_directory
         self.cv = cv
         self.inner_cv = cv_edge_selection
@@ -36,16 +79,56 @@ class CPMRegression:
         self.n_permutations = n_permutations
 
         np.random.seed(42)
+        os.makedirs(self.results_directory, exist_ok=True)
+        self._setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
+        self.logger = logging.getLogger(__name__)
+
+        # Log important configuration details
+        self._log_analysis_details()
+
+    def _setup_logging(self, log_level: str):
+        setup_logging(log_level)
+
+    def _log_analysis_details(self):
+        """
+        Log important information about the analysis in a structured format.
+        """
+        self.logger.info("Starting CPM Regression Analysis")
+        self.logger.info("="*50)
+        self.logger.info(f"Results Directory:       {self.results_directory}")
+        self.logger.info(f"Outer CV strategy:       {self.cv}")
+        if self.inner_cv:
+            self.logger.info(f"Inner CV strategy:       {self.inner_cv}")
+        self.logger.info(f"Edge selection method:   {self.edge_selection}")
+        self.logger.info(f"Add Edge Filter:         {'Yes' if self.add_edge_filter else 'No'}")
+        self.logger.info(f"Number of Permutations:  {self.n_permutations}")
+        self.logger.info("="*50)
 
     def save_configuration(self, config_filename: str):
-        with open(os.path.splitext(config_filename)[0] + '.pkl', 'wb') as file:
-            pickle.dump({'cv': self.cv,
-                             'inner_cv': self.inner_cv,
-                             'edge_selection': self.edge_selection,
-                             'add_edge_filter': self.add_edge_filter,
-                             'n_permutations': self.n_permutations}, file)
+        """
+        Save the current configuration to a file.
 
-    def load_configuration(self, results_directory, config_filename):
+        :param config_filename: Path to the configuration file.
+        """
+        config_path = os.path.splitext(config_filename)[0] + '.pkl'
+        config_data = {
+            'cv': self.cv,
+            'inner_cv': self.inner_cv,
+            'edge_selection': self.edge_selection,
+            'add_edge_filter': self.add_edge_filter,
+            'n_permutations': self.n_permutations
+        }
+        with open(config_path, 'wb') as file:
+            pickle.dump(config_data, file)
+        self.logger.info(f"Configuration saved to {config_path}")
+
+    def load_configuration(self, results_directory: str, config_filename: str):
+        """
+        Load configuration from a file.
+
+        :param results_directory: Directory to set for results.
+        :param config_filename: Path to the configuration file.
+        """
         with open(config_filename, 'rb') as file:
             loaded_config = pickle.load(file)
 
@@ -55,128 +138,111 @@ class CPMRegression:
         self.edge_selection = loaded_config['edge_selection']
         self.add_edge_filter = loaded_config['add_edge_filter']
         self.n_permutations = loaded_config['n_permutations']
+        self.logger.info(f"Configuration loaded from {config_filename}")
+        self.logger.info(f"Results directory set to: {self.results_directory}")
 
     def estimate(self,
                  X: Union[pd.DataFrame, np.ndarray],
                  y: Union[pd.Series, pd.DataFrame, np.ndarray],
                  covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
+        """
+        Estimate the CPM Regression models and run permutation tests.
 
-        # estimate models
+        :param X: Features (predictors).
+        :param y: Labels (target variable).
+        :param covariates: Covariates to control for.
+        """
+        self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
+
+        # Estimate models on actual data
         self._estimate(X=X, y=y, covariates=covariates, perm_run=0)
+        self.logger.info("=" * 50)
 
-        # run permutation test
+        # Estimate models on permuted data
         for perm_id in range(1, self.n_permutations + 1):
             self._estimate(X=X, y=y, covariates=covariates, perm_run=perm_id)
 
-        self.calculate_permutation_results(self.results_directory)
+        self._calculate_permutation_results()
+        self.logger.info("Estimation completed.")
 
     def _estimate(self,
                   X: Union[pd.DataFrame, np.ndarray],
                   y: Union[pd.Series, pd.DataFrame, np.ndarray],
                   covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
                   perm_run: int = 0):
+        """
+        Perform an estimation run (either real or permuted data).
 
+        :param X: Features (predictors).
+        :param y: Labels (target variable).
+        :param covariates: Covariates to control for.
+        :param perm_run: Permutation run identifier.
+        """
         if perm_run > 0:
-            print(f"Permutation run {perm_run}")
+            self.logger.debug(f"Permutation run {perm_run}")
             y = np.random.permutation(y)
 
-        current_results_directory = self._update_results_directory(perm_run=perm_run)
+        current_results_directory = self._get_results_directory(perm_run=perm_run)
         cv_edges = self._initialize_edges(n_outer_folds=self.cv.get_n_splits(), n_features=X.shape[1])
         cv_results = pd.DataFrame()
         cv_predictions = pd.DataFrame()
 
         for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
             if not perm_run:
-                print(f"Running fold {outer_fold}")
+                self.logger.debug(f"Running fold {outer_fold + 1}/{self.cv.get_n_splits()}")
 
-            X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
+            train_test_data = train_test_split(train, test, X, y, covariates)
+            X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_data
 
-            if self.inner_cv is not None:
-                best_params = self._run_inner_folds(X=X_train, y=y_train, covariates=cov_train,
-                                                    fold=outer_fold, perm_run=perm_run)
-            else:
-                best_params = self.edge_selection.param_grid[0]
+            best_params = self._run_inner_folds(X_train, y_train, cov_train, outer_fold, perm_run) if self.inner_cv else \
+            self.edge_selection.param_grid[0]
 
-            # use best parameters to estimate performance on outer fold test set
+            # Use best parameters to estimate performance on outer fold test set
             self.edge_selection.set_params(**best_params)
-
-            # build model using best hyperparameters
             edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train)
             cv_edges['positive'][outer_fold, edges['positive']] = 1
             cv_edges['negative'][outer_fold, edges['negative']] = 1
 
-            # build linear models using positive and negative edges (training data)
-            model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
+            # Build model and make predictions
+            model = LinearCPMModel(edges=edges)
+            model.fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
-            y_pred = self._update_predictions(y_pred=y_pred, y_true=y_test, best_params=best_params, fold=outer_fold)
+            y_pred = self._update_predictions(y_pred, y_test, best_params, outer_fold)
             cv_predictions = pd.concat([cv_predictions, y_pred], axis=0)
 
             metrics = self._update_metrics(metrics, best_params, outer_fold)
             cv_results = pd.concat([cv_results, metrics], axis=0)
 
-        cv_results.set_index(['fold', 'network', 'model'], inplace=True)
-
-        cv_results = self._calculate_model_increments(cv_results=cv_results, metrics=regression_metrics)
-        agg_results = cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
-
-        # save results to csv files
-        cv_results.to_csv(os.path.join(current_results_directory, 'cv_results.csv'))
-        agg_results.to_csv(os.path.join(current_results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
-
-        self._calculate_edge_stability(cv_edges=cv_edges, results_directory=current_results_directory)
+        cv_results, agg_results = self._calculate_final_cv_results(cv_results, current_results_directory)
+        self._calculate_edge_stability(cv_edges, current_results_directory)
 
         if not perm_run:
-            self._save_predictions(cv_predictions=cv_predictions, results_directory=current_results_directory)
-
-        return
-
-    def _write_info(self):
-        pass
-
-    def _calculate_edge_stability(self, cv_edges, results_directory):
-        for sign, edges in cv_edges.items():
-            np.save(os.path.join(results_directory, f'{sign}_edges.npy'),
-                    vector_to_upper_triangular_matrix(edges[0]))
-
-            stability_edges = np.sum(edges, axis=0) / edges.shape[0]
-            overlap_edges = stability_edges == 1
-
-            np.save(os.path.join(results_directory, f'stability_{sign}_edges.npy'),
-                    vector_to_upper_triangular_matrix(stability_edges))
-            np.save(os.path.join(results_directory, f'overlap_{sign}_edges.npy'),
-                    vector_to_upper_triangular_matrix(overlap_edges))
-
-    def _save_predictions(self, cv_predictions, results_directory):
-        cv_predictions.reset_index().set_index(['fold', 'network', 'model'], inplace=True)
-        cv_predictions.sort_index(inplace=True)
-        cv_predictions.to_csv(os.path.join(results_directory, 'predictions.csv'))
-
-    def _update_results_directory(self, perm_run: int):
-        if perm_run > 0:
-            current_results_directory = os.path.join(self.results_directory, 'permutation', f'{perm_run}')
-        else:
-            current_results_directory = self.results_directory
-        os.makedirs(current_results_directory, exist_ok=True)
-        return current_results_directory
+            self.logger.info(agg_results.to_string())
+            self._save_predictions(cv_predictions, current_results_directory)
 
     def _run_inner_folds(self, X, y, covariates, fold, perm_run):
-        fold_dir = os.path.join(self.results_directory, f'fold_{fold}')
-        inner_cv_results = list()
+        """
+        Run inner folds to find the best hyperparameters.
+
+        :param X: Training features.
+        :param y: Training labels.
+        :param covariates: Training covariates.
+        :param fold: Current fold number.
+        :param perm_run: Permutation run identifier.
+        :return: Best hyperparameters found in inner folds.
+        """
+        fold_dir = os.path.join(self.results_directory, "folds", f'{fold}')
+        os.makedirs(fold_dir, exist_ok=True)
+        inner_cv_results = []
+
         for param_id, param in enumerate(self.edge_selection.param_grid):
-            if perm_run == 0:
-                print("       Parameter {}".format(param_id))
+            inner_cv_results.append(
+                compute_inner_fold(X, y, covariates, self.inner_cv, self.edge_selection, param, param_id))
 
-            inner_cv_results.append(compute_inner_fold(X, y, covariates, self.inner_cv,
-                                                       self.edge_selection, param, param_id))
         inner_cv_results = pd.concat(inner_cv_results)
-
-        # model increments
-        inner_cv_results = self._calculate_model_increments(cv_results=inner_cv_results,
-                                                            metrics=regression_metrics)
-
-        # aggregate over folds to calculate mean and std
+        inner_cv_results = self._calculate_model_increments(cv_results=inner_cv_results, metrics=regression_metrics)
         agg_results = inner_cv_results.groupby(['network', 'param_id', 'model'])[regression_metrics].agg(
             ['mean', 'std'])
 
@@ -184,80 +250,64 @@ class CPMRegression:
             inner_cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
             agg_results.to_csv(os.path.join(fold_dir, 'inner_cv_results_mean_std.csv'))
 
-        # find parameters that perform best
         best_params_ids = agg_results['mean_absolute_error'].groupby(['network', 'model'])['mean'].idxmin()
         best_params = inner_cv_results.loc[(0, best_params_ids.loc[('both', 'full')][1], 'both', 'full'), 'params']
         return best_params
 
-    def _update_predictions(self, y_pred, y_true, best_params, fold):
-        preds = (pd.DataFrame.from_dict(y_pred).stack()
-                 .explode().reset_index().rename({'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1)
-                 .set_index(['network', 'model']))
-        n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
-        preds['y_true'] = np.repeat(y_true, n_network_model)
-        preds['params'] = [best_params] * y_true.shape[0] * n_network_model
-        preds['fold'] = [fold] * y_true.shape[0] * n_network_model
-        return preds
+    def _calculate_final_cv_results(self, cv_results: pd.DataFrame, results_directory: str):
+        """
+        Calculate mean and standard deviation of cross-validation results and save to CSV.
 
-    def _update_metrics(self, metrics, params, fold):
-        df = pd.DataFrame()
-        for model in ModelDict().keys():
-            d = pd.DataFrame.from_dict(metrics[model], orient='index')
-            d['model'] = [model] * NetworkDict.n_networks()
-            d['params'] = [params] * NetworkDict.n_networks()
-            d['fold'] = [fold] * NetworkDict.n_networks()
-            df = pd.concat([df, d], axis=0)
-        df.reset_index(inplace=True)
-        df.rename(columns={'index': 'network'}, inplace=True)
-        return df
+        :param cv_results: DataFrame with cross-validation results.
+        :param results_directory: Directory to save the results.
+        :return: Updated cross-validation results DataFrame.
+        """
+        cv_results.set_index(['fold', 'network', 'model'], inplace=True)
+        cv_results = self._calculate_model_increments(cv_results=cv_results, metrics=regression_metrics)
+        agg_results = cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
 
-    @staticmethod
-    def _initialize_edges(n_outer_folds, n_features):
-        return {'positive': np.zeros((n_outer_folds, n_features)), 'negative': np.zeros((n_outer_folds, n_features))}
+        # Save results to CSV
+        cv_results.to_csv(os.path.join(results_directory, 'cv_results.csv'))
+        agg_results.to_csv(os.path.join(results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
 
-    @staticmethod
-    def _initialize_predictions(n_samples, y_true):
-        networks = list(NetworkDict().keys())
-        models = list(ModelDict().keys())
+        return cv_results, agg_results
 
-        subject_index_list, fold_list, network_list, model_list, y_true_list, y_pred_list = [], [], [], [], [], []
-        for network in networks:
-            for model in models:
-                network_list.extend([network] * n_samples)
-                model_list.extend([model] * n_samples)
-                subject_index_list.extend(list(np.arange(n_samples)))
-                fold_list.extend(np.zeros(n_samples))
-                y_true_list.extend(y_true)
-                y_pred_list.extend(np.zeros(n_samples))
+    def _get_results_directory(self, perm_run: int = 0):
+        """
+        Determine the directory to save results.
 
-        # put everything in a pandas dataframe and sort index
-        predictions = pd.DataFrame({'index': subject_index_list,
-                                    'fold_id': fold_list,
-                                    'y_true': y_true_list,
-                                    'y_pred': y_pred_list,
-                                    'network': network_list,
-                                    'model': model_list})
-        predictions.set_index(['fold', 'network', 'model'], inplace=True)
-        predictions.sort_index(inplace=True)
+        :param perm_run: Permutation run identifier.
+        :return: Results directory path.
+        """
+        if perm_run > 0:
+            perm_directory = os.path.join(self.results_directory, 'permutation', f'{perm_run}')
+            if not os.path.exists(perm_directory):
+                os.makedirs(perm_directory)
+            return perm_directory
 
-        return predictions
+        if not os.path.exists(self.results_directory):
+            os.makedirs(self.results_directory)
+        return self.results_directory
 
-    @staticmethod
-    def _calculate_model_increments(cv_results, metrics):
-        increments = cv_results[metrics].xs(key='full', level='model') - \
-                     cv_results[metrics].xs(key='covariates', level='model')
-        increments['params'] = cv_results.xs(key='full', level='model')['params']
-        increments['model'] = 'increment'
-        increments = increments.set_index('model', append=True)
-        cv_results = pd.concat([cv_results, increments])
-        cv_results.sort_index(inplace=True)
-        return cv_results
+    def _save_predictions(self, predictions: pd.DataFrame, results_directory: str):
+        """
+        Save predictions to CSV.
 
-    @staticmethod
-    def calculate_permutation_results(results_directory):
-        true_results = CPMRegression._load_cv_results(results_directory)
+        :param predictions: DataFrame containing predictions.
+        :param results_directory: Directory to save the predictions.
+        """
+        predictions.to_csv(os.path.join(results_directory, 'cv_predictions.csv'))
+        self.logger.info(f"Predictions saved to {results_directory}/cv_predictions.csv")
 
-        perm_dir = os.path.join(results_directory, 'permutation')
+    def _calculate_permutation_results(self):
+        """
+        Calculate and save the permutation test results.
+
+        :param results_directory: Directory where the results are saved.
+        """
+        true_results = CPMRegression._load_cv_results(self.results_directory)
+
+        perm_dir = os.path.join(self.results_directory, 'permutation')
         valid_perms = glob(os.path.join(perm_dir, '*'))
         perm_results = list()
         stability_positive = list()
@@ -277,31 +327,132 @@ class CPMRegression:
                 print(f'No permutation results found for {perm_run_folder}')
         concatenated_df = pd.concat(perm_results)
         p_values = CPMRegression.calculate_p_values(true_results, concatenated_df)
-        p_values.to_csv(os.path.join(results_directory, 'p_values.csv'))
+        p_values.to_csv(os.path.join(self.results_directory, 'p_values.csv'))
 
         # stability
         stability_positive = np.stack(stability_positive)
         stability_negative = np.stack(stability_negative)
-        true_stability_positive = np.load(os.path.join(results_directory, 'stability_positive_edges.npy'))
-        true_stability_negative = np.load(os.path.join(results_directory, 'stability_negative_edges.npy'))
+        true_stability_positive = np.load(os.path.join(self.results_directory, 'stability_positive_edges.npy'))
+        true_stability_negative = np.load(os.path.join(self.results_directory, 'stability_negative_edges.npy'))
         sig_stability_positive = np.sum((stability_positive >= np.expand_dims(true_stability_positive, 0)), axis=0) / (len(valid_perms) + 1)
         sig_stability_negative = np.sum((stability_negative >= np.expand_dims(true_stability_negative, 0)), axis=0) / (len(valid_perms) + 1)
-        np.save(os.path.join(results_directory, 'sig_stability_positive_edges.npy'), sig_stability_positive)
-        np.save(os.path.join(results_directory, 'sig_stability_negative_edges.npy'), sig_stability_negative)
+        np.save(os.path.join(self.results_directory, 'sig_stability_positive_edges.npy'), sig_stability_positive)
+        np.save(os.path.join(self.results_directory, 'sig_stability_negative_edges.npy'), sig_stability_negative)
+
+        self.logger.debug("Saving significance of edge stability.")
+        self.logger.info("Permutation test results")
+        self.logger.info(p_values.to_string())
         return
 
     @staticmethod
     def _load_cv_results(folder):
+        """
+        Load cross-validation results from a CSV file.
+
+        :param folder: Directory containing the results file.
+        :return: DataFrame with the loaded results.
+        """
         results = pd.read_csv(os.path.join(folder, 'cv_results_mean_std.csv'), header=[0, 1], index_col=[0, 1])
         results = results.loc[:, results.columns.get_level_values(1) == 'mean']
         results.columns = results.columns.droplevel(1)
         return results
 
     @staticmethod
-    def _calculate_group_p_value(true_group, perms_group):
-        result_dict = {}
+    def _initialize_edges(n_outer_folds, n_features):
+        """
+        Initialize a dictionary to store edges for cross-validation.
 
-        # Iterate over each column (metric) in true_group
+        :param n_outer_folds: Number of outer folds.
+        :param n_features: Number of features in the data.
+        :return: Dictionary to store edges.
+        """
+        return {'positive': np.zeros((n_outer_folds, n_features)), 'negative': np.zeros((n_outer_folds, n_features))}
+
+    def _update_predictions(self, y_pred, y_true, best_params, fold):
+        """
+        Update predictions DataFrame with new predictions and parameters.
+
+        :param y_pred: Predicted values.
+        :param y_true: True values.
+        :param best_params: Best hyperparameters from inner cross-validation.
+        :param fold: Current fold number.
+        :return: Updated predictions DataFrame.
+        """
+        preds = (pd.DataFrame.from_dict(y_pred).stack().explode().reset_index().rename(
+            {'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1).set_index(['network', 'model']))
+        n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
+        preds['y_true'] = np.repeat(y_true, n_network_model)
+        preds['params'] = [best_params] * y_true.shape[0] * n_network_model
+        preds['fold'] = [fold] * y_true.shape[0] * n_network_model
+        return preds
+
+    def _update_metrics(self, metrics, params, fold):
+        """
+        Update metrics DataFrame with new metrics and parameters.
+
+        :param metrics: Dictionary with computed metrics.
+        :param params: Best hyperparameters from inner cross-validation.
+        :param fold: Current fold number.
+        :return: Updated metrics DataFrame.
+        """
+        df = pd.DataFrame()
+        for model in ModelDict().keys():
+            d = pd.DataFrame.from_dict(metrics[model], orient='index')
+            d['model'] = [model] * NetworkDict.n_networks()
+            d['params'] = [params] * NetworkDict.n_networks()
+            d['fold'] = [fold] * NetworkDict.n_networks()
+            df = pd.concat([df, d], axis=0)
+        df.reset_index(inplace=True)
+        df.rename(columns={'index': 'network'}, inplace=True)
+        return df
+
+    @staticmethod
+    def _calculate_model_increments(cv_results, metrics):
+        """
+        Calculate model increments comparing full model to a baseline.
+
+        :param cv_results: Cross-validation results.
+        :param metrics: List of metrics to calculate.
+        :return: Cross-validation results with increments.
+        """
+        increments = cv_results[metrics].xs(key='full', level='model') - cv_results[metrics].xs(key='covariates',
+                                                                                                level='model')
+        increments['params'] = cv_results.xs(key='full', level='model')['params']
+        increments['model'] = 'increment'
+        increments = increments.set_index('model', append=True)
+        cv_results = pd.concat([cv_results, increments])
+        cv_results.sort_index(inplace=True)
+        return cv_results
+
+    def _calculate_edge_stability(self, cv_edges, results_directory):
+        """
+        Calculate and save edge stability and overlap.
+
+        :param cv_edges: Cross-validation edges.
+        :param results_directory: Directory to save the results.
+        """
+        for sign, edges in cv_edges.items():
+            np.save(os.path.join(results_directory, f'{sign}_edges.npy'),
+                    vector_to_upper_triangular_matrix(edges[0]))
+
+            stability_edges = np.sum(edges, axis=0) / edges.shape[0]
+            overlap_edges = stability_edges == 1
+
+            np.save(os.path.join(results_directory, f'stability_{sign}_edges.npy'),
+                    vector_to_upper_triangular_matrix(stability_edges))
+            np.save(os.path.join(results_directory, f'overlap_{sign}_edges.npy'),
+                    vector_to_upper_triangular_matrix(overlap_edges))
+
+    @staticmethod
+    def _calculate_group_p_value(true_group, perms_group):
+        """
+        Calculate p-value for a group of metrics.
+
+        :param true_group: DataFrame with the true results.
+        :param perms_group: DataFrame with the permutation results.
+        :return: Series with calculated p-values.
+        """
+        result_dict = {}
         for column in true_group.columns:
             condition_count = 0
             if column.endswith('error'):
@@ -315,20 +466,23 @@ class CPMRegression:
 
     @staticmethod
     def calculate_p_values(true_results, perms):
-        # Group by 'network' and 'model'
+        """
+        Calculate p-values based on true results and permutation results.
+
+        :param true_results: DataFrame with the true results.
+        :param perms: DataFrame with the permutation results.
+        :return: DataFrame with the calculated p-values.
+        """
         grouped_true = true_results.groupby(['network', 'model'])
         grouped_perms = perms.groupby(['network', 'model'])
 
         p_values = []
-
         for (name, true_group), (_, perms_group) in zip(grouped_true, grouped_perms):
             p_value_series = CPMRegression._calculate_group_p_value(true_group, perms_group)
             p_values.append(pd.DataFrame(p_value_series).T.assign(network=name[0], model=name[1]))
 
-        # Concatenate all the p-values DataFrames into a single DataFrame
         p_values_df = pd.concat(p_values).reset_index(drop=True)
         p_values_df = p_values_df.set_index(['network', 'model'])
-
         return p_values_df
 
 
