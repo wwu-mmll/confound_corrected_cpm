@@ -331,6 +331,7 @@ class CPMRegression:
             except FileNotFoundError:
                 print(f'No permutation results found for {perm_run_folder}')
         concatenated_df = pd.concat(perm_results)
+        concatenated_df.to_csv(os.path.join(self.results_directory, 'permutation_results.csv'))
         p_values = CPMRegression.calculate_p_values(true_results, concatenated_df)
         p_values.to_csv(os.path.join(self.results_directory, 'p_values.csv'))
 
@@ -441,12 +442,9 @@ class CPMRegression:
                     vector_to_upper_triangular_matrix(edges[0]))
 
             stability_edges = np.sum(edges, axis=0) / edges.shape[0]
-            overlap_edges = stability_edges == 1
 
             np.save(os.path.join(results_directory, f'stability_{sign}_edges.npy'),
                     vector_to_upper_triangular_matrix(stability_edges))
-            np.save(os.path.join(results_directory, f'overlap_{sign}_edges.npy'),
-                    vector_to_upper_triangular_matrix(overlap_edges))
 
     @staticmethod
     def _calculate_group_p_value(true_group, perms_group):
