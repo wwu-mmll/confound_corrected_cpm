@@ -69,7 +69,6 @@ class CPMRegression:
         :param edge_selection: Method for edge selection.
         :param add_edge_filter: Whether to add an edge filter.
         :param n_permutations: Number of permutations to run for permutation testing.
-        :param log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
         """
         self.results_directory = results_directory
         self.cv = cv
@@ -97,8 +96,7 @@ class CPMRegression:
         self.logger.info("="*50)
         self.logger.info(f"Results Directory:       {self.results_directory}")
         self.logger.info(f"Outer CV strategy:       {self.cv}")
-        if self.inner_cv:
-            self.logger.info(f"Inner CV strategy:       {self.inner_cv}")
+        self.logger.info(f"Inner CV strategy:       {self.inner_cv}")
         self.logger.info(f"Edge selection method:   {self.edge_selection}")
         self.logger.info(f"Add Edge Filter:         {'Yes' if self.add_edge_filter else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
@@ -194,8 +192,15 @@ class CPMRegression:
             train_test_data = train_test_split(train, test, X, y, covariates)
             X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_data
 
-            best_params = self._run_inner_folds(X_train, y_train, cov_train, outer_fold, perm_run) if self.inner_cv else \
-            self.edge_selection.param_grid[0]
+            if self.inner_cv:
+                best_params = self._run_inner_folds(X_train, y_train, cov_train, outer_fold, perm_run)
+                if not perm_run:
+                    self.logger.info(f"Best hyperparameters: {best_params}")
+            else:
+                if len(self.edge_selection.param_grid) > 1:
+                    raise RuntimeError("Multiple hyperparameter configurations but no inner cv defined. "
+                                       "Please provide only one hyperparameter configuration or an inner cv.")
+                best_params = self.edge_selection.param_grid[0]
 
             # Use best parameters to estimate performance on outer fold test set
             self.edge_selection.set_params(**best_params)
