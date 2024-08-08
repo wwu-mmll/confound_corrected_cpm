@@ -11,7 +11,10 @@ st.set_page_config(layout="wide")
 
 def main():
     if 'results_directory' not in st.session_state:
-        st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/example_simulated_data2/'
+        #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/example_simulated_data2/'
+        #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/hannah_sad/'
+        #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/hannah_sad_pearson/'
+        st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/macs_ctq_hc/'
     st.session_state['df'] = pd.read_csv(os.path.join(st.session_state.results_directory, 'cv_results.csv'))
     st.session_state['df_main'] = load_results_from_folder(st.session_state.results_directory, 'cv_results_mean_std.csv')
     st.session_state['df_predictions'] = load_data_from_folder(st.session_state.results_directory, 'cv_predictions.csv')
@@ -27,6 +30,16 @@ def main():
     perms_page = st.Page("permutations.py", title="Permutations")
 
     pg = st.navigation([info_page, results_page, edges_page, predictions_page, perms_page])
+    st.sidebar.markdown("""
+# Confound-Corrected Connectome-Based Predictive Modeling
+
+Python-Toolbox  
+Software Version: 0.1.0  
+Author: Nils R. Winter  
+Github: https://github.com/wwu-mmll/cpm_python  
+
+    """)
+
     pg.run()
 
 

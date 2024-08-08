@@ -2,6 +2,7 @@ import os
 import pickle
 import logging
 import typer
+import shutil
 from typing import Union
 from glob import glob
 
@@ -49,7 +50,6 @@ class CPMRegression:
     """
     This class handles the process of performing CPM Regression with cross-validation and permutation testing.
     """
-
     def __init__(self,
                  results_directory: str,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
@@ -59,7 +59,8 @@ class CPMRegression:
                      edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
                  ),
                  add_edge_filter: bool = True,
-                 n_permutations: int = 0):
+                 n_permutations: int = 0,
+                 atlas_labels: str = None):
         """
         Initialize the CPMRegression object.
 
@@ -69,6 +70,7 @@ class CPMRegression:
         :param edge_selection: Method for edge selection.
         :param add_edge_filter: Whether to add an edge filter.
         :param n_permutations: Number of permutations to run for permutation testing.
+        :param atlas_labels: CSV file containing atlas and regions labels.
         """
         self.results_directory = results_directory
         self.cv = cv
@@ -76,9 +78,11 @@ class CPMRegression:
         self.edge_selection = edge_selection
         self.add_edge_filter = add_edge_filter
         self.n_permutations = n_permutations
+        self.atlas_labels = atlas_labels
 
         np.random.seed(42)
         os.makedirs(self.results_directory, exist_ok=True)
+        self._copy_atlas_labels()
         self._setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
         self.logger = logging.getLogger(__name__)
 
@@ -101,6 +105,11 @@ class CPMRegression:
         self.logger.info(f"Add Edge Filter:         {'Yes' if self.add_edge_filter else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info("="*50)
+
+    def _copy_atlas_labels(self):
+        # ToDo: add checks for atlas file
+        if self.atlas_labels is not None:
+            shutil.copy(self.atlas_labels, os.path.join(self.results_directory, 'atlas_labels.csv'))
 
     def save_configuration(self, config_filename: str):
         """
@@ -459,9 +468,9 @@ class CPMRegression:
         for column in true_group.columns:
             condition_count = 0
             if column.endswith('error'):
-                condition_count = (true_group[column].values[0] > perms_group[column]).sum()
+                condition_count = (true_group[column].values[0] > perms_group[column].astype(float)).sum()
             elif column.endswith('score'):
-                condition_count = (true_group[column].values[0] < perms_group[column]).sum()
+                condition_count = (true_group[column].values[0] < perms_group[column].astype(float)).sum()
 
             result_dict[column] = condition_count / (len(perms_group[column]) + 1)
 

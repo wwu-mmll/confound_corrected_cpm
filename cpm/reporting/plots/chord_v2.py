@@ -396,11 +396,13 @@ def plot_rim(degree_st: Union[float, int], degree_end: Union[float, int],
 
     plt.xlim(-0.65, 0.65)
     plt.ylim(-0.65, 0.65)
-    ax.add_patch(patches.Wedge((.0, .0), radius, degree_st + rim_border,
+    center = (.0, .0)
+    ax.add_patch(patches.Wedge(center, radius, degree_st + rim_border,
                                degree_end - rim_border, color=color,
                                alpha=1))  # larger, colored wedge
-    ax.add_patch(patches.Wedge((.0, .0), radius - .02, degree_st, degree_end,
+    ax.add_patch(patches.Wedge(center, radius - .02, degree_st, degree_end,
                                color='white'))  # smaller white edge
+
 
 
 def plot_arcs(edges: list, idx_to_label: dict, network_low_high: dict,
@@ -525,7 +527,36 @@ def plot_arcs(edges: list, idx_to_label: dict, network_low_high: dict,
     else:
         edges, edge_weights = zip(*sorted(zip(edges, edge_weights),
                                       key=lambda x: abs(x[1])))
+    value_range = (np.min(edge_weights), np.max(edge_weights))
+
+    import seaborn as sns
+    # Create a diverging palette centered around zero with a midpoint of 0.5
+    palette = sns.diverging_palette(220, 20, n=256, as_cmap=True)
+    from matplotlib.colors import Normalize
+    from matplotlib.colors import TwoSlopeNorm
+    from matplotlib.cm import ScalarMappable
+    #norm = Normalize(vmin=value_range[0], vmax=value_range[1])
+    if value_range[0] == 0 and value_range[1] > 0:
+        adjusted_min = -value_range[1]
+        norm = TwoSlopeNorm(vmin=adjusted_min, vcenter=0, vmax=value_range[1])
+    else:
+        norm = TwoSlopeNorm(vmin=value_range[0], vcenter=0, vmax=value_range[1])
+
+    #norm = TwoSlopeNorm(vmin=value_range[0], vcenter=0, vmax=value_range[1])
+
+    # Create a ScalarMappable to map normalized data to colormap
+    scalar_mappable = ScalarMappable(norm=norm, cmap=palette)
+
+
+    import matplotlib.colors as mcolors
+    from matplotlib.cm import ScalarMappable
+    #divnorm = mcolors.DivergingNorm(vmin=value_range[0], vcenter=0, vmax=value_range[1])
+    # Create a ScalarMappable to map normalized data to colormap
+    #scalar_mappable = ScalarMappable(norm=norm, cmap=palette)
+
     for idx, (edge, edge_weight) in enumerate(zip(edges, edge_weights)):
+        if edge_weight == 0:
+            continue
         if plot_count or plot_abs_sum:
             deg0 = network_centers[edge[0]]
             deg1 = network_centers[edge[1]]
@@ -572,7 +603,10 @@ def plot_arcs(edges: list, idx_to_label: dict, network_low_high: dict,
             if colors is None:
                 weight_relative_min = (edge_weight - vmin) / \
                                       (vmax - vmin)
-                color = cmap(weight_relative_min)
+                #color = cmap(weight_relative_min)
+                #color = palette(norm(edge_weight))
+                color = scalar_mappable.to_rgba(edge_weight)
+
             if linewidths is None:
                 if plot_count or plot_abs_sum:
                     linewidth = network2thickness[edge] / total_thickness * 250
@@ -608,6 +642,11 @@ def plot_arcs(edges: list, idx_to_label: dict, network_low_high: dict,
         else:
             center0 = network_centers[idx_to_label[edge[0]]]
             center1 = network_centers[idx_to_label[edge[1]]]
+
+        #center0 = np.mean([center0, center1])
+        #center1 = np.mean([center0, center1])
+        #deg0 = np.mean([deg0, deg1])
+        #deg1 = np.mean([deg0, deg1])
 
         plot_arc(deg0, deg1,
                  center0, center1,

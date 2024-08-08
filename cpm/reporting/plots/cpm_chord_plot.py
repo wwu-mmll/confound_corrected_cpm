@@ -3,6 +3,8 @@ import numpy as np
 from plots.chord_v2 import plot_chord
 from typing import Union, Tuple
 import matplotlib.pyplot as plt
+from nichord.glassbrain import plot_glassbrain
+import pandas as pd
 
 
 def vector_to_upper_triangular_matrix(vector):
@@ -62,20 +64,58 @@ def convert_matrix(adj: Union[list, np.ndarray]) -> Tuple[np.ndarray, np.ndarray
     weights = weights[(weights > smol) | (weights < -smol)]
     return idxs, weights
 
+
+def extract_edges(matrix):
+    """
+    Given a square matrix (graph), this function returns:
+    1. A NumPy array with two columns containing the ids of the two nodes connected by an edge.
+    2. A NumPy array containing the weights of the edges.
+
+    Args:
+    matrix (2D numpy array): A square matrix representing a graph.
+
+    Returns:
+    edges (2D numpy array): Array of edges.
+    weights (1D numpy array): Array of weights corresponding to the edges.
+    """
+    if isinstance(matrix, np.ndarray) and matrix.shape[0] == matrix.shape[1]:
+        n = matrix.shape[0]
+        edges = []
+        weights = []
+
+        for i in range(1, n):
+            for j in range(i):
+                edges.append([i, j])
+                weights.append(matrix[i, j])
+
+        edges = np.array(edges, dtype=int)
+        weights = np.array(weights)
+        return edges, weights
+    else:
+        raise ValueError("Input must be a square matrix (2D NumPy array).")
+
+
 def plot_cpm_chord_plot(results_folder, selected_metric):
     edges = np.load(os.path.join(results_folder, f"{selected_metric}.npy"))
-    edges += 0.01
     if (selected_metric == "sig_stability_positive_edges") or (selected_metric == "sig_stability_negative_edges"):
         threshold = 0.05
-        corr_transformed = np.where(edges > threshold, 0, edges)
-        corr_transformed = np.where(edges <= threshold, 1, corr_transformed)
+        corr_transformed = np.where(np.abs(edges) > threshold, 0, edges)
+        corr_transformed = np.where(np.abs(edges) <= threshold, 1, corr_transformed)
         edges = corr_transformed
 
-    edges_plot, edge_weights = convert_matrix(edges)
+    try:
+        aparc = pd.read_csv(os.path.join(results_folder, "atlas_labels.csv"), names=['x', 'y', 'z', 'regions'])
+    except FileNotFoundError:
+        aparc = pd.DataFrame({'x': np.ones(edges.shape[1]), 'y': np.ones(edges.shape[1]),
+                              'z': np.ones(edges.shape[1]), 'regions': [f"Region {i}" for i in range(edges.shape[1])]})
+    edges_plot, edge_weights = extract_edges(edges)
     n_regions = edges.shape[1]
     networks = ["Network 1"] * n_regions
-    regions = [f"Region {r}" for r in range(n_regions)]
-
+    regions = aparc['regions'].to_list()[:n_regions]
+    coords = aparc.iloc[:, :3].to_numpy()
+    coords_list = list()
+    for i, region in enumerate(regions):
+        coords_list.append((coords[i, 0], coords[i, 1], coords[i, 2]))
     colors = get_colors_from_colormap(len(set(networks)) + 1, 'tab10')
     network_colors_dict = {}
     for i, network in enumerate(set(networks)):
@@ -88,6 +128,18 @@ def plot_cpm_chord_plot(results_folder, selected_metric):
 
     filename = os.path.join(results_folder, "plots", "edge_chord.png")
     plot_chord(idx_to_label, edges_plot, edge_weights=edge_weights, fp_chord=filename,
+               network_order=regions,
                edge_threshold=0, arc_setting=False, network_colors=network_colors,
                linewidths=3, alphas=0.6, label_fontsize=12)
-    return filename
+
+    fp_glass = os.path.join(results_folder, "plots", "glass_brain.png")
+    plot_glassbrain(idx_to_label, edges_plot, edge_weights, fp_glass,
+                    coords_list, linewidths=7, node_size=13, network_order=regions,
+                    network_colors=network_colors)
+    return filename, fp_glass
+
+
+if __name__ == "__main__":
+    results_directory = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/example_simulated_data2/'
+    selected_metric = "sig_stability_positive_edges"
+    plot_cpm_chord_plot(results_directory, selected_metric)

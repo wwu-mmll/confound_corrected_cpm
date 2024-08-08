@@ -6,12 +6,23 @@ from typing import Union
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
 import statsmodels.stats.multitest as multitest
+from warnings import filterwarnings
 
 
-def one_sample_t_test(x):
-    # use two-sided for correlations (functional connectome) or one-sided positive for NOS etc (structural connectome)
-    _, p_value = ttest_1samp(x, popmean=0, nan_policy='omit', alternative='two-sided')
-    return p_value
+def one_sample_t_test(matrix, population_mean):
+    # Calculate the mean and standard deviation along the rows
+    sample_means = np.mean(matrix, axis=0)
+    sample_stds = np.std(matrix, axis=0, ddof=1)
+    n = matrix.shape[1]  # Number of samples in each row
+
+    # Calculate the t-statistics
+    filterwarnings('ignore', category=RuntimeWarning)
+    t_stats = (sample_means - population_mean) / (sample_stds / np.sqrt(n))
+
+    # Calculate the p-values using the t-distribution survival function
+    p_values = 2 * t.sf(np.abs(t_stats), df=n - 1)
+
+    return t_stats, p_values
 
 
 def compute_t_and_p_values(correlations, df):
@@ -167,11 +178,18 @@ class UnivariateEdgeSelection(BaseEstimator):
         return ParameterGrid(grid_elements)
 
     def fit_transform(self, X, y=None, covariates=None):
-        r_edges, p_edges = self.compute_edge_statistics(X=X, y=y, covariates=covariates)
+        _, p_values = one_sample_t_test(X, 0)
+        valid_edges = p_values < 0.05
+
+        r_edges, p_edges = np.zeros(X.shape[1]), np.ones(X.shape[1])
+        r_edges_masked, p_edges_masked = self.compute_edge_statistics(X=X[:, valid_edges], y=y, covariates=covariates)
+        r_edges[valid_edges] = r_edges_masked
+        p_edges[valid_edges] = p_edges_masked
         edges = self.edge_selection.select(r=r_edges, p=p_edges)
         return edges
 
-    def compute_edge_statistics(self, X: Union[pd.DataFrame, np.ndarray],
+    def compute_edge_statistics(self,
+                                X: Union[pd.DataFrame, np.ndarray],
                                 y: Union[pd.Series, pd.DataFrame, np.ndarray],
                                 covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
         if self.edge_statistic == 'pearson':

@@ -2,9 +2,12 @@ import numpy as np
 
 from sklearn.metrics import (mean_squared_error, mean_absolute_error, explained_variance_score)
 from scipy.stats import pearsonr, spearmanr
-
+from scipy.stats import ConstantInputWarning, NearConstantInputWarning
 import matplotlib.pyplot as plt
+import warnings
 
+warnings.filterwarnings("ignore", category=ConstantInputWarning)
+warnings.filterwarnings("ignore", category=NearConstantInputWarning)
 
 regression_metrics_functions = {
     'mean_squared_error': mean_squared_error,
