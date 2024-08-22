@@ -23,6 +23,9 @@ tinycss2 = "^1.3.0"
 
 [tool.poetry.dev-dependencies]
 
+[tool.poetry.packages]
+include = ["cpm", "cpm.*"]
+
 [tool.poetry.scripts]
 
 [build-system]
