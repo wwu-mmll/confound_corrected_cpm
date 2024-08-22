@@ -34,6 +34,7 @@ jobs:
         poetry install
     - name: Test with pytest
       run: |
+        export PYTHONPATH=$(pwd)
         poetry run pytest ./tests --cov=./cpm_python --full-trace
 
   build:
