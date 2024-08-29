@@ -31,7 +31,8 @@ jobs:
         poetry config virtualenvs.create false
     - name: Install dependencies
       run: |
-        poetry install
+        pip install --upgrade poetry
+        poetry install --verbose
     - name: Test with pytest
       run: |
         export PYTHONPATH=$(pwd)
