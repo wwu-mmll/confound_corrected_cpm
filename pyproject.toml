@@ -1,14 +1,17 @@
-# pyproject.toml
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "cpm_python"
 version = "0.1.0"
 description = ""
-authors = ["Nils Winter <nils.r.winter@uni-muenster.de>"]
-license = "MIT"
+authors = [""]
+readme = "README.md"
+packages = [{ include = "cpm" }]
 
 [tool.poetry.dependencies]
-python = ">=3.8"
+python = ">=3.6"
 numpy = "*"
 pandas = "*"
 scikit-learn = "*"
@@ -18,18 +21,3 @@ nilearn = "*"
 typer = "*"
 pytest = "*"
 pytest-cov = "*"
-bleach = "^6.1.0"
-tinycss2 = "^1.3.0"
-
-[tool.poetry.dev-dependencies]
-
-[tool.poetry.packages]
-packages = [
-    { include = "cpm" }
-]
-
-[tool.poetry.scripts]
-
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
