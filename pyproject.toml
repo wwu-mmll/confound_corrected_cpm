@@ -6,7 +6,7 @@ build-backend = "poetry.core.masonry.api"
 name = "cpm_python"
 version = "0.1.0"
 description = ""
-authors = [""]
+authors = ["Nils Winter <nils.r.winter@uni-muenster.de>"]
 readme = "README.md"
 packages = [{ include = "cpm" }]
 
