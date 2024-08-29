@@ -6,7 +6,7 @@ import pingouin as pg
 
 from scipy.stats import pearsonr, spearmanr, t
 
-from cpm.simulate_data import simulate_data
+from cpm.simulate_data import simulate_regression_data
 from cpm.edge_selection import (pearson_correlation_with_pvalues, spearman_correlation_with_pvalues,
                                 semi_partial_correlation_pearson, semi_partial_correlation_spearman)
 
@@ -14,7 +14,7 @@ from cpm.edge_selection import (pearson_correlation_with_pvalues, spearman_corre
 class TestEdgeStatistics(unittest.TestCase):
     def setUp(self):
         super(TestEdgeStatistics, self).setUp()
-        self.X, self.y, self.covariates = simulate_data(n_samples=100, n_features=45)
+        self.X, self.y, self.covariates = simulate_regression_data(n_samples=100, n_features=45)
 
     def test_cpm_pearson(self):
         """Test CPM implementation of Pearson correlation with p-values"""
