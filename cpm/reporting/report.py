@@ -14,7 +14,12 @@ def main():
         #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/example_simulated_data2/'
         #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/hannah_sad/'
         #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/hannah_sad_pearson/'
-        st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/macs_ctq_hc/'
+        #st.session_state['results_directory'] = '/spm-data/vault-data3/mmll/projects/cpm_macs_example/haushaltsnetto'
+        #st.session_state['results_directory'] = '/spm-data/vault-data3/mmll/projects/cpm_macs_example/haushaltsnetto_partial'
+        #st.session_state['results_directory'] = '/spm-data/vault-data3/mmll/projects/cpm_macs_example/haushaltsnetto_05_fdr'
+        st.session_state[
+            'results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/simulated_data_no_no_link/'
+
     st.session_state['df'] = pd.read_csv(os.path.join(st.session_state.results_directory, 'cv_results.csv'))
     st.session_state['df_main'] = load_results_from_folder(st.session_state.results_directory, 'cv_results_mean_std.csv')
     st.session_state['df_predictions'] = load_data_from_folder(st.session_state.results_directory, 'cv_predictions.csv')

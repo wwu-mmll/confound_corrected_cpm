@@ -162,12 +162,12 @@ class CPMRegression:
         self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
 
         # Estimate models on actual data
-        self._estimate(X=X, y=y, covariates=covariates, perm_run=0)
+        self._estimate(X=X, y=np.squeeze(y), covariates=covariates, perm_run=0)
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
         for perm_id in range(1, self.n_permutations + 1):
-            self._estimate(X=X, y=y, covariates=covariates, perm_run=perm_id)
+            self._estimate(X=X, y=np.squeeze(y), covariates=covariates, perm_run=perm_id)
 
         self._calculate_permutation_results()
         self.logger.info("Estimation completed.")
@@ -396,7 +396,7 @@ class CPMRegression:
         preds = (pd.DataFrame.from_dict(y_pred).stack().explode().reset_index().rename(
             {'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1).set_index(['network', 'model']))
         n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
-        preds['y_true'] = np.repeat(y_true, n_network_model)
+        preds['y_true'] = np.tile(y_true, n_network_model)
         preds['params'] = [best_params] * y_true.shape[0] * n_network_model
         preds['fold'] = [fold] * y_true.shape[0] * n_network_model
         return preds
