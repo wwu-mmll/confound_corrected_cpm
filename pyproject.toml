@@ -1,12 +1,26 @@
 # pyproject.toml
-
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
 
-[project]
+[tool.poetry]
 name = "cpm_python"
 version = "0.1.0"
+description = ""
+authors = ["Nils Winter <nils.r.winter@uni-muenster.de>"]
+readme = "README.md"
+packages = [{ include = "cpm" }]
 
-[tool.setuptools.packages.find]
-where = ["cpm"]
+[tool.poetry.dependencies]
+python = ">=3.11"
+bleach = "*"
+tinycss2 = "*"
+numpy = "*"
+pandas = "*"
+scikit-learn = "*"
+pingouin = "*"
+streamlit = "*"
+nilearn = "*"
+typer = "*"
+pytest = "*"
+pytest-cov = "*"
