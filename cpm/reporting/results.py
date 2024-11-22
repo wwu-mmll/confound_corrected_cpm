@@ -23,4 +23,4 @@ with tab1:
 
         with st.container(border=False):
             #st.plotly_chart(fig, use_container_width=True)
-            st.image(plot_name)
+            st.image(plot_name, width=600)

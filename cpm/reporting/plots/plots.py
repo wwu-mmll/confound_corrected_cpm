@@ -8,6 +8,44 @@ from plotly.subplots import make_subplots
 
 
 def bar_plot(df, selected_metric, results_folder):
+    cmap = sns.color_palette("muted", n_colors=3)
+    flatui = [ "#ba6523", "#31559e", "#cc3727"]
+    cmap = sns.color_palette(flatui)
+
+    # Dropdown for metric selection
+
+    fig = sns.FacetGrid(df[df['model'].isin(['connectome', 'covariates', 'residuals', 'full'])],
+                      row='model', col='network', hue='network',
+                      aspect=3, height=2 / 2.54,
+                      col_order = ["positive", "negative", "both"],
+                      row_order=['covariates', 'connectome','full', 'residuals'],
+                      sharex='col', sharey=False, palette=cmap)
+
+    # then we add the densities kdeplots
+    fig.map(sns.boxplot, selected_metric, "model")
+
+    #fig.map(sns.kdeplot, selected_metric,
+    #        bw_adjust=1, clip_on=False,
+    #        fill=True, alpha=1, linewidth=1)
+
+    #fig.map(sns.violinplot, selected_metric, "model", inner = None, split = True,  hue=1, hue_order=[1, 2],
+    #        density_norm = 'count', dodge = True, fill = True)
+    #fig.map(sns.boxplot, selected_metric, "model")#, dodge=True, hue=1, hue_order=[2, 1])
+
+    fig.set_titles(template='')
+    fig.set(ylabel=None)
+    for ax,m in zip(fig.axes[0,:], ["positive", "negative", "both"]):
+        ax.set_title(m, fontweight='bold', fontsize=8)
+    for ax,l in zip(fig.axes[:,0], ['covariates', 'connectome','full', 'residuals']):
+        ax.set_ylabel(l, fontweight='bold', fontsize=8, rotation=0, ha='right', va='center')
+    fig.set(yticks=[])
+
+    fig.fig.subplots_adjust(hspace=0.2, wspace=0.15)
+    if selected_metric == 'pearson_score' or selected_metric == 'spearman_score':
+        for ax in fig.axes.ravel():
+            ax.set_xlim(-0.5, 1)
+        fig.map(plt.axvline, x=0, color='black', linewidth=0.5, zorder=-1)
+    """    
     cmap = sns.color_palette("muted", n_colors=4)
 
     # Dropdown for metric selection
@@ -35,9 +73,9 @@ def bar_plot(df, selected_metric, results_folder):
     plt.tight_layout()
     if selected_metric == 'pearson_score' or selected_metric == 'spearman_score':
         axes[1].set_ylim(-0.5, 1)
-
+    """
     plot_name = os.path.join(results_folder, "plots", 'point_plot.png')
-    sns.despine(offset=1, trim=True)
+    #sns.despine(offset=1, trim=True)
     fig.savefig(plot_name, dpi=300)
     return plot_name, fig
 

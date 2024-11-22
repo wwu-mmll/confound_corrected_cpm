@@ -109,15 +109,15 @@ def simulate_regression_data_2(n_samples: int = 500,
     y = np.copy(y_rand)
 
     if link_type == 'no_link':
-        z = 1 * y_rand + z_rand
+        z = 0.4 * y_rand + z_rand
         X[:, :n_informative_features] = x_rand[:, :n_informative_features] + z
     elif link_type == 'no_no_link':
-        z = 0.8 * y_rand + z_rand
+        z = 0.4 * y_rand + z_rand
     elif link_type == 'direct_link':
-        z = 0.8 * y_rand + z_rand
+        z = 0.4 * y_rand + z_rand
         X[:, :n_informative_features] = x_rand[:, :n_informative_features] + (0.2 * (noise * y_rand) + y_rand) + z
     elif link_type == 'weak_link':
-        z = 0.3 * y_rand + z_rand
+        z = 0.4 * y_rand + z_rand
         X[:, :n_informative_features] = x_rand[:, :n_informative_features] + (0.8 * (noise * y_rand) + y_rand) + z
     else:
         raise NotImplemented(f'Link type {link_type} not implemented')
