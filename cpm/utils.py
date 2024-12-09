@@ -1,10 +1,16 @@
 import numpy as np
 
 from sklearn.metrics import (mean_squared_error, mean_absolute_error, explained_variance_score)
+from sklearn.utils import check_X_y
 from scipy.stats import pearsonr, spearmanr
 from scipy.stats import ConstantInputWarning, NearConstantInputWarning
 import matplotlib.pyplot as plt
 import warnings
+
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", category=ConstantInputWarning)
 warnings.filterwarnings("ignore", category=NearConstantInputWarning)
@@ -108,3 +114,20 @@ def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     cmap = plt.get_cmap(colormap_name)
     colors = [cmap(i / (n_colors - 1)) for i in range(n_colors)]
     return colors
+
+
+def check_data(X, y, covariates, impute_missings: bool = False):
+    logger.info("Checking data...")
+    if impute_missings:
+        try:
+            X, y = check_X_y(X, y, force_all_finite='allow-nan', allow_nd=True, y_numeric=True)
+        except ValueError as e:
+            logger.info("y contains NaN values. Only missing values in X and covariates can be imputed.")
+            raise e
+    else:
+        try:
+            X, y = check_X_y(X, y, force_all_finite=True, allow_nd=True, y_numeric=True)
+        except ValueError as e:
+            logger.info("Your input contains NaN values. Fix NaNs or use impute_missing_values=True.")
+            raise e
+    return X, y, covariates

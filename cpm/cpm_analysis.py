@@ -10,40 +10,15 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
 
+from cpm.logging import setup_logging
 from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cpm.utils import (
     score_regression_models, regression_metrics,
-    train_test_split, vector_to_upper_triangular_matrix
+    train_test_split, vector_to_upper_triangular_matrix, check_data
 )
 from cpm.fold import compute_inner_fold
 from cpm.models import NetworkDict, ModelDict
-
-
-def setup_logging(log_file: str = "analysis_log.txt"):
-    # Console handler: logs all levels (DEBUG and above) to the console
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)
-    console_handler.setFormatter(SimpleFormatter())
-
-    # File handler: logs only INFO level logs to the file
-    file_handler = logging.FileHandler(log_file, mode='w')
-    file_handler.setLevel(logging.INFO)
-    file_handler.addFilter(lambda record: record.levelno == logging.INFO)
-    file_handler.setFormatter(SimpleFormatter())
-
-    # Create a logger and set the base level to DEBUG so both handlers can operate independently
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)  # This ensures all messages are passed to handlers
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-
-
-class SimpleFormatter(logging.Formatter):
-    def format(self, record):
-        log_fmt = "%(message)s"
-        formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
 
 
 class CPMRegression:
@@ -53,12 +28,14 @@ class CPMRegression:
     def __init__(self,
                  results_directory: str,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
-                 cv_edge_selection: Union[BaseCrossValidator, BaseShuffleSplit] = None,
+                 inner_cv: Union[BaseCrossValidator, BaseShuffleSplit] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
                      edge_statistic=['pearson'],
                      edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
                  ),
-                 add_edge_filter: bool = True,
+                 select_stable_edges: bool = True,
+                 stability_threshold: float = 0.8,
+                 impute_missing_values: bool = True,
                  n_permutations: int = 0,
                  atlas_labels: str = None):
         """
@@ -66,17 +43,19 @@ class CPMRegression:
 
         :param results_directory: Directory to save results.
         :param cv: Outer cross-validation strategy.
-        :param cv_edge_selection: Inner cross-validation strategy for edge selection.
+        :param inner_cv: Inner cross-validation strategy for edge selection.
         :param edge_selection: Method for edge selection.
-        :param add_edge_filter: Whether to add an edge filter.
+        :param impute_missing_values: Whether to impute missing values.
         :param n_permutations: Number of permutations to run for permutation testing.
         :param atlas_labels: CSV file containing atlas and regions labels.
         """
         self.results_directory = results_directory
         self.cv = cv
-        self.inner_cv = cv_edge_selection
+        self.inner_cv = inner_cv
         self.edge_selection = edge_selection
-        self.add_edge_filter = add_edge_filter
+        self.select_stable_edges = select_stable_edges
+        self.stability_threshold = stability_threshold
+        self.impute_missing_values = impute_missing_values
         self.n_permutations = n_permutations
         self.atlas_labels = atlas_labels
 
@@ -102,7 +81,9 @@ class CPMRegression:
         self.logger.info(f"Outer CV strategy:       {self.cv}")
         self.logger.info(f"Inner CV strategy:       {self.inner_cv}")
         self.logger.info(f"Edge selection method:   {self.edge_selection}")
-        self.logger.info(f"Add Edge Filter:         {'Yes' if self.add_edge_filter else 'No'}")
+        self.logger.info(f"Select stable edges:     {'Yes' if self.select_stable_edges else 'No'}")
+        self.logger.info(f"Stability threshold:     {self.stability_threshold}")
+        self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info("="*50)
 
@@ -122,7 +103,9 @@ class CPMRegression:
             'cv': self.cv,
             'inner_cv': self.inner_cv,
             'edge_selection': self.edge_selection,
-            'add_edge_filter': self.add_edge_filter,
+            'select_stable_edges': self.select_stable_edges,
+            'stability_threshold': self.stability_threshold,
+            'impute_missing_values': self.impute_missing_values,
             'n_permutations': self.n_permutations
         }
         with open(config_path, 'wb') as file:
@@ -143,7 +126,9 @@ class CPMRegression:
         self.cv = loaded_config['cv']
         self.inner_cv = loaded_config['inner_cv']
         self.edge_selection = loaded_config['edge_selection']
-        self.add_edge_filter = loaded_config['add_edge_filter']
+        self.select_stable_edges = loaded_config['select_stable_edges']
+        self.stability_threshold = loaded_config['stability_threshold']
+        self.impute_missing_values = loaded_config['impute_missing_values']
         self.n_permutations = loaded_config['n_permutations']
         self.logger.info(f"Configuration loaded from {config_filename}")
         self.logger.info(f"Results directory set to: {self.results_directory}")
@@ -161,13 +146,19 @@ class CPMRegression:
         """
         self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
 
+        # check data and convert to numpy
+        X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
+
+        # check missing data
+        # ToDo
+
         # Estimate models on actual data
-        self._estimate(X=X, y=np.squeeze(y), covariates=covariates, perm_run=0)
+        self._estimate(X=X, y=y, covariates=covariates, perm_run=0)
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
         for perm_id in range(1, self.n_permutations + 1):
-            self._estimate(X=X, y=np.squeeze(y), covariates=covariates, perm_run=perm_id)
+            self._estimate(X=X, y=y, covariates=covariates, perm_run=perm_id)
 
         self._calculate_permutation_results()
         self.logger.info("Estimation completed.")
@@ -198,22 +189,28 @@ class CPMRegression:
             if not perm_run:
                 self.logger.debug(f"Running fold {outer_fold + 1}/{self.cv.get_n_splits()}")
 
-            train_test_data = train_test_split(train, test, X, y, covariates)
-            X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_data
+            X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 
             if self.inner_cv:
-                best_params = self._run_inner_folds(X_train, y_train, cov_train, outer_fold, perm_run)
+                best_params, stability_edges = self._run_inner_folds(X_train, y_train, cov_train, outer_fold, perm_run)
                 if not perm_run:
                     self.logger.info(f"Best hyperparameters: {best_params}")
             else:
                 if len(self.edge_selection.param_grid) > 1:
                     raise RuntimeError("Multiple hyperparameter configurations but no inner cv defined. "
                                        "Please provide only one hyperparameter configuration or an inner cv.")
+                if self.select_stable_edges:
+                    raise RuntimeError("Stable edges can only be selected when using an inner cv.")
                 best_params = self.edge_selection.param_grid[0]
 
             # Use best parameters to estimate performance on outer fold test set
-            self.edge_selection.set_params(**best_params)
-            edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train)
+            if self.select_stable_edges:
+                edges = {'positive': np.where(stability_edges['positive'] > self.stability_threshold)[0],
+                         'negative': np.where(stability_edges['negative'] > self.stability_threshold)[0]}
+            else:
+                self.edge_selection.set_params(**best_params)
+                edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train)
+
             cv_edges['positive'][outer_fold, edges['positive']] = 1
             cv_edges['negative'][outer_fold, edges['negative']] = 1
 
@@ -233,7 +230,7 @@ class CPMRegression:
         self._calculate_edge_stability(cv_edges, current_results_directory)
 
         if not perm_run:
-            self.logger.info(agg_results.to_string())
+            self.logger.info(agg_results.round(4).to_string())
             self._save_predictions(cv_predictions, current_results_directory)
 
     def _run_inner_folds(self, X, y, covariates, fold, perm_run):
@@ -250,10 +247,11 @@ class CPMRegression:
         fold_dir = os.path.join(self.results_directory, "folds", f'{fold}')
         os.makedirs(fold_dir, exist_ok=True)
         inner_cv_results = []
-
+        stable_edges = []
         for param_id, param in enumerate(self.edge_selection.param_grid):
-            inner_cv_results.append(
-                compute_inner_fold(X, y, covariates, self.inner_cv, self.edge_selection, param, param_id))
+            res, edges = compute_inner_fold(X, y, covariates, self.inner_cv, self.edge_selection, param, param_id)
+            inner_cv_results.append(res)
+            stable_edges.append(edges)
 
         inner_cv_results = pd.concat(inner_cv_results)
         inner_cv_results = self._calculate_model_increments(cv_results=inner_cv_results, metrics=regression_metrics)
@@ -266,7 +264,8 @@ class CPMRegression:
 
         best_params_ids = agg_results['mean_absolute_error'].groupby(['network', 'model'])['mean'].idxmin()
         best_params = inner_cv_results.loc[(0, best_params_ids.loc[('both', 'full')][1], 'both', 'full'), 'params']
-        return best_params
+        stable_edges_best_param = stable_edges[best_params_ids.loc[('both', 'full')][1]]
+        return best_params, stable_edges_best_param
 
     def _calculate_final_cv_results(self, cv_results: pd.DataFrame, results_directory: str):
         """

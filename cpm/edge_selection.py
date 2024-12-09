@@ -161,9 +161,11 @@ class SelectKBest(BaseEdgeSelector):
 class UnivariateEdgeSelection(BaseEstimator):
     def __init__(self,
                  edge_statistic: Union[str, list] = 'pearson',
-                 edge_selection: list = None):
+                 edge_selection: list = None,
+                 t_test_filter: bool = True):
         self.edge_statistic = edge_statistic
         self.edge_selection = edge_selection
+        self.t_test_filter = t_test_filter
         self.param_grid = self._generate_config_grid()
 
     def _generate_config_grid(self):
@@ -178,19 +180,18 @@ class UnivariateEdgeSelection(BaseEstimator):
         return ParameterGrid(grid_elements)
 
     def fit_transform(self, X, y=None, covariates=None):
-        t_test_filter = False
-        if t_test_filter:
+        if self.t_test_filter:
             _, p_values = one_sample_t_test(X, 0)
             valid_edges = p_values < 0.05
         else:
             valid_edges = np.bool(np.ones(X.shape[1]))
 
-        #r_edges, p_edges = np.zeros(X.shape[1]), np.ones(X.shape[1])
-        #r_edges_masked, p_edges_masked = self.compute_edge_statistics(X=X[:, valid_edges], y=y, covariates=covariates)
-        #r_edges[valid_edges] = r_edges_masked
-        #p_edges[valid_edges] = p_edges_masked
+        r_edges, p_edges = np.zeros(X.shape[1]), np.ones(X.shape[1])
+        r_edges_masked, p_edges_masked = self.compute_edge_statistics(X=X[:, valid_edges], y=y, covariates=covariates)
+        r_edges[valid_edges] = r_edges_masked
+        p_edges[valid_edges] = p_edges_masked
 
-        r_edges, p_edges = self.compute_edge_statistics(X=X, y=y, covariates=covariates)
+        #r_edges, p_edges = self.compute_edge_statistics(X=X, y=y, covariates=covariates)
 
         edges = self.edge_selection.select(r=r_edges, p=p_edges)
         return edges
