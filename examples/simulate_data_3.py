@@ -1,7 +1,15 @@
+import os
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import KFold, ShuffleSplit, RepeatedKFold
 from sklearn.metrics import r2_score
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+from sklearn.model_selection import cross_val_score
+from cpm import CPMRegression
+from cpm.simulate_data import simulate_regression_data_2
+from cpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 
 def generate_scenario_data(scenario, n_samples=1000, n_features=10, n_informative=3, noise_level=0.1):
@@ -9,39 +17,58 @@ def generate_scenario_data(scenario, n_samples=1000, n_features=10, n_informativ
 
     # Generate feature matrix X
     X = np.random.normal(0, 1, (n_samples, n_features))
+    z = np.random.normal(0, 1, n_samples)
+    y = np.random.normal(0, 1, n_samples)
 
     # Generate ground truth coefficients for X's influence on z and y
-    z_coefficients = np.zeros(n_features)
-    y_coefficients = np.zeros(n_features)
+    z_coefficients = np.empty(n_features)
+    y_coefficients = np.empty(n_features)
 
-    if scenario == 1:
-        # Scenario 1: y and z are influenced by X independently
-        z_coefficients[:n_informative] = np.linspace(1, 0.1, n_informative)  # Decreasing influence
-        y_coefficients[:n_informative] = np.linspace(1, 0.1, n_informative)  # Decreasing influence
-        z = np.dot(X, z_coefficients) + np.random.normal(0, noise_level, n_samples)
-        y = np.dot(X, y_coefficients) + np.random.normal(0, noise_level, n_samples)
+    z_coefficients[:n_informative]  = np.linspace(0.3, 0.1, n_informative)
+    y_coefficients[:n_informative]  = np.linspace(0.3, 0.1, n_informative)
 
-    elif scenario == 2:
-        # Scenario 2: z influences both X and y, inducing spurious association
-        z = np.random.normal(0, 1, n_samples)
-        z_coefficients[:n_informative] = np.linspace(1, 0.1, n_informative)
-        y = 2 * z + np.random.normal(0, noise_level, n_samples)
+    if scenario == "A1":
+        pass
+
+    elif scenario == "A2":
         for i in range(n_features):
-            X[:, i] = z * z_coefficients[i] + np.random.normal(0, noise_level, n_samples)
+            X[:, i] = X[:, i] + 0.8 * z * z_coefficients[i]
 
-    elif scenario == 3:
-        # Scenario 3: y is influenced by both X and z, with z partially mediating
-        z_coefficients[:n_informative] = np.linspace(1, 0.1, n_informative)
-        y_coefficients[:n_informative] = np.linspace(1, 0.1, n_informative)
-        z = np.dot(X, z_coefficients) + np.random.normal(0, noise_level, n_samples)
-        y = np.dot(X, y_coefficients) + 0.5 * z + np.random.normal(0, noise_level, n_samples)
-    elif scenario == 4:
-        y_coefficients[:n_informative] = np.linspace(1, 0.1, n_informative)
-        z = np.random.normal(0, noise_level, n_samples)
-        y = np.dot(X, y_coefficients) + np.random.normal(0, noise_level, n_samples)
+    elif scenario == "A3":
+        y = y + 0.8 * z
+
+    elif scenario == "A4":
+        for i in range(n_features):
+            X[:, i] = X[:, i] + 0.8 * z * z_coefficients[i]
+        y = y + 0.8 * z
+
+    elif scenario == "B1":
+        for i in range(n_features):
+            X[:, i] =  X[:, i] + y * y_coefficients[i]
+
+    elif scenario == "B2":
+        for i in range(n_features):
+            X[:, i] = X[:, i] + y * y_coefficients[i]
+        model = LinearRegression()
+        model.fit(y.reshape(-1, 1), X[:, 0])
+        resid = X[:, 0] - model.predict(y.reshape(-1, 1))
+        z = z + 2 * resid
+
+    elif scenario == "B3":
+        for i in range(n_features):
+            X[:, i] = X[:, i] + y * y_coefficients[i]
+        model = LinearRegression()
+        model.fit(X[:, 0].reshape(-1, 1), y)
+        resid = y - model.predict(X[:, 0].reshape(-1, 1))
+        z = z + 2 * resid
+
+    elif scenario == "B4":
+        z = 1.5 * z + y
+        for i in range(n_features):
+            X[:, i] = X[:, i] + 2 * y * y_coefficients[i] + 0.1 * z * z_coefficients[i]
 
     else:
-        raise ValueError("Invalid scenario. Choose 1, 2, or 3.")
+        raise NotImplementedError("Invalid scenario.")
 
     return X, y, z
 
@@ -69,28 +96,59 @@ def calculate_explained_variance_y_given_z(y, z):
     return r2
 
 
+def residualize_X(X, z):
+    """Regress out the effect of z from each column of X."""
+    z = z.reshape(-1, 1)  # Reshape z for regression
+    residualized_X = np.zeros_like(X)
+
+    for i in range(X.shape[1]):  # Iterate over columns (features)
+        model = LinearRegression()
+        model.fit(z, X[:, i])
+        # Compute residuals
+        residualized_X[:, i] = X[:, i] - model.predict(z)
+
+    return residualized_X
+
+
+def calculate_explained_variance_y_with_residualized_X(X, y, z):
+    """Calculate explained variance of y by X after removing z's influence on X."""
+    X_residualized = residualize_X(X, z)
+    return calculate_explained_variance(X_residualized, y)
+
+
+#edge_statistics = ['pearson', 'pearson_partial']
+edge_statistics = ['pearson']
+
 # Generate data for each scenario and calculate explained variances
-for scenario in range(1, 5):
-    X, y, z = generate_scenario_data(scenario, noise_level=1)
+for scenario in ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4"]:
+    for edge_statistic in edge_statistics:
+        print(f"Scenario {scenario}:")
+        X, y, z = generate_scenario_data(scenario, noise_level=1, n_samples=1000, n_features=105, n_informative=10)
+        folder = f"simulated_data/scenario_{scenario}"
+        os.makedirs(folder, exist_ok=True)
+        np.save(f"{folder}/X.npy", X)
+        np.save(f"{folder}/y.npy", y)
+        np.save(f"{folder}/covariates.npy", z)
 
-    # Calculate explained variances
-    explained_variance_X_y = calculate_explained_variance(X, y)
-    explained_variance_X_z = calculate_explained_variance(X, z)
-    explained_variance_y_given_z = calculate_explained_variance_y_given_z(y, z)
 
-    print(f"Scenario {scenario}:")
-    print(f"  Explained Variance (R^2) of X for y: {explained_variance_X_y:.2f}")
-    print(f"  Explained Variance (R^2) of X for z: {explained_variance_X_z:.2f}")
-    print(f"  Explained Variance (R^2) of y for z: {explained_variance_y_given_z:.2f}")
-    print(f"  Corr(X[:, 0], y): {np.corrcoef(X[:, 0], y)[0, 1]:.2f}")
-    print(f"  Corr(X[:, 0], z): {np.corrcoef(X[:, 0], z)[0, 1]:.2f}")
-    print(f"  Corr(y, z): {np.corrcoef(y, z)[0, 1]:.2f}")
+        univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=[edge_statistic],
+                                                            edge_selection=[PThreshold(threshold=[0.05],
+                                                                                       correction=['fdr_by'])])
+        cpm = CPMRegression(results_directory=os.path.join(folder, 'results', f'{edge_statistic}'),
+                            cv=RepeatedKFold(n_splits=10, n_repeats=5, random_state=42),
+                            edge_selection=univariate_edge_selection,
+                            # cv_edge_selection=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
+                            add_edge_filter=True,
+                            n_permutations=2)
+        cpm.estimate(X=X, y=y, covariates=z.reshape(-1, 1))
 
-    # Plot y vs z for visualization
-    plt.figure()
-    plt.scatter(y, z, alpha=0.5, label="y vs z")
-    plt.title(f"Scenario {scenario}: y vs z")
-    plt.xlabel("y")
-    plt.ylabel("z")
-    plt.legend()
-    plt.show()
+        # Calculate explained variances
+        explained_variance_X_y = calculate_explained_variance(X[:,0].reshape(-1, 1), y)
+        explained_variance_X_z = calculate_explained_variance(X[:,0].reshape(-1, 1), z)
+        explained_variance_y_given_z = calculate_explained_variance_y_given_z(y, z)
+        explained_variance_X_y_residualized = calculate_explained_variance_y_with_residualized_X(X[:,0].reshape(-1, 1), y, z)
+
+        print(f"  Explained Variance (R^2) in y given X: {explained_variance_X_y:.2f}")
+        print(f"  Explained Variance (R^2) in y given X controlling for z: {explained_variance_X_y_residualized:.2f}")
+        print(f"  Explained Variance (R^2) in z given X: {explained_variance_X_z:.2f}")
+        print(f"  Explained Variance (R^2) in y given z: {explained_variance_y_given_z:.2f}")
