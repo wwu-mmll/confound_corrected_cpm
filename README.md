@@ -26,7 +26,7 @@ Connectome-based predictive modeling (CPM) is a machine learning framework that 
 
 ## Documentation
 
-For detailed instructions on installation, usage, and advanced configurations, visit the [documentation website](https://your-documentation-url.com).
+For detailed instructions on installation, usage, and advanced configurations, visit the [documentation website](https://wwu-mmll.github.io/confound_corrected_cpm/).
 
 ---
 
@@ -35,7 +35,7 @@ For detailed instructions on installation, usage, and advanced configurations, v
 Install the package from GitHub:
 
 ```bash
-git clone https://github.com/mmll/cpm_python.git
+git clone https://github.com/mmll/confound_corrected_cpm.git
 cd cpm_python
 pip install .
 ```
