@@ -3,37 +3,72 @@
 [![Github Contributors](https://img.shields.io/github/contributors-anon/wwu-mmll/cpm_python?color=blue)](https://github.com/wwu-mmll/cpm_python/graphs/contributors)
 [![Github Commits](https://img.shields.io/github/commit-activity/y/wwu-mmll/cpm_python)](https://github.com/wwu-mmll/cpm_python/commits/main)
 
-# Connectome-Based Predictive Modelling (The right way)
-Python version of the Connectome-based Predictive Modelling framework
+# Confound-Corrected Connectome-Based Predictive Modelling in Python
+**Confound-Corrected Connectome-Based Predictive Modelling** is a Python package for performing connectome-based predictive modeling (CPM). This toolbox is designed for researchers in neuroscience and psychiatry, providing robust methods for building predictive models based on structural or functional connectome data. It emphasizes replicability, interpretability, and flexibility, making it a valuable tool for analyzing brain connectivity and its relationship to behavior or clinical outcomes.
 
-## Basic info
-relevant paper: https://www.nature.com/articles/nprot.2016.178.pdf
+---
 
-## Notes
-Implement a pipeline similar to sklearn or PHOTONAI that contains the first edge filtering (one sample ttest),
-the edge statistic (pearson, spearman, partial) and the edge selection (mainly threshold).
-If these steps are implemented in a pipeline, it might be easier to optimize each individual step. For this, we need
-to implement a nested CV.
-If the edge statistic is a multivariate model (e.g. Lasso), then edge statistic and edge selection is one step. Maybe
-it might be could to merge these steps to one edge selection step and some methods also allow for a threshold parameter
-to be optimized.
+## What is Connectome-Based Predictive Modeling?
 
-### Hyperparameters
-- edge statistic and selection
-    - univariate
-        - correlation (pearson, spearman, semi-partial)
-        - mutual information
-        - simple p-value, FDR, FWE, FPR, k-best, percentile
-            - absolute p-threshold (p)
-            - corrected p-threshold: FDR, FWE, FPR
-            - relative (k-best, percentile)
-    - multivariate
-        - lasso (L1)
-        - tree-based
-        - recursive feature elimination
-    - use stability over inner CV folds (only those edges that are selected for within all inner CV folds)
-        - could apply for both multivariate and univariate
+Connectome-based predictive modeling (CPM) is a machine learning framework that leverages the brain's connectivity patterns to predict individual differences in behavior, cognition, or clinical status. By identifying key edges in the connectome, CPM creates models that link connectivity metrics with target variables (e.g., clinical scores). This approach is particularly suited for studying complex relationships in neuroimaging data and developing interpretable predictive models.
 
-- predictive model
-    - use covariates: yes/no
-    -
+---
+
+## Key Features
+
+- **Univariate Edge Selection**: Supports methods like `pearson`, `spearman`, and their partial correlation counterparts, with options for p-threshold optimization and FDR correction.
+- **Cross-Validation**: Implements nested cross-validation for robust model evaluation.
+- **Edge Stability**: Selects stable edges across folds to improve model reliability.
+- **Confound Adjustment**: Controls for covariates during edge selection and modeling.
+- **Permutation Testing**: Assesses the statistical significance of models using robust permutation-based methods.
+
+---
+
+## Documentation
+
+For detailed instructions on installation, usage, and advanced configurations, visit the [documentation website](https://your-documentation-url.com).
+
+---
+
+## Installation
+
+Install the package from GitHub:
+
+```bash
+git clone https://github.com/mmll/cpm_python.git
+cd cpm_python
+pip install .
+```
+
+## Quick Example
+Here's a quick overview of how to run a CPM analysis:
+
+```python
+from cpm.cpm_analysis import CPMRegression
+from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from sklearn.model_selection import KFold
+
+# Configure edge selection
+univariate_edge_selection = UnivariateEdgeSelection(
+    edge_statistic=["pearson"],
+    edge_selection=[PThreshold(threshold=[0.05], correction=["fdr_by"])]
+)
+
+# Create the CPMRegression object
+cpm = CPMRegression(
+    results_directory="results/",
+    cv=KFold(n_splits=10, shuffle=True, random_state=42),
+    edge_selection=univariate_edge_selection,
+    n_permutations=100
+)
+
+# Run the analysis
+X = ...  # Connectome data
+y = ...  # Target variable
+covariates = ...  # Covariates
+cpm.estimate(X, y, covariates)
+```
+
+## Contributing
+Contributions are welcome! If you have ideas, feedback, or feature requests, feel free to open an issue or submit a pull request on the GitHub repository.
+
