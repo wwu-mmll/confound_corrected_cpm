@@ -1,20 +1,19 @@
 # pyproject.toml
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
-name = "cpm_python"
+name = "confound_corrected_cpm"
 version = "0.1.0"
-description = ""
-authors = ["Nils Winter <nils.r.winter@uni-muenster.de>"]
+description = "Confound-corrected Connectome-based Predictive Modeling Python Package"
+authors = [
+    "Nils Winter <nils.r.winter@uni-muenster.de>",
+    "MMLL <nils.r.winter@uni-muenster.de>"
+]
+license = "MIT"
 readme = "README.md"
-packages = [{ include = "cpm" }]
+requires-python = ">=3.11"
 
 [tool.poetry.dependencies]
 python = ">=3.11"
-bleach = "*"
-tinycss2 = "*"
 numpy = "*"
 pandas = "*"
 scikit-learn = "*"
@@ -24,3 +23,9 @@ nilearn = "*"
 typer = "*"
 pytest = "*"
 pytest-cov = "*"
+bleach = "*"
+tinycss2 = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
