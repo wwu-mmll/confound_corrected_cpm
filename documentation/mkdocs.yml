@@ -1,8 +1,8 @@
 # Project information
 site_name: Confound-Corrected CPM
-repo_name: 'cpm_python'
-repo_url: 'https://github.com/wwu-mmll/cpm_python'
-site_dir: '../docs'
+repo_name: 'confound_corrected_cpm'
+repo_url: 'https://github.com/wwu-mmll/confound_corrected_cpm'
+site_dir: 'site'
 edit_uri: 'edit/master/documentation/docs'
 
 # Theme configuration
