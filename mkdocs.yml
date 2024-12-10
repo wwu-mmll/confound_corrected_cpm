@@ -5,7 +5,7 @@ repo_url: 'https://github.com/wwu-mmll/confound_corrected_cpm'
 site_url: 'https://wwu-mmll.github.io/confound_corrected_cpm/'
 docs_dir: 'documentation/docs'
 #site_dir: 'site'
-#edit_uri: 'edit/master/documentation/docs'
+edit_uri: 'edit/master/documentation/docs'
 
 # Theme configuration
 theme:
@@ -34,7 +34,7 @@ markdown_extensions:
   - pymdownx.snippets:
       base_path: "../"
   - pymdownx.superfences
-  #- codehilite
+  - codehilite
   - admonition
   - pymdownx.details
 
@@ -51,6 +51,7 @@ nav:
     - Edge Selection: api/edge_selection.md
     - Models: api/models.md
     - Fold: api/fold.md
+
 extra_css:
   - stylesheets/extra.css
 
