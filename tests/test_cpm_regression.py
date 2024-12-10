@@ -22,7 +22,6 @@ class TestMissingValues(unittest.TestCase):
         cpm = CPMRegression(results_directory='./tmp',
                             cv=KFold(n_splits=10, shuffle=True, random_state=42),
                             edge_selection=univariate_edge_selection,
-                            add_edge_filter=True,
                             n_permutations=2)
         self.X, self.y, self.covariates = simulate_regression_data_2(n_samples=100, n_features=45)
 

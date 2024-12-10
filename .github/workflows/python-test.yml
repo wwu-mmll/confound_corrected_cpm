@@ -1,12 +1,10 @@
-name: Run Tests and Build Package
+name: Run Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
-  schedule:
-    - cron: '0 10 5 * *' # Optional scheduled runs
+    branches: [main, develop]
 
 jobs:
   test:
@@ -31,10 +29,5 @@ jobs:
 
       - name: Run Tests with Coverage
         run: |
-          poetry run pytest ./tests --cov=./cpm_python --cov-report=xml --cov-report=term
-
-      - name: Upload Coverage Report to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: true # Fails the CI if uploading fails
+          export PYTHONPATH=$(pwd)
+          poetry run pytest ./tests --cov=./cpm --cov-report=xml --cov-report=term
