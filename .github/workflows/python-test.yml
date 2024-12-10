@@ -1,7 +1,4 @@
-# This workflow will install Python dependencies, run tests, and build distribution artifacts with Poetry
-# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
-
-name: CPM test and build
+name: Run Tests and Build Package
 
 on:
   push:
@@ -9,59 +6,72 @@ on:
   pull_request:
     branches: [ main, develop ]
   schedule:
-    - cron: '0 10 5 * *'
+    - cron: '0 10 5 * *' # Optional scheduled runs
 
 jobs:
-  coverage:
-    name: Run CPM tests and publish test coverage
+  test:
+    name: Run Tests with Coverage
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v3
-      name: Checkout code
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11
-    - name: Install Poetry
-      run: |
-        curl -sSL https://install.python-poetry.org | python3 -
-    - name: Configure Poetry
-      run: |
-        poetry config virtualenvs.create false
-    - name: Install dependencies
-      run: |
-        pip install --upgrade poetry
-        poetry install --verbose
-    - name: Test with pytest
-      run: |
-        export PYTHONPATH=$(pwd)
-        poetry run pytest ./tests --cov=./cpm_python --full-trace
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+
+      - name: Install Dependencies
+        run: |
+          poetry install
+
+      - name: Run Tests with Coverage
+        run: |
+          poetry run pytest ./tests --cov=./cpm_python --cov-report=xml --cov-report=term
+
+      - name: Upload Coverage Report to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: true # Fails the CI if uploading fails
 
   build:
-    name: Build distribution
+    name: Build and Publish Distribution
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-    - uses: actions/checkout@v3
-      name: Checkout code
-      with:
-        fetch-depth: 0
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11
-    - name: Install Poetry
-      run: |
-        curl -sSL https://install.python-poetry.org | python3 -
-    - name: Configure Poetry
-      run: |
-        poetry config virtualenvs.create false  # Use the system environment
-    - name: Install dependencies
-      run: |
-        poetry install
-    - name: Build distribution
-      run: |
-        poetry build --no-interaction
-    - name: List built artifacts
-      run: ls -al dist/
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Full depth for versioning or changelog needs
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+
+      - name: Install Dependencies
+        run: |
+          poetry install
+
+      - name: Build Distribution
+        run: |
+          poetry build
+
+      - name: List Artifacts
+        run: |
+          ls -al dist/
+
+      - name: Upload Artifacts (optional)
+        uses: actions/upload-artifact@v3
+        with:
+          name: package-dist
+          path: dist/
