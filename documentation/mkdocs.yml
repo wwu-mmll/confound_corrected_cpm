@@ -2,6 +2,7 @@
 site_name: Confound-Corrected CPM
 repo_name: 'confound_corrected_cpm'
 repo_url: 'https://github.com/wwu-mmll/confound_corrected_cpm'
+site_url: 'https://wwu-mmll.github.io/confound_corrected_cpm/'
 #site_dir: 'site'
 #edit_uri: 'edit/master/documentation/docs'
 
