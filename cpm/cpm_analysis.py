@@ -41,13 +41,22 @@ class CPMRegression:
         """
         Initialize the CPMRegression object.
 
-        :param results_directory: Directory to save results.
-        :param cv: Outer cross-validation strategy.
-        :param inner_cv: Inner cross-validation strategy for edge selection.
-        :param edge_selection: Method for edge selection.
-        :param impute_missing_values: Whether to impute missing values.
-        :param n_permutations: Number of permutations to run for permutation testing.
-        :param atlas_labels: CSV file containing atlas and regions labels.
+        Parameters
+        ----------
+        results_directory: str
+            Directory to save results.
+        cv: Union[BaseCrossValidator, BaseShuffleSplit]
+            Outer cross-validation strategy.
+        inner_cv: Union[BaseCrossValidator, BaseShuffleSplit]
+            Inner cross-validation strategy for edge selection.
+        edge_selection:  UnivariateEdgeSelection
+            Method for edge selection.
+        impute_missing_values: bool
+            Whether to impute missing values.
+        n_permutations: int
+            Number of permutations to run for permutation testing.
+        atlas_labels: str
+            CSV file containing atlas and regions labels.
         """
         self.results_directory = results_directory
         self.cv = cv
@@ -94,9 +103,11 @@ class CPMRegression:
 
     def save_configuration(self, config_filename: str):
         """
-        Save the current configuration to a file.
+        Saves the current configuration settings to a file in Pickle format. All attributes related to the configuration of the object
+        are serialized and stored in a file with the same base name as the provided filename, but with a .pkl extension.
 
-        :param config_filename: Path to the configuration file.
+        :param config_filename: The base name of the file where the configuration will be saved.
+        :return: None
         """
         config_path = os.path.splitext(config_filename)[0] + '.pkl'
         config_data = {
@@ -138,11 +149,14 @@ class CPMRegression:
                  y: Union[pd.Series, pd.DataFrame, np.ndarray],
                  covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
         """
-        Estimate the CPM Regression models and run permutation tests.
+        Estimates a model using the provided data and conducts permutation testing. This method first fits the model to the actual data and subsequently performs estimation on permuted data for a specified number of permutations. Finally, it calculates permutation results.
 
-        :param X: Features (predictors).
-        :param y: Labels (target variable).
-        :param covariates: Covariates to control for.
+        Parameters
+        ----------
+        X: Feature data used for the model. Can be a pandas DataFrame or a NumPy array.
+        y: Target variable used in the estimation process. Can be a pandas Series, DataFrame, or a NumPy array.
+        covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
+
         """
         self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
 

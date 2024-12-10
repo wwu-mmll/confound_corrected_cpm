@@ -1,5 +1,5 @@
 # Project information
-site_name: Connectome-based Predictive Modeling in Python
+site_name: Confound-Corrected CPM
 repo_name: 'cpm_python'
 repo_url: 'https://github.com/wwu-mmll/cpm_python'
 site_dir: '../docs'
@@ -8,20 +8,18 @@ edit_uri: 'edit/master/documentation/docs'
 # Theme configuration
 theme:
   name: 'material'
+  language: en
   palette:
-    primary: 'teal'
-    accent: 'teal'
-  font: false
-  logo: assets/img/photonai-01.png
-  favicon: assets/img/photonai-02.png
+    primary: custom
+    accent: custom
+  font:
+    text: Figtree
+  logo: assets/img/CCCPM.png
+  favicon: assets/img/CCCPM.png
   features:
-     - toc.integrate
-
-# Latex
-extra_javascript:
-  - assets/javascript/mathjax.js
-  - https://polyfill.io/v3/polyfill.min.js?features=es6
-  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+     - toc.follow
+     - navigation.tabs
+     - navigation.sections
 
 # extensions
 markdown_extensions:
@@ -29,14 +27,12 @@ markdown_extensions:
         generic: true
   - pymdownx.highlight:
       auto_title: true
+      use_pygments: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
-  - codehilite
+  - pymdownx.snippets:
+      base_path: "../"
+  - pymdownx.superfences
+  #- codehilite
   - admonition
   - pymdownx.details
 
@@ -45,18 +41,24 @@ nav:
 - Home: 'index.md'
 - Installation: 'installation.md'
 - Getting Started: 'getting_started.md'
-
+- Examples:
+    - Simulated Data: 'examples/simulated_data.md'
+    - HCP: 'examples/human_connectome_project.md'
+- API:
+    - CPM Regression: api/cpm_regression.md
+    - Edge Selection: api/edge_selection.md
+    - Models: api/models.md
+    - Fold: api/fold.md
 extra_css:
-  - assets/stylesheets/material.css
-  - assets/stylesheets/fonts.css
+  - stylesheets/extra.css
 
 plugins:
+  - search
   - mkdocstrings:
       handlers:
         python:
-          selection:
+          options:
             docstring_style: numpy
-          rendering:
-            show_source: false
-  - mkdocs-jupyter:
-      execute: True
+            show_source: False
+          path:
+            [cpm]
