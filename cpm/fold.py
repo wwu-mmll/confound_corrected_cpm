@@ -5,7 +5,7 @@ from cpm.models import LinearCPMModel, NetworkDict, ModelDict
 from cpm.utils import score_regression_models, train_test_split
 
 
-def compute_inner_fold(X, y, covariates, cv, edge_selection, param, param_id):
+def compute_inner_folds(X, y, covariates, cv, edge_selection, param, param_id):
     cv_results = pd.DataFrame()
     n_folds = cv.get_n_splits()
     n_features = X.shape[1]

@@ -38,7 +38,7 @@ def compute_correlation_and_pvalues(x, Y, rank=False):
 
     if rank:
         x = rankdata(x)
-        Y = np.apply_along_axis(rankdata, axis=0, arr=Y)
+        Y = rankdata(Y, axis=0)
 
     # Mean-centering
     x_centered = x - np.mean(x)
@@ -75,8 +75,11 @@ def get_residuals(X, Z):
 def semi_partial_correlation(x, Y, Z, rank=False):
     if rank:
         x = rankdata(x)
-        Y = np.apply_along_axis(rankdata, 0, Y)
-        Z = np.apply_along_axis(rankdata, 0, Z)
+        Y = rankdata(Y, axis=0)
+        Z = rankdata(Z, axis=0)
+
+        #Y = np.apply_along_axis(rankdata, 0, Y)
+        #Z = np.apply_along_axis(rankdata, 0, Z)
 
     # Calculate residuals for x and each column in Y
     x_residuals = get_residuals(x.reshape(-1, 1), Z).ravel()
@@ -158,57 +161,64 @@ class SelectKBest(BaseEdgeSelector):
         self.k = k
 
 
-class UnivariateEdgeSelection(BaseEstimator):
-    def __init__(self,
-                 edge_statistic: Union[str, list] = 'pearson',
-                 edge_selection: list = None,
-                 t_test_filter: bool = True):
+class EdgeStatistic(BaseEstimator):
+    def __init__(self, edge_statistic: str = 'spearman', t_test_filter: bool = False):
         self.edge_statistic = edge_statistic
-        self.edge_selection = edge_selection
         self.t_test_filter = t_test_filter
-        self.param_grid = self._generate_config_grid()
 
-    def _generate_config_grid(self):
-        grid_elements = []
-        for selector in self.edge_selection:
-            params = {}
-            params['edge_statistic'] = self.edge_statistic
-            params['edge_selection'] = [selector]
-            for key, value in selector.get_params().items():
-                params['edge_selection__' + key] = value
-            grid_elements.append(params)
-        return ParameterGrid(grid_elements)
-
-    def fit_transform(self, X, y=None, covariates=None):
+    def fit_transform(self,
+                      X: Union[pd.DataFrame, np.ndarray],
+                      y: Union[pd.Series, pd.DataFrame, np.ndarray],
+                      covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
+        r_edges, p_edges = np.zeros(X.shape[1]), np.ones(X.shape[1])
         if self.t_test_filter:
             _, p_values = one_sample_t_test(X, 0)
             valid_edges = p_values < 0.05
         else:
             valid_edges = np.bool(np.ones(X.shape[1]))
 
-        r_edges, p_edges = np.zeros(X.shape[1]), np.ones(X.shape[1])
-        r_edges_masked, p_edges_masked = self.compute_edge_statistics(X=X[:, valid_edges], y=y, covariates=covariates)
-        r_edges[valid_edges] = r_edges_masked
-        p_edges[valid_edges] = p_edges_masked
-
-        #r_edges, p_edges = self.compute_edge_statistics(X=X, y=y, covariates=covariates)
-
-        edges = self.edge_selection.select(r=r_edges, p=p_edges)
-        return edges
-
-    def compute_edge_statistics(self,
-                                X: Union[pd.DataFrame, np.ndarray],
-                                y: Union[pd.Series, pd.DataFrame, np.ndarray],
-                                covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
         if self.edge_statistic == 'pearson':
-            r_edges, p_edges = pearson_correlation_with_pvalues(y, X)
+            r_edges_masked, p_edges_masked = pearson_correlation_with_pvalues(y, X[:, valid_edges])
         elif self.edge_statistic == 'spearman':
-            r_edges, p_edges = spearman_correlation_with_pvalues(y, X)
+            r_edges_masked, p_edges_masked = spearman_correlation_with_pvalues(y, X[:, valid_edges])
         elif self.edge_statistic == 'pearson_partial':
-            r_edges, p_edges = semi_partial_correlation_pearson(y, X, covariates)
+            r_edges_masked, p_edges_masked = semi_partial_correlation_pearson(y, X[:, valid_edges], covariates)
         elif self.edge_statistic == 'spearman_partial':
-            r_edges, p_edges = semi_partial_correlation_spearman(y, X, covariates)
+            r_edges_masked, p_edges_masked = semi_partial_correlation_spearman(y, X[:, valid_edges], covariates)
         else:
             raise NotImplemented("Unsupported edge selection method")
-
+        r_edges[valid_edges] = r_edges_masked
+        p_edges[valid_edges] = p_edges_masked
         return r_edges, p_edges
+
+
+class UnivariateEdgeSelection(BaseEstimator):
+    def __init__(self,
+                 edge_statistic: str = 'spearman',
+                 t_test_filter: bool = False,
+                 edge_selection: list = None,
+                ):
+        self.r_edges = None
+        self.p_edges = None
+        self.t_test_filter = t_test_filter
+        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic, t_test_filter=t_test_filter)
+        self.edge_selection = edge_selection
+        self.param_grid = self._generate_config_grid()
+
+    def _generate_config_grid(self):
+        grid_elements = []
+        for selector in self.edge_selection:
+            params = {}
+            params['edge_selection'] = [selector]
+            for key, value in selector.get_params().items():
+                params['edge_selection__' + key] = value
+            grid_elements.append(params)
+        return ParameterGrid(grid_elements)
+
+    def fit(self, X, y=None, covariates=None):
+        self.r_edges, self.p_edges = self.edge_statistic.fit_transform(X=X, y=y, covariates=covariates)
+        return self.r_edges, self.p_edges
+
+    def return_selected_edges(self):
+        selected_edges = self.edge_selection.select(r=self.r_edges, p=self.p_edges)
+        return selected_edges

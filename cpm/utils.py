@@ -32,21 +32,49 @@ def score_regression(y_true, y_pred):
     return scores
 
 
-def apply_metrics(y_true, y_pred):
+def apply_metrics(y_true, y_pred, primary_metric_only: bool = False):
     result = {}
+    result['spearman_score'] = regression_metrics_functions['spearman_score'](y_true, y_pred)
     for metric_name, metric_func in regression_metrics_functions.items():
-        result[metric_name] = metric_func(y_true, y_pred)
+        if metric_name == 'spearman_score':
+            pass
+        if not primary_metric_only:
+            result[metric_name] = regression_metrics_functions[metric_name](y_true, y_pred)
     return result
 
 
-def score_regression_models(y_true, y_pred):
+def score_regression_models(y_true, y_pred, primary_metric_only: bool = False):
     scores = {}
     for model in ['full', 'covariates', 'connectome', 'residuals']:
         scores[model] = {}
         for network in ['positive', 'negative', 'both']:
-            scores[model][network] = apply_metrics(y_true, y_pred[model][network])
+            scores[model][network] = apply_metrics(y_true, y_pred[model][network], primary_metric_only = primary_metric_only)
     return scores
 
+"""
+from joblib import Parallel, delayed
+
+
+def score_regression_models(y_true, y_pred, primary_metric_only: bool = False, n_jobs=-1):
+    def compute_score(model, network, primary_metric_only):
+        return (model, network, apply_metrics(y_true, y_pred[model][network], primary_metric_only))
+
+    # Generate all model-network combinations
+    tasks = [(model, network) for model in ['full', 'covariates', 'connectome', 'residuals']
+             for network in ['positive', 'negative', 'both']]
+
+    # Run tasks in parallel
+    results = Parallel(n_jobs=n_jobs)(delayed(compute_score)(model, network, primary_metric_only) for model, network in tasks)
+
+    # Reconstruct dictionary structure
+    scores = {model: {network: None for network in ['positive', 'negative', 'both']}
+              for model in ['full', 'covariates', 'connectome', 'residuals']}
+
+    for model, network, result in results:
+        scores[model][network] = result
+
+    return scores
+"""
 
 def train_test_split(train, test, X, y, covariates):
     return X[train], X[test], y[train], y[test], covariates[train], covariates[test]

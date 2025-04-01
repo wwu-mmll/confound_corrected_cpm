@@ -11,20 +11,9 @@ st.set_page_config(layout="wide")
 
 def main():
     if 'results_directory' not in st.session_state:
-        #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/example_simulated_data2/'
-        #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/hannah_sad/'
-        #st.session_state['results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/hannah_sad_pearson/'
-        #st.session_state['results_directory'] = '/spm-data/vault-data3/mmll/projects/cpm_macs_example/haushaltsnetto'
-        #st.session_state['results_directory'] = '/spm-data/vault-data3/mmll/projects/cpm_macs_example/haushaltsnetto_partial'
-        #st.session_state['results_directory'] = '/spm-data/vault-data3/mmll/projects/cpm_macs_example/haushaltsnetto_05_fdr'
-        #st.session_state[
-        #    'results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/simulated_data_no_no_link/'
-        #st.session_state[
-        #    'results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/macs_fsozu_partial/'
-        #st.session_state[
-        #    'results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/macs_age_partial/'
         st.session_state[
-            'results_directory'] = '/home/nwinter/PycharmProjects/cpm_python/examples/tmp/macs_IQ_partial/'
+            'results_directory'] = '/spm-data/vault-data3/mmll/projects/cpm_python/results_new/hcp_SSAGA_TB_Yrs_Smoked_spearman_partial_p=0.01'
+
 
     st.session_state['df'] = pd.read_csv(os.path.join(st.session_state.results_directory, 'cv_results.csv'))
     st.session_state['df_main'] = load_results_from_folder(st.session_state.results_directory, 'cv_results_mean_std.csv')

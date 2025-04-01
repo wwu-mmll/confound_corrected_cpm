@@ -9,6 +9,7 @@ from glob import glob
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
+from sklearn.impute import SimpleImputer
 
 from cpm.logging import setup_logging
 from cpm.models import LinearCPMModel
@@ -17,7 +18,7 @@ from cpm.utils import (
     score_regression_models, regression_metrics,
     train_test_split, vector_to_upper_triangular_matrix, check_data
 )
-from cpm.fold import compute_inner_fold
+from cpm.fold import compute_inner_folds
 from cpm.models import NetworkDict, ModelDict
 
 
@@ -101,49 +102,6 @@ class CPMRegression:
         if self.atlas_labels is not None:
             shutil.copy(self.atlas_labels, os.path.join(self.results_directory, 'atlas_labels.csv'))
 
-    def save_configuration(self, config_filename: str):
-        """
-        Saves the current configuration settings to a file in Pickle format. All attributes related to the configuration of the object
-        are serialized and stored in a file with the same base name as the provided filename, but with a .pkl extension.
-
-        :param config_filename: The base name of the file where the configuration will be saved.
-        :return: None
-        """
-        config_path = os.path.splitext(config_filename)[0] + '.pkl'
-        config_data = {
-            'cv': self.cv,
-            'inner_cv': self.inner_cv,
-            'edge_selection': self.edge_selection,
-            'select_stable_edges': self.select_stable_edges,
-            'stability_threshold': self.stability_threshold,
-            'impute_missing_values': self.impute_missing_values,
-            'n_permutations': self.n_permutations
-        }
-        with open(config_path, 'wb') as file:
-            pickle.dump(config_data, file)
-        self.logger.info(f"Configuration saved to {config_path}")
-
-    def load_configuration(self, results_directory: str, config_filename: str):
-        """
-        Load configuration from a file.
-
-        :param results_directory: Directory to set for results.
-        :param config_filename: Path to the configuration file.
-        """
-        with open(config_filename, 'rb') as file:
-            loaded_config = pickle.load(file)
-
-        self.results_directory = results_directory
-        self.cv = loaded_config['cv']
-        self.inner_cv = loaded_config['inner_cv']
-        self.edge_selection = loaded_config['edge_selection']
-        self.select_stable_edges = loaded_config['select_stable_edges']
-        self.stability_threshold = loaded_config['stability_threshold']
-        self.impute_missing_values = loaded_config['impute_missing_values']
-        self.n_permutations = loaded_config['n_permutations']
-        self.logger.info(f"Configuration loaded from {config_filename}")
-        self.logger.info(f"Results directory set to: {self.results_directory}")
-
     def estimate(self,
                  X: Union[pd.DataFrame, np.ndarray],
                  y: Union[pd.Series, pd.DataFrame, np.ndarray],
@@ -204,6 +162,16 @@ class CPMRegression:
                 self.logger.debug(f"Running fold {outer_fold + 1}/{self.cv.get_n_splits()}")
 
             X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
+            if self.impute_missing_values:
+                # Initialize imputers with chosen strategy (e.g., mean, median, most_frequent)
+                x_imputer = SimpleImputer(strategy='mean')
+                cov_imputer = SimpleImputer(strategy='mean')
+
+                # Fit on training data and transform both training and test data
+                X_train = x_imputer.fit_transform(X_train)
+                X_test = x_imputer.transform(X_test)
+                cov_train = cov_imputer.fit_transform(cov_train)
+                cov_test = cov_imputer.transform(cov_test)
 
             if self.inner_cv:
                 best_params, stability_edges = self._run_inner_folds(X_train, y_train, cov_train, outer_fold, perm_run)
@@ -223,8 +191,9 @@ class CPMRegression:
                          'negative': np.where(stability_edges['negative'] > self.stability_threshold)[0]}
             else:
                 self.edge_selection.set_params(**best_params)
-                edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train)
-
+                self.edge_selection.fit(X=X_train, y=y_train, covariates=cov_train)
+                edges = self.edge_selection.return_selected_edges()
+                
             cv_edges['positive'][outer_fold, edges['positive']] = 1
             cv_edges['negative'][outer_fold, edges['negative']] = 1
 
@@ -260,26 +229,84 @@ class CPMRegression:
         """
         fold_dir = os.path.join(self.results_directory, "folds", f'{fold}')
         os.makedirs(fold_dir, exist_ok=True)
-        inner_cv_results = []
-        stable_edges = []
-        for param_id, param in enumerate(self.edge_selection.param_grid):
-            res, edges = compute_inner_fold(X, y, covariates, self.inner_cv, self.edge_selection, param, param_id)
-            inner_cv_results.append(res)
-            stable_edges.append(edges)
 
-        inner_cv_results = pd.concat(inner_cv_results)
-        inner_cv_results = self._calculate_model_increments(cv_results=inner_cv_results, metrics=regression_metrics)
-        agg_results = inner_cv_results.groupby(['network', 'param_id', 'model'])[regression_metrics].agg(
+        # 1. split in folds
+        # 2. for train set, calculate one sample t test
+        # 3. calculate test statistics r and p
+        # 4. use one set of edge selection parameters and select edges
+        # 5. calculate linear model
+        # 6. calculate predictions and metrics
+
+        n_folds = self.inner_cv.get_n_splits()
+        n_features = X.shape[1]
+        n_params = len(self.edge_selection.param_grid)
+        cv_results = pd.DataFrame()
+        cv_edges = {'positive': np.zeros((n_folds, n_features, n_params)),
+                    'negative': np.zeros((n_folds, n_features, n_params))}
+
+        for fold_id, (nested_train, nested_test) in enumerate(self.inner_cv.split(X, y)):
+            (X_train, X_test, y_train,
+             y_test, cov_train, cov_test) = train_test_split(train=nested_train, test=nested_test,
+                                                             X=X, y=y, covariates=covariates)
+
+            # calculate test statistics for all edges (r, p)
+            self.edge_selection.fit(X_train, y_train, cov_train)
+
+            # now loop through all edge selection configurations (e.g. different p-levels)
+            for param_id, param in enumerate(self.edge_selection.param_grid):
+                self.edge_selection.set_params(**param)
+                selected_edges = self.edge_selection.return_selected_edges()
+                model = LinearCPMModel(edges=selected_edges).fit(X_train, y_train, cov_train)
+                y_pred = model.predict(X_test, cov_test)
+                metrics = score_regression_models(y_true=y_test, y_pred=y_pred, primary_metric_only=True)
+                results_fold = self._collect_results(fold_id=fold_id, param_id=param_id, param=param, metrics=metrics)
+
+                cv_results = pd.concat([cv_results, pd.DataFrame(results_fold)], ignore_index=True)
+
+                cv_edges['positive'][fold_id, selected_edges['positive'], param_id] = 1
+                cv_edges['negative'][fold_id, selected_edges['negative'], param_id] = 1
+
+        cv_results.set_index(['fold', 'param_id', 'network', 'model'], inplace=True)
+        cv_results.sort_index(inplace=True)
+
+        stability_edges = {'positive': np.sum(cv_edges['positive'], axis=0) / cv_edges['positive'].shape[0],
+                           'negative': np.sum(cv_edges['negative'], axis=0) / cv_edges['negative'].shape[0]}
+
+        # no changes required from this point onwards
+        # calculate model increments
+        #cv_results = self._calculate_model_increments(cv_results=cv_results, metrics=regression_metrics)
+        cv_results = self._calculate_model_increments(cv_results=cv_results, metrics=['spearman_score'])
+
+        # aggregate metrics across folds so that we can find the best model later
+        #agg_results = cv_results.groupby(['network', 'param_id', 'model'])[regression_metrics].agg(
+        #    ['mean', 'std'])
+        agg_results = cv_results.groupby(['network', 'param_id', 'model'])[['spearman_score']].agg(
             ['mean', 'std'])
-
+        # save inner cv results to csv in case this is not a permutation run
         if not perm_run:
-            inner_cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
+            cv_results.to_csv(os.path.join(fold_dir, 'inner_cv_results.csv'))
             agg_results.to_csv(os.path.join(fold_dir, 'inner_cv_results_mean_std.csv'))
 
-        best_params_ids = agg_results['mean_absolute_error'].groupby(['network', 'model'])['mean'].idxmin()
-        best_params = inner_cv_results.loc[(0, best_params_ids.loc[('both', 'full')][1], 'both', 'full'), 'params']
-        stable_edges_best_param = stable_edges[best_params_ids.loc[('both', 'full')][1]]
+        # find the best hyperparameter configuration (best edge selection)
+        best_params_ids = agg_results['spearman_score'].groupby(['network', 'model'])['mean'].idxmax()
+        best_params = cv_results.loc[(0, best_params_ids.loc[('both', 'connectome')][1], 'both', 'connectome'), 'params']
+        stable_edges_best_param = {'positive': stability_edges['positive'][:, best_params_ids.loc[('both', 'connectome')][1]],
+                        'negative': stability_edges['negative'][:, best_params_ids.loc[('both', 'connectome')][1]]}
         return best_params, stable_edges_best_param
+
+    @staticmethod
+    def _collect_results(fold_id, param_id, param, metrics):
+        df = pd.DataFrame()
+        for model_type in ModelDict().keys():
+            for network in NetworkDict().keys():
+                results_dict = metrics[model_type][network]
+                results_dict['model'] = model_type
+                results_dict['network'] = network
+                results_dict['fold'] = fold_id
+                results_dict['param_id'] = param_id
+                results_dict['params'] = [param]
+                df = pd.concat([df, pd.DataFrame(results_dict, index=[0])], ignore_index=True)
+        return df
 
     def _calculate_final_cv_results(self, cv_results: pd.DataFrame, results_directory: str):
         """
