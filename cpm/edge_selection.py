@@ -215,9 +215,9 @@ class UnivariateEdgeSelection(BaseEstimator):
             grid_elements.append(params)
         return ParameterGrid(grid_elements)
 
-    def fit(self, X, y=None, covariates=None):
+    def fit_transform(self, X, y=None, covariates=None):
         self.r_edges, self.p_edges = self.edge_statistic.fit_transform(X=X, y=y, covariates=covariates)
-        return self.r_edges, self.p_edges
+        return self
 
     def return_selected_edges(self):
         selected_edges = self.edge_selection.select(r=self.r_edges, p=self.p_edges)

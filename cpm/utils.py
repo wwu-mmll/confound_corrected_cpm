@@ -1,9 +1,10 @@
 import numpy as np
 
-from sklearn.metrics import (mean_squared_error, mean_absolute_error, explained_variance_score)
 from sklearn.utils import check_X_y
-from scipy.stats import pearsonr, spearmanr
+from sklearn.impute import SimpleImputer
+
 from scipy.stats import ConstantInputWarning, NearConstantInputWarning
+
 import matplotlib.pyplot as plt
 import warnings
 
@@ -14,67 +15,6 @@ logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", category=ConstantInputWarning)
 warnings.filterwarnings("ignore", category=NearConstantInputWarning)
-
-regression_metrics_functions = {
-    'mean_squared_error': mean_squared_error,
-    'mean_absolute_error': mean_absolute_error,
-    'explained_variance_score': explained_variance_score,
-    'pearson_score': lambda y_true, y_pred: pearsonr(y_true, y_pred)[0],
-    'spearman_score': lambda y_true, y_pred: spearmanr(y_true, y_pred)[0]}
-
-regression_metrics = list(regression_metrics_functions.keys())
-
-
-def score_regression(y_true, y_pred):
-    scores = {}
-    for metric_name, metric_func in regression_metrics_functions.items():
-        scores[metric_name] = metric_func(y_true, y_pred)
-    return scores
-
-
-def apply_metrics(y_true, y_pred, primary_metric_only: bool = False):
-    result = {}
-    result['spearman_score'] = regression_metrics_functions['spearman_score'](y_true, y_pred)
-    for metric_name, metric_func in regression_metrics_functions.items():
-        if metric_name == 'spearman_score':
-            pass
-        if not primary_metric_only:
-            result[metric_name] = regression_metrics_functions[metric_name](y_true, y_pred)
-    return result
-
-
-def score_regression_models(y_true, y_pred, primary_metric_only: bool = False):
-    scores = {}
-    for model in ['full', 'covariates', 'connectome', 'residuals']:
-        scores[model] = {}
-        for network in ['positive', 'negative', 'both']:
-            scores[model][network] = apply_metrics(y_true, y_pred[model][network], primary_metric_only = primary_metric_only)
-    return scores
-
-"""
-from joblib import Parallel, delayed
-
-
-def score_regression_models(y_true, y_pred, primary_metric_only: bool = False, n_jobs=-1):
-    def compute_score(model, network, primary_metric_only):
-        return (model, network, apply_metrics(y_true, y_pred[model][network], primary_metric_only))
-
-    # Generate all model-network combinations
-    tasks = [(model, network) for model in ['full', 'covariates', 'connectome', 'residuals']
-             for network in ['positive', 'negative', 'both']]
-
-    # Run tasks in parallel
-    results = Parallel(n_jobs=n_jobs)(delayed(compute_score)(model, network, primary_metric_only) for model, network in tasks)
-
-    # Reconstruct dictionary structure
-    scores = {model: {network: None for network in ['positive', 'negative', 'both']}
-              for model in ['full', 'covariates', 'connectome', 'residuals']}
-
-    for model, network, result in results:
-        scores[model][network] = result
-
-    return scores
-"""
 
 def train_test_split(train, test, X, y, covariates):
     return X[train], X[test], y[train], y[test], covariates[train], covariates[test]
@@ -159,3 +99,19 @@ def check_data(X, y, covariates, impute_missings: bool = False):
             logger.info("Your input contains NaN values. Fix NaNs or use impute_missing_values=True.")
             raise e
     return X, y, covariates
+
+def impute_missing_values(X_train, X_test, cov_train, cov_test):
+    # Initialize imputers with chosen strategy (e.g., mean, median, most_frequent)
+    x_imputer = SimpleImputer(strategy='mean')
+    cov_imputer = SimpleImputer(strategy='mean')
+
+    # Fit on training data and transform both training and test data
+    X_train = x_imputer.fit_transform(X_train)
+    X_test = x_imputer.transform(X_test)
+    cov_train = cov_imputer.fit_transform(cov_train)
+    cov_test = cov_imputer.transform(cov_test)
+    return X_train, X_test, cov_train, cov_test
+
+def select_stable_edges(stability_edges, stability_threshold):
+    return {'positive': np.where(stability_edges['positive'] > stability_threshold)[0],
+            'negative': np.where(stability_edges['negative'] > stability_threshold)[0]}

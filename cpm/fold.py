@@ -1,46 +1,47 @@
-import numpy as np
-import pandas as pd
+from cpm.models import LinearCPMModel
+from cpm.utils import train_test_split
+from cpm.scoring import score_regression_models
+from cpm.results_manager import ResultsManager
+from cpm.edge_selection import BaseEdgeSelector
 
-from cpm.models import LinearCPMModel, NetworkDict, ModelDict
-from cpm.utils import score_regression_models, train_test_split
 
+def run_inner_folds(X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector, results_directory,
+                    perm_run):
+    """
+    Run inner cross-validation over all folds and hyperparameter configurations.
 
-def compute_inner_folds(X, y, covariates, cv, edge_selection, param, param_id):
-    cv_results = pd.DataFrame()
-    n_folds = cv.get_n_splits()
+    Returns
+    -------
+    cv_results : DataFrame
+        Aggregated results from all inner folds.
+    stability_edges : dict
+        Dictionary with 'positive' and 'negative' keys mapping to arrays of edge stability scores.
+    """
+    param_grid = edge_selection.param_grid
     n_features = X.shape[1]
-    cv_edges = {'positive': np.zeros((n_folds, n_features)), 'negative': np.zeros((n_folds, n_features))}
-    edge_selection.set_params(**param)
-    for fold_id, (nested_train, nested_test) in enumerate(cv.split(X, y)):
-        (X_train, X_test, y_train,
-         y_test, cov_train, cov_test) = train_test_split(nested_train, nested_test, X, y, covariates)
+    n_params = len(param_grid)
+    n_folds = inner_cv.get_n_splits()
 
-        res, edges = compute_fold(X_train, X_test, y_train, y_test, cov_train, cov_test, edge_selection, param, param_id, fold_id)
-        cv_results = pd.concat([cv_results, pd.DataFrame(res)], ignore_index=True)
-        cv_edges['positive'][fold_id, edges['positive']] = 1
-        cv_edges['negative'][fold_id, edges['negative']] = 1
-    cv_results.set_index(['fold', 'param_id', 'network', 'model'], inplace=True)
-    cv_results.sort_index(inplace=True)
+    results_manager = ResultsManager(output_dir=results_directory, perm_run=perm_run,
+                                     n_folds=n_folds, n_features=n_features, n_params=n_params)
 
-    stability_edges = {'positive': np.sum(cv_edges['positive'], axis=0) / cv_edges['positive'].shape[0],
-                       'negative': np.sum(cv_edges['negative'], axis=0) / cv_edges['negative'].shape[0]}
+    for fold_id, (train, test) in enumerate(inner_cv.split(X, y)):
+        # split according to single fold
+        X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 
-    return cv_results, stability_edges
+        for param_id, config in enumerate(param_grid):
+            edge_selection.set_params(**config)
+            selected_edges = edge_selection.fit_transform(X_train, y_train, cov_train).return_selected_edges()
+            y_pred = LinearCPMModel(edges=selected_edges).fit(X_train, y_train, cov_train).predict(X_test, cov_test)
+            metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
+            results_manager.store_edges(selected_edges, fold_id, param_id)
+            results_manager.store_metrics(metrics=metrics, params=config, fold=fold_id, param_id=param_id)
 
-def compute_fold(X_train, X_test, y_train, y_test, cov_train, cov_test, edge_selection, param, param_id, fold_id):
-    edges = edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train)
-    model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
-    y_pred = model.predict(X_test, cov_test)
-    metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
-    cv_results = pd.DataFrame()
-    for model_type in ModelDict().keys():
-        for network in NetworkDict().keys():
-            res = metrics[model_type][network]
-            res['model'] = model_type
-            res['network'] = network
-            res['fold'] = fold_id
-            res['param_id'] = param_id
-            res['params'] = [param]
-            cv_results = pd.concat([cv_results, pd.DataFrame(res, index=[0])], ignore_index=True)
-    return cv_results, edges
+    # once all outer folds are done, calculate final results and edge stability
+    results_manager.aggregate_inner_folds()
+
+    best_params, best_param_id = results_manager.find_best_params()
+    stability_edges = results_manager.calculate_edge_stability(write=False, best_param_id=best_param_id)
+
+    return best_params, stability_edges

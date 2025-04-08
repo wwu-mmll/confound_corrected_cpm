@@ -26,7 +26,7 @@ for link in link_types:
                             #cv_edge_selection=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
                             add_edge_filter=True,
                             n_permutations=2)
-        cpm.estimate(X=X, y=y, covariates=covariates)
+        cpm.run(X=X, y=y, covariates=covariates)
 
         #cpm._calculate_permutation_results('./tmp/example_simulated_data2')
 

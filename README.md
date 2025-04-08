@@ -66,7 +66,7 @@ cpm = CPMRegression(
 X = ...  # Connectome data
 y = ...  # Target variable
 covariates = ...  # Covariates
-cpm.estimate(X, y, covariates)
+cpm.run(X, y, covariates)
 ```
 
 ## Contributing

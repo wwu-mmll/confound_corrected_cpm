@@ -140,7 +140,7 @@ for scenario in ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4"]:
                             # cv_edge_selection=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
                             add_edge_filter=True,
                             n_permutations=2)
-        cpm.estimate(X=X, y=y, covariates=z.reshape(-1, 1))
+        cpm.run(X=X, y=y, covariates=z.reshape(-1, 1))
 
         # Calculate explained variances
         explained_variance_X_y = calculate_explained_variance(X[:,0].reshape(-1, 1), y)

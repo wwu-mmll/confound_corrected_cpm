@@ -98,7 +98,7 @@ X = ...  # Load your connectome data (numpy array or pandas DataFrame)
 y = ...  # Load your target variable (numpy array or pandas Series)
 covariates = ...  # Load your covariates (numpy array or pandas DataFrame)
 
-cpm.estimate(X=X, y=y, covariates=covariates)
+cpm.run(X=X, y=y, covariates=covariates)
 ```
 
 This will:
