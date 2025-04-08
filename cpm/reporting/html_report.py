@@ -45,8 +45,9 @@ def generate_info_page():
 def generate_main_results_page(df, df_main):
     table = ar.HTML(style_apa(df_main).to_html())
     plot_name, fig = bar_plot(df, 'pearson_score', '')
+    plot_block = ar.Media(file=plot_name, name="Image1", caption="Arakawa in action!")
     return ar.Page(title='Results', blocks=[table,
-                                            ar.Plot(fig)])
+                                            plot_block])
 
 
 """
