@@ -6,112 +6,121 @@ from plots.plots import bar_plot
 from plots.plots import scatter_plot
 from plots.cpm_chord_plot import plot_netplotbrain
 from streamlit_utils import load_results_from_folder, load_data_from_folder, style_apa
+from reporting_utils import format_results_table, extract_log_block
 
 
-def generate_html_report(results_directory):
-    plots_dir = os.path.join(results_directory, "plots")
-    os.makedirs(plots_dir, exist_ok=True)
+class HTMLReporter:
+    def __init__(self, results_directory):
+        self.results_directory = results_directory
+        self.plots_dir = os.path.join(results_directory, "plots")
+        os.makedirs(self.plots_dir, exist_ok=True)
 
-    # Load data
-    df = pd.read_csv(os.path.join(results_directory, 'cv_results.csv'))
-    df_main = load_results_from_folder(results_directory, 'cv_results_mean_std.csv')
-    df_predictions = load_data_from_folder(results_directory, 'cv_predictions.csv')
-    df_p_values = load_data_from_folder(results_directory, 'p_values.csv')
-    df_permutations = load_data_from_folder(results_directory, 'permutation_results.csv')
+        # Load results
+        self.df = pd.read_csv(os.path.join(results_directory, 'cv_results.csv'))
+        self.df_mean = load_results_from_folder(results_directory, 'cv_results_mean_std.csv')
+        self.df_predictions = load_data_from_folder(results_directory, 'cv_predictions.csv')
+        self.df_p_values = load_data_from_folder(results_directory, 'p_values.csv')
+        self.df_permutations = load_data_from_folder(results_directory, 'permutation_results.csv')
 
-    info_page = generate_info_page()
-    main_results_page = generate_main_results_page(df, df_main)
-    report_blocks = [
-        info_page,
-        main_results_page
-    ]
-    report = ar.Report(blocks=report_blocks)
-    report.save('report.html', open=True)
-    return
+    def generate_html_report(self):
+
+        info_page = self.generate_info_page()
+        main_results_page = self.generate_main_results_page()
+        edges_page = self.generate_edges_page()
+        report_blocks = [
+            info_page,
+            main_results_page,
+            edges_page
+        ]
+
+        main_tabs = ar.Select(blocks=report_blocks)
+        main_page = ar.Group(ar.Media(file='../../documentation/docs/assets/img/CCCPM.png', name="Logo"),
+                        main_tabs,
+                        widths=[1, 10], columns=2)
+        report = ar.Report(blocks=[main_page])
+        report.save(os.path.join(self.results_directory, 'report.html'),
+                    open=False, formatting=ar.Formatting(width=ar.Width.FULL, accent_color="orange"))
+        return
+
+    def generate_info_page(self):
+        log_text = extract_log_block(os.path.join(self.results_directory, "cpm_log.txt"))
+        # --- Page: Info ---
+        info_text = ar.Group(ar.Text("""
+        # Confound-Corrected Connectome-Based Predictive Modeling
+        ## Python Toolbox
+        **Author**: Nils R. Winter  
+        **GitHub**: https://github.com/wwu-mmll/cpm_python
+        
+        **Confound-Corrected Connectome-Based Predictive Modelling** is a Python package for performing connectome-based 
+        predictive modeling (**CPM**). This toolbox is designed for researchers in neuroscience and psychiatry, providing 
+        robust methods for building **predictive models** based on structural or functional **connectome** data. It emphasizes 
+        replicability, interpretability, and flexibility, making it a valuable tool for analyzing brain connectivity 
+        and its relationship to behavior or clinical outcomes.
+        """),
+                             ar.Text("**Version: 0.1.0**"),
+                             widths=[7, 1], columns=2)
 
 
-def generate_info_page():
-    # --- Page: Info ---
-    info_text = ar.Text("""
-    # Confound-Corrected Connectome-Based Predictive Modeling
-    ## Python Toolbox  
-    **Software Version**: 0.1.0  
-    **Author**: Nils R. Winter  
-    **GitHub**: [cpm_python](https://github.com/wwu-mmll/cpm_python)
-    """)
-    return ar.Page(title='Toolbox Info', blocks=[info_text])
+        header = ar.Text("## Analysis Setup")
+        log_block = ar.Text(f"<pre>{log_text}</pre>")
+        log_group = ar.Group(ar.Blocks(blocks=[header, log_block]), ar.Text("Current Analysis"), columns=2, widths=[7, 1])
 
+        blocks = ar.Blocks(blocks=[info_text, log_group], label="Info")
+        return blocks
 
-def generate_main_results_page(df, df_main):
-    table = ar.HTML(style_apa(df_main).to_html())
-    plot_name, fig = bar_plot(df, 'pearson_score', '')
-    plot_block = ar.Media(file=plot_name, name="Image1", caption="Arakawa in action!")
-    return ar.Page(title='Results', blocks=[table,
-                                            plot_block])
+    def generate_main_results_page(self):
+        self.df_p_values.set_index(['network', 'model'], inplace=True)
+        self.df_p_values.columns = pd.MultiIndex.from_tuples([(col, 'p') for col in self.df_p_values.columns])
+        df_combined = pd.concat([self.df_mean, self.df_p_values], axis=1)
+        df_combined = df_combined.sort_index(axis=1, level=0)
+        desired_order = ["mean", "std", "p"]
+        df_combined = df_combined.loc[:,
+                      sorted(df_combined.columns, key=lambda x: (x[0], desired_order.index(x[1])))
+                      ]
 
+        # Style with smaller font
+        styled_df = format_results_table(df_combined)
+        table = ar.HTML(styled_df.to_html(escape=False), label='Predictive Performance')
 
-"""
-# --- Page: Main Results ---
-selected_metric = df.columns[4]  # Example metric for default plot
-plot_name, _ = bar_plot(df, selected_metric, RESULTS_DIR)
-main_plot = ar.Plot(plot_name)
-main_table = ar.HTML(style_apa(df_main).to_html())
-main_results = ar.Select(
-    main_plot,
-    main_table
-)
+        bar_plot_blocks = []
+        for metric in list(self.df.columns)[3:-1]:
+            plot_name, fig = bar_plot(self.df, metric, self.plots_dir)
 
-# --- Page: Selected Edges ---
-plots = []
-edges = []
-labels = [
-    ("Positive Edges", "positive_edges"),
-    ("Negative Edges", "negative_edges"),
-    ("Stability Positive Edges", "stability_positive_edges"),
-    ("Stability Negative Edges", "stability_negative_edges"),
-    ("Significant Stability Positive Edges", "sig_stability_positive_edges"),
-    ("Significant Stability Negative Edges", "sig_stability_negative_edges")
-]
+            plot_block = ar.Media(file=plot_name, name=f"Image1_{metric}", caption="Boxplot of main predictive performance",
+                                  label=f'{metric}')
+            bar_plot_blocks.append(plot_block)
 
-for _, metric in labels:
-    plot_img, edge_df = plot_netplotbrain(RESULTS_DIR, metric)
-    plots.append(ar.Plot(plot_img))
-    edges.append(ar.DataTable(edge_df))
+        # predictions scatter plot
+        scatter_plot_name = scatter_plot(self.df_predictions, self.plots_dir)
+        scatter_block = ar.Media(file=scatter_plot_name, name=f"Predictions", caption="Scatter plot of true versus predicted scores.",
+                              label='predictions')
+        first_row = ar.Group(name='main_results', blocks=[ar.Select(blocks=bar_plot_blocks), table], columns=2)
 
-edges_blocks = [
-    ar.Group(p, e) for (l, _), p, e in zip(labels, plots, edges)
-]
-selected_edges = ar.Select(*edges_blocks)
+        second_row = ar.Group(name='perms_and_predictions', blocks=[scatter_block], columns=2)
+        return ar.Blocks(blocks=[first_row, second_row], label='Results')
 
-# --- Page: Predictions ---
-pred_img = scatter_plot(df_predictions, RESULTS_DIR)
-predictions_block = ar.Plot(pred_img, label="Model Predictions")
+    def generate_edges_page(self):
+        plots = list()
+        edges = list()
+        for metric in ["positive_edges", "negative_edges", "stability_positive_edges",
+                       "stability_negative_edges", "sig_stability_positive_edges", "sig_stability_negative_edges"]:
+            plot_brainplot, edge_list = plot_netplotbrain(results_folder=self.results_directory,
+                                                          selected_metric=metric)
+            plots.append(plot_brainplot)
+            edges.append(edge_list)
 
-# --- Page: Permutations ---
-p_values_table = ar.HTML(style_apa(df_p_values.set_index(['network', 'model'])).to_html())
-perm_img_path = os.path.join(PLOTS_DIR, 'permutations.png')
-if os.path.exists(perm_img_path):
-    permutations_plot = ar.Plot(perm_img_path)
-else:
-    permutations_plot = ar.Text("No permutation plot available.")
-permutations_block = ar.Select(
-    permutations_plot,
-    p_values_table
-)
+        first_header = ar.Group(blocks=[ar.Text("Positive Edges"), ar.Text("Negative Edges")], columns=2)
+        first_row = ar.Group(blocks=[ar.Media(file=plots[0]), ar.Media(file=plots[1])], columns=2)
+        second_header = ar.Group(blocks=[ar.Text("Stable Positive Edges"), ar.Text("Stable Negative Edges")], columns=2)
+        second_row = ar.Group(blocks=[ar.Media(file=plots[2]), ar.Media(file=plots[3])], columns=2)
+        third_header = ar.Group(blocks=[ar.Text("Significantly Stable Positive Edges"), ar.Text("Significantly Stable Negative Edges")], columns=2)
+        third_row = ar.Group(blocks=[ar.Media(file=plots[4]), ar.Media(file=plots[5])], columns=2)
+        blocks = ar.Blocks(blocks=[first_header, first_row,
+                                   second_header, second_row,
+                                   third_header, third_row], label='Edges')
+        return blocks
 
-# --- Final Report Assembly ---
-report = ar.Blocks(
-    ar.Page(info_block, title="Info"),
-    ar.Page(main_results, title="Main Results"),
-    ar.Page(selected_edges, title="Selected Edges"),
-    ar.Page(predictions_block, title="Model Predictions"),
-    ar.Page(permutations_block, title="Permutations")
-)
-
-# Save to HTML
-ar.save_report(report, path="connectome_report.html", open=True)
-
-"""
 
 if __name__=="__main__":
-    generate_html_report(results_directory='/spm-data/vault-data3/mmll/projects/cpm_python/results_new/hcp_SSAGA_TB_Yrs_Smoked_spearman_partial_p=0.01')
+    reporter = HTMLReporter(results_directory='/spm-data/vault-data3/mmll/projects/cpm_python/results_new/hcp_SSAGA_TB_Yrs_Smoked_spearman_partial_p=0.01')
+    reporter.generate_html_report()
