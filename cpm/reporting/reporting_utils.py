@@ -71,7 +71,7 @@ def format_results_table(df, precision=2):
     # Apply only to p-value columns
     for col in combined.columns:
         if col[1] == "p":
-            styler = styler.applymap(bold_sig, subset=[col])
+            styler = styler.map(bold_sig, subset=[col])
 
     return styler
 

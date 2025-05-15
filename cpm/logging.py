@@ -25,6 +25,9 @@ def setup_logging(log_file: str = "analysis_log.txt"):
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+
 
 class SimpleFormatter(logging.Formatter):
     def format(self, record):

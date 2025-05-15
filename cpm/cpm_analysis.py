@@ -13,6 +13,7 @@ from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cpm.results_manager import ResultsManager, PermutationManager
 from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges
 from cpm.scoring import score_regression_models
+from cpm.reporting import HTMLReporter
 
 
 class CPMRegression:
@@ -126,6 +127,9 @@ class CPMRegression:
         if self.n_permutations > 0:
             PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
         self.logger.info("Estimation completed.")
+        self.logger.info("Generating results file.")
+        reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
+        reporter.generate_html_report()
 
     def _single_run(self,
                     X: Union[pd.DataFrame, np.ndarray],

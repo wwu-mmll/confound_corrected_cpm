@@ -1,19 +1,31 @@
 import os
+import shutil
+
+from pathlib import Path
+
 import pandas as pd
 import arakawa as ar
 
-from plots.plots import bar_plot
-from plots.plots import scatter_plot
-from plots.cpm_chord_plot import plot_netplotbrain
-from streamlit_utils import load_results_from_folder, load_data_from_folder, style_apa
-from reporting_utils import format_results_table, extract_log_block
+from cpm.reporting.plots.plots import bar_plot
+from cpm.reporting.plots.plots import scatter_plot
+from cpm.reporting.plots.cpm_chord_plot import plot_netplotbrain
+from cpm.reporting.streamlit_utils import load_results_from_folder, load_data_from_folder, style_apa
+from cpm.reporting.reporting_utils import format_results_table, extract_log_block
+
 
 
 class HTMLReporter:
-    def __init__(self, results_directory):
+    def __init__(self, results_directory: str, atlas_labels: str = None):
         self.results_directory = results_directory
         self.plots_dir = os.path.join(results_directory, "plots")
         os.makedirs(self.plots_dir, exist_ok=True)
+
+        # copy atlas labels file to plotting directory
+        if atlas_labels is not None:
+            self.validate_atlas_file_columns(atlas_labels)
+            self.atlas_labels = self.copy_csv_file(atlas_labels, self.plots_dir)
+        else:
+            self.atlas_labels = None
 
         # Load results
         self.df = pd.read_csv(os.path.join(results_directory, 'cv_results.csv'))
@@ -21,6 +33,36 @@ class HTMLReporter:
         self.df_predictions = load_data_from_folder(results_directory, 'cv_predictions.csv')
         self.df_p_values = load_data_from_folder(results_directory, 'p_values.csv')
         self.df_permutations = load_data_from_folder(results_directory, 'permutation_results.csv')
+
+    @staticmethod
+    def copy_csv_file(src_path, dest_path):
+        """
+        Copies a CSV file from src_path to dest_path using shutil.
+        """
+        try:
+            dest_file_path = os.path.join(dest_path, os.path.basename(src_path))
+            shutil.copy(src_path, dest_file_path)
+            print(f"Copied CSV file to {dest_file_path}")
+            return dest_file_path
+        except Exception as e:
+            print(f"Error copying file: {e}")
+
+    @staticmethod
+    def validate_atlas_file_columns(csv_path):
+        """
+        Checks whether the CSV file contains at least the columns:
+        'x', 'y', 'z', and 'region'.
+        """
+        required_columns = {"x", "y", "z", "region"}
+
+        try:
+            df = pd.read_csv(csv_path)
+            missing = required_columns - set(df.columns)
+
+            if missing:
+                print(f"Error: The file {csv_path} is missing required columns: {', '.join(missing)}")
+        except Exception as e:
+            print(f"Error reading CSV file: {e}")
 
     def generate_html_report(self):
 
@@ -34,7 +76,11 @@ class HTMLReporter:
         ]
 
         main_tabs = ar.Select(blocks=report_blocks)
-        main_page = ar.Group(ar.Media(file='../../documentation/docs/assets/img/CCCPM.png', name="Logo"),
+        script_dir = Path(__file__).parent
+        image_path = script_dir / '../../documentation/docs/assets/img/CCCPM.png'
+        image_path = image_path.resolve()  # Optional: resolve to absolute path
+
+        main_page = ar.Group(ar.Media(file=image_path, name="Logo"),
                         main_tabs,
                         widths=[1, 10], columns=2)
         report = ar.Report(blocks=[main_page])
@@ -105,7 +151,8 @@ class HTMLReporter:
         for metric in ["positive_edges", "negative_edges", "stability_positive_edges",
                        "stability_negative_edges", "sig_stability_positive_edges", "sig_stability_negative_edges"]:
             plot_brainplot, edge_list = plot_netplotbrain(results_folder=self.results_directory,
-                                                          selected_metric=metric)
+                                                          selected_metric=metric,
+                                                          atlas_labels=self.atlas_labels)
             plots.append(plot_brainplot)
             edges.append(edge_list)
 

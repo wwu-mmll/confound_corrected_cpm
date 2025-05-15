@@ -2,13 +2,8 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 import os
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import altair as alt
-import pandas as pd
-
-#from cpm.reporting.edges import metric
 
 
 def bar_plot(df, selected_metric, results_folder):
