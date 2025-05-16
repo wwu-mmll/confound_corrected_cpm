@@ -12,7 +12,7 @@ license = "MIT"
 readme = "README.md"
 
 packages = [
-    { include = "confound_corrected_cpm" }
+    { include = "cpm", from = "confound_corrected_cpm" }
 ]
 
 [tool.poetry.dependencies]
