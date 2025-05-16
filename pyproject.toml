@@ -11,6 +11,10 @@ authors = [
 license = "MIT"
 readme = "README.md"
 
+packages = [
+    { include = "confound_corrected_cpm" }
+]
+
 [tool.poetry.dependencies]
 python = ">=3.10"
 numpy = "*"
