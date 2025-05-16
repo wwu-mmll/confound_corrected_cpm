@@ -118,8 +118,8 @@ def plot_netplotbrain(results_folder, selected_metric, atlas_labels):
 
     edges_plot, edge_weights = extract_edges(edges, keep_only_non_zero_edges=True)
 
-    if edges_plot.any() and atlas_labels:
-        aparc = pd.read_csv(atlas_labels, names=['x', 'y', 'z', 'regions'])
+    if atlas_labels is not None and edges_plot.any():
+        aparc = atlas_labels
 
         edges_netplot = pd.DataFrame({'i': edges_plot[:, 0], 'j': edges_plot[:, 1],
                                       'weights': edge_weights})

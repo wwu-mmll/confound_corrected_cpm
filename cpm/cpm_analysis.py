@@ -1,5 +1,7 @@
 import os
 import logging
+import shutil
+
 from typing import Union
 
 import numpy as np
@@ -25,10 +27,10 @@ class CPMRegression:
                  cv: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
                  inner_cv: Union[BaseCrossValidator, BaseShuffleSplit] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
-                     edge_statistic=['pearson'],
+                     edge_statistic='pearson',
                      edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
                  ),
-                 select_stable_edges: bool = True,
+                 select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
                  n_permutations: int = 0,
@@ -61,10 +63,10 @@ class CPMRegression:
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
         self.n_permutations = n_permutations
-        self.atlas_labels = atlas_labels
 
         np.random.seed(42)
         os.makedirs(self.results_directory, exist_ok=True)
+        os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
         setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
         self.logger = logging.getLogger(__name__)
 
@@ -78,6 +80,9 @@ class CPMRegression:
                                    "Please provide only one hyperparameter configuration or an inner cv.")
             if self.select_stable_edges:
                 raise RuntimeError("Stable edges can only be selected when using an inner cv.")
+
+        # check and copy atlas labels file
+        self.atlas_labels = self.validate_and_copy_atlas_file(atlas_labels)
 
     def _log_analysis_details(self):
         """
@@ -94,6 +99,42 @@ class CPMRegression:
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info("="*50)
+
+    def validate_and_copy_atlas_file(self, csv_path):
+        """
+        Validates that a CSV file exists and contains the required columns ('x', 'y', 'z', 'region').
+        If valid, copies it to <self.results_directory>/edges.
+        """
+        if csv_path is None:
+            return None
+
+        required_columns = {"x", "y", "z", "region"}
+        csv_path = os.path.abspath(csv_path)
+
+        # Check if file exists
+        if not os.path.isfile(csv_path):
+            raise RuntimeError(f"CSV file does not exist: {csv_path}")
+
+        # Try to read and validate columns
+        try:
+            df = pd.read_csv(csv_path)
+            missing = required_columns - set(df.columns)
+
+            if missing:
+                raise RuntimeError(f"CSV file is missing required columns: {', '.join(missing)}")
+        except Exception as e:
+            raise RuntimeError(f"Error reading CSV file {csv_path}: {e}")
+
+        # File and columns valid, proceed to copy
+        dest_path = os.path.join(self.results_directory, "edges", os.path.basename(csv_path))
+
+        try:
+            shutil.copy(csv_path, dest_path)
+            self.logger.info(f"Copied CSV file to {dest_path}")
+            return dest_path
+        except Exception as e:
+            self.logger.error(f"Error copying file to {dest_path}: {e}")
+            return None
 
     def run(self,
             X: Union[pd.DataFrame, np.ndarray],
@@ -128,6 +169,11 @@ class CPMRegression:
             PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
         self.logger.info("Estimation completed.")
         self.logger.info("Generating results file.")
+        reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
+        reporter.generate_html_report()
+
+    def generate_html_report(self):
+        self.logger.info("Generating HTML report.")
         reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
         reporter.generate_html_report()
 

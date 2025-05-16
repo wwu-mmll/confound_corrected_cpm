@@ -22,8 +22,7 @@ class HTMLReporter:
 
         # copy atlas labels file to plotting directory
         if atlas_labels is not None:
-            self.validate_atlas_file_columns(atlas_labels)
-            self.atlas_labels = self.copy_csv_file(atlas_labels, self.plots_dir)
+            self.atlas_labels = pd.read_csv(atlas_labels)
         else:
             self.atlas_labels = None
 
@@ -34,41 +33,11 @@ class HTMLReporter:
         self.df_p_values = load_data_from_folder(results_directory, 'p_values.csv')
         self.df_permutations = load_data_from_folder(results_directory, 'permutation_results.csv')
 
-    @staticmethod
-    def copy_csv_file(src_path, dest_path):
-        """
-        Copies a CSV file from src_path to dest_path using shutil.
-        """
-        try:
-            dest_file_path = os.path.join(dest_path, os.path.basename(src_path))
-            shutil.copy(src_path, dest_file_path)
-            print(f"Copied CSV file to {dest_file_path}")
-            return dest_file_path
-        except Exception as e:
-            print(f"Error copying file: {e}")
-
-    @staticmethod
-    def validate_atlas_file_columns(csv_path):
-        """
-        Checks whether the CSV file contains at least the columns:
-        'x', 'y', 'z', and 'region'.
-        """
-        required_columns = {"x", "y", "z", "region"}
-
-        try:
-            df = pd.read_csv(csv_path)
-            missing = required_columns - set(df.columns)
-
-            if missing:
-                print(f"Error: The file {csv_path} is missing required columns: {', '.join(missing)}")
-        except Exception as e:
-            print(f"Error reading CSV file: {e}")
-
     def generate_html_report(self):
 
         info_page = self.generate_info_page()
         main_results_page = self.generate_main_results_page()
-        edges_page = self.generate_edges_page()
+        edges_page = self.generate_brain_plot_page()
         report_blocks = [
             info_page,
             main_results_page,
@@ -132,8 +101,10 @@ class HTMLReporter:
         for metric in list(self.df.columns)[3:-1]:
             plot_name, fig = bar_plot(self.df, metric, self.plots_dir)
 
-            plot_block = ar.Media(file=plot_name, name=f"Image1_{metric}", caption="Boxplot of main predictive performance",
-                                  label=f'{metric}')
+            #plot_block = ar.Media(file=plot_name, name=f"Image1_{metric}", caption="Boxplot of main predictive performance",
+            #                      label=f'{metric}')
+            plot_block = ar.HTML(plot_name, name=f"Image1_{metric}", label=f'{metric}')
+
             bar_plot_blocks.append(plot_block)
 
         # predictions scatter plot
@@ -145,7 +116,10 @@ class HTMLReporter:
         second_row = ar.Group(name='perms_and_predictions', blocks=[scatter_block], columns=2)
         return ar.Blocks(blocks=[first_row, second_row], label='Results')
 
-    def generate_edges_page(self):
+    def generate_brain_plot_page(self):
+        if self.atlas_labels is None:
+            return ar.Blocks(blocks=[ar.Group(blocks=[ar.Text("Provide atlas labels as csv file.")], columns=1)],
+                             label='BrainPlots')
         plots = list()
         edges = list()
         for metric in ["positive_edges", "negative_edges", "stability_positive_edges",
@@ -164,7 +138,7 @@ class HTMLReporter:
         third_row = ar.Group(blocks=[ar.Media(file=plots[4]), ar.Media(file=plots[5])], columns=2)
         blocks = ar.Blocks(blocks=[first_header, first_row,
                                    second_header, second_row,
-                                   third_header, third_row], label='Edges')
+                                   third_header, third_row], label='BrainPlots')
         return blocks
 
 
