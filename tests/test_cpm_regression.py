@@ -5,7 +5,7 @@ import pandas as pd
 from numpy.random import shuffle
 from pandas.core.common import random_state
 
-from cpm.simulate_data import simulate_regression_data_2
+from cpm.simulate_data import simulate_regression_data_scenarios
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cpm.cpm_analysis import CPMRegression
 from cpm.utils import check_data
@@ -23,7 +23,7 @@ class TestMissingValues(unittest.TestCase):
                             cv=KFold(n_splits=10, shuffle=True, random_state=42),
                             edge_selection=univariate_edge_selection,
                             n_permutations=2)
-        self.X, self.y, self.covariates = simulate_regression_data_2(n_samples=100, n_features=45)
+        self.X, self.y, self.covariates = simulate_regression_data_scenarios(n_samples=100, n_features=45)
 
     def test_nan_in_X(self):
         self.X[0, 0] = np.nan

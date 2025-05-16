@@ -12,18 +12,18 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.11"
+python = ">=3.10"
 numpy = "*"
 pandas = "*"
 scikit-learn = "*"
 pingouin = "*"
-streamlit = "*"
 nilearn = "*"
 typer = "*"
 pytest = "*"
 pytest-cov = "*"
 bleach = "*"
 tinycss2 = "*"
+plotly = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
