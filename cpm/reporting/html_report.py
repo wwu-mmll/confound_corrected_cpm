@@ -1,5 +1,4 @@
 import os
-import shutil
 
 from pathlib import Path
 
@@ -9,8 +8,7 @@ import arakawa as ar
 from cpm.reporting.plots.plots import bar_plot
 from cpm.reporting.plots.plots import scatter_plot
 from cpm.reporting.plots.cpm_chord_plot import plot_netplotbrain
-from cpm.reporting.streamlit_utils import load_results_from_folder, load_data_from_folder, style_apa
-from cpm.reporting.reporting_utils import format_results_table, extract_log_block
+from cpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
 
 
 

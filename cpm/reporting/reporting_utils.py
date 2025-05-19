@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 
 
@@ -92,3 +94,20 @@ def extract_log_block(filepath):
         content = []  # or raise an error, depending on your expectations
 
     return "".join(content).strip()
+
+
+# Function to read CSV file from the given folder path
+def load_data_from_folder(folder_path, filename):
+    csv_path = os.path.join(folder_path, filename)
+    if os.path.exists(csv_path):
+        return pd.read_csv(csv_path)
+    else:
+        raise RuntimeError(f"No CSV file found at path: {csv_path}")
+
+
+def load_results_from_folder(folder_path, filename):
+    csv_path = os.path.join(folder_path, filename)
+    if os.path.exists(csv_path):
+        return pd.read_csv(csv_path, header=[0, 1], index_col=[0, 1])
+    else:
+        raise RuntimeError(f"No CSV file found at path: {csv_path}")
