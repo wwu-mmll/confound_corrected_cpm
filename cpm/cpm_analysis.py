@@ -82,7 +82,7 @@ class CPMRegression:
                 raise RuntimeError("Stable edges can only be selected when using an inner cv.")
 
         # check and copy atlas labels file
-        self.atlas_labels = self.validate_and_copy_atlas_file(atlas_labels)
+        self.atlas_labels = self._validate_and_copy_atlas_file(atlas_labels)
 
     def _log_analysis_details(self):
         """
@@ -100,7 +100,7 @@ class CPMRegression:
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info("="*50)
 
-    def validate_and_copy_atlas_file(self, csv_path):
+    def _validate_and_copy_atlas_file(self, csv_path):
         """
         Validates that a CSV file exists and contains the required columns ('x', 'y', 'z', 'region').
         If valid, copies it to <self.results_directory>/edges.
