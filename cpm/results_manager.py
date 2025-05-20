@@ -312,8 +312,8 @@ class PermutationManager:
         true_stability_positive = np.load(os.path.join(results_directory, 'stability_positive_edges.npy'))
         true_stability_negative = np.load(os.path.join(results_directory, 'stability_negative_edges.npy'))
 
-        sig_stability_positive = np.sum((stability_positive >= np.expand_dims(true_stability_positive, 0)), axis=0) / (len(valid_perms) + 1)
-        sig_stability_negative = np.sum((stability_negative >= np.expand_dims(true_stability_negative, 0)), axis=0) / (len(valid_perms) + 1)
+        sig_stability_positive = (np.sum((stability_positive >= np.expand_dims(true_stability_positive, 0)), axis=0) + 1) / (len(valid_perms) + 1)
+        sig_stability_negative = (np.sum((stability_negative >= np.expand_dims(true_stability_negative, 0)), axis=0) + 1) / (len(valid_perms) + 1)
 
         np.save(os.path.join(results_directory, 'sig_stability_positive_edges.npy'), sig_stability_positive)
         np.save(os.path.join(results_directory, 'sig_stability_negative_edges.npy'), sig_stability_negative)

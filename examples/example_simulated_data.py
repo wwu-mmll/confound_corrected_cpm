@@ -1,4 +1,4 @@
-from sklearn.model_selection import KFold, ShuffleSplit
+from sklearn.model_selection import KFold, ShuffleSplit, RepeatedKFold
 
 from cpm import CPMRegression
 from cpm.simulate_data import simulate_regression_data
@@ -16,13 +16,13 @@ univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
                                                     t_test_filter=False)
 
 cpm = CPMRegression(results_directory='./tmp/example_simulated_data',
-                    cv=KFold(n_splits=5, shuffle=True, random_state=42),
+                    cv=RepeatedKFold(n_splits=10, n_repeats=10, random_state=42),
                     edge_selection=univariate_edge_selection,
                     inner_cv=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
-                    n_permutations=2,
+                    n_permutations=10,
                     atlas_labels='atlas_labels.csv',
                     #atlas_labels=None,
                     select_stable_edges=False)
 
-#cpm.run(X=X, y=y, covariates=covariates)
-cpm.generate_html_report()
+cpm.run(X=X, y=y, covariates=covariates)
+#cpm.generate_html_report()

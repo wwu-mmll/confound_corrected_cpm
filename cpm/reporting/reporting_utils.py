@@ -74,7 +74,18 @@ def format_results_table(df, precision=2):
     for col in combined.columns:
         if col[1] == "p":
             styler = styler.map(bold_sig, subset=[col])
+    # Add thick horizontal lines between top-level index groups
+    def thick_divider_rows(df):
+        styles = pd.DataFrame("", index=df.index, columns=df.columns)
+        previous_group = None
+        for i, idx in enumerate(df.index):
+            current_group = idx[0]  # assumes 'model' is the first index level
+            if previous_group is not None and current_group != previous_group:
+                styles.iloc[i] = 'border-top: 1px solid black'
+            previous_group = current_group
+        return styles
 
+    styler = styler.apply(thick_divider_rows, axis=None)
     return styler
 
 
