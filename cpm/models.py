@@ -136,3 +136,12 @@ class LinearCPMModel:
             predictions['full'][network] = self.models['full'][network].predict(np.hstack((connectome[network], covariates)))
 
         return predictions
+
+    def get_network_strengths(self, X, covariates):
+        connectome = {}
+        residuals = {}
+        for network in ['positive', 'negative']:
+            # Compute sum_positive and sum_negative
+            connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
+            residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+        return {"connectome": connectome, "residuals": residuals}

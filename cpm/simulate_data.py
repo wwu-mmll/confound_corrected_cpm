@@ -72,11 +72,11 @@ def simulate_regression_data(n_samples: int = 500,
     return X, y, covariates
 
 
-def simulate_regression_data_2(n_samples: int = 500,
-                               n_features: int = 4950,
-                               n_informative_features: int = 200,
-                               link_type: str = 'no_link',
-                               random_state: int = 42):
+def simulate_regression_data_scenarios(n_samples: int = 500,
+                                       n_features: int = 4950,
+                                       n_informative_features: int = 200,
+                                       link_type: str = 'no_link',
+                                       random_state: int = 42):
     """
     Simulates data with specified parameters for regression problems.
 
