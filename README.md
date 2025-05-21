@@ -1,5 +1,5 @@
 [![GitHub Workflow Status](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/python-test.yml/badge.svg)](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/python-test.yml)
-[![Coverage Status](https://coveralls.io/repos/github/wwu-mmll/confound_corrected_cpm/badge.svg?branch=develop)](https://coveralls.io/github/wwu-mmll/confound_corrected_cpm?branch=develop)
+[![Coverage Status](https://coveralls.io/repos/github/wwu-mmll/confound_corrected_cpm/badge.svg)](https://coveralls.io/github/wwu-mmll/confound_corrected_cpm)
 [![Github Contributors](https://img.shields.io/github/contributors-anon/wwu-mmll/cpm_python?color=blue)](https://github.com/wwu-mmll/cpm_python/graphs/contributors)
 [![Github Commits](https://img.shields.io/github/commit-activity/y/wwu-mmll/cpm_python)](https://github.com/wwu-mmll/cpm_python/commits/main)
 
