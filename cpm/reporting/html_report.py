@@ -6,7 +6,8 @@ import pandas as pd
 import arakawa as ar
 
 from cpm.reporting.plots.plots import boxplot_model_performance
-from cpm.reporting.plots.plots import scatter_plot, scatter_plot_covariates_model
+from cpm.reporting.plots.plots import (scatter_plot, scatter_plot_covariates_model, scatter_plot_network_strengths,
+                                       histograms_network_strengths)
 from cpm.reporting.plots.cpm_chord_plot import plot_netplotbrain, extract_edges
 from cpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
 from cpm.utils import matrix_to_upper_triangular_vector
@@ -42,6 +43,7 @@ class HTMLReporter:
         self.df_predictions = load_data_from_folder(results_directory, 'cv_predictions.csv')
         self.df_p_values = load_data_from_folder(results_directory, 'p_values.csv')
         self.df_permutations = load_data_from_folder(results_directory, 'permutation_results.csv')
+        self.df_network_strengths = load_data_from_folder(results_directory, 'cv_network_strengths.csv')
 
     def generate_html_report(self):
 
@@ -49,9 +51,11 @@ class HTMLReporter:
         main_results_page = self.generate_main_results_page()
         edges_page = self.generate_brain_plot_page()
         edges_table_page = self.generate_edge_page()
+        network_strength_page = self.generate_network_strengths_page()
         report_blocks = [
             info_page,
             main_results_page,
+            network_strength_page,
             edges_page,
             edges_table_page
         ]
@@ -133,14 +137,27 @@ class HTMLReporter:
         scatter_block = ar.Media(file=scatter_plot_name, name=f"Predictions", caption="Scatter plot of true versus predicted scores.",
                               label='predictions')
         scatter_block_covariates = ar.Media(file=scatter_covariates_name, name=f"PredictionsCovariatesModel",
-                                 caption="Scatter plot of true versus predicted scores.",
+                                 caption="Scatter plot of true versus predicted scores for the covariates model.",
                                  label='predictions_covariates')
 
-        first_row = ar.Group(name='main_results', blocks=[ar.Select(blocks=bar_plot_blocks), scatter_block], columns=2,
-                             widths=[2, 1])
+        first_row = ar.Group(name='main_results', blocks=[ar.Select(blocks=bar_plot_blocks), scatter_block, scatter_block_covariates], columns=3,
+                             widths=[2, 1, 1])
 
-        second_row = ar.Group(name='perms_and_predictions', blocks=[table, scatter_block_covariates], columns=2, widths=[2, 1])
-        return ar.Blocks(blocks=[first_row, second_row], label='Results')
+        second_row = ar.Group(name='perms_and_predictions', blocks=[table], columns=2, widths=[2, 1])
+
+        return ar.Blocks(blocks=[first_row, second_row], label='Predictive Performance')
+
+    def generate_network_strengths_page(self):
+        scatter_network_strengths = scatter_plot_network_strengths(self.df_network_strengths, self.plots_dir)
+        scatter_block_network_strength = ar.Media(file=scatter_network_strengths, name=f"NetworkStrengths",
+                                 caption="Scatter plot of target versus network strength scores.",
+                                 label='Network Strengths')
+        hist = histograms_network_strengths(self.df_network_strengths, self.plots_dir)
+        hist_block_network_strength = ar.Media(file=hist, name=f"NetworkStrengthsHist",
+                                                  caption="Histograms of network strength scores.",
+                                                  label='Distribution of Network Strengths')
+        row = ar.Group(name='network_strengths', blocks=[scatter_block_network_strength, hist_block_network_strength], columns=4)
+        return ar.Blocks(blocks=[row], label='Network Strengths')
 
     def generate_brain_plot_page(self):
         if self.atlas_labels is None:
@@ -148,23 +165,16 @@ class HTMLReporter:
                              label='Brain Plots')
         plots = list()
         edges = list()
-        for metric in ["positive_edges", "negative_edges", "stability_positive_edges",
-                       "stability_negative_edges", "sig_stability_positive_edges", "sig_stability_negative_edges"]:
+        for metric in ["sig_stability_positive_edges", "sig_stability_negative_edges"]:
             plot_brainplot, edge_list = plot_netplotbrain(results_folder=self.results_directory,
                                                           selected_metric=metric,
                                                           atlas_labels=self.atlas_labels)
             plots.append(plot_brainplot)
             edges.append(edge_list)
 
-        first_header = ar.Group(blocks=[ar.Text("Positive Edges"), ar.Text("Negative Edges")], columns=2)
-        first_row = ar.Group(blocks=[ar.Media(file=plots[0]), ar.Media(file=plots[1])], columns=2)
-        second_header = ar.Group(blocks=[ar.Text("Stable Positive Edges"), ar.Text("Stable Negative Edges")], columns=2)
-        second_row = ar.Group(blocks=[ar.Media(file=plots[2]), ar.Media(file=plots[3])], columns=2)
         third_header = ar.Group(blocks=[ar.Text("Significantly Stable Positive Edges"), ar.Text("Significantly Stable Negative Edges")], columns=2)
-        third_row = ar.Group(blocks=[ar.Media(file=plots[4]), ar.Media(file=plots[5])], columns=2)
-        blocks = ar.Blocks(blocks=[first_header, first_row,
-                                   second_header, second_row,
-                                   third_header, third_row], label='Brain Plots')
+        third_row = ar.Group(blocks=[ar.Media(file=plots[0]), ar.Media(file=plots[1])], columns=2)
+        blocks = ar.Blocks(blocks=[third_header, third_row], label='Brain Plots')
         return blocks
 
     def generate_edge_page(self):

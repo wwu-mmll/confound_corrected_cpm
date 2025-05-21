@@ -3,6 +3,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+import matplotlib.gridspec as gridspec
 
 
 # Shared plotting settings
@@ -67,7 +68,12 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str) -> str:
 
     df = df[df["model"] == "covariates"]
 
-    fig, ax = plt.subplots(figsize=(2.5, 2.5))
+    # Create a figure with GridSpec
+    fig = plt.figure(figsize=(6, 2))
+    gs = gridspec.GridSpec(1, 3, figure=fig)
+
+    # Create one subplot in the center cell
+    ax = fig.add_subplot(gs[0, 1])
 
     sns.regplot(
         data=df,
@@ -84,9 +90,115 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str) -> str:
     ax.set_title('covariates')
     png_path = os.path.join(results_folder, "scatter_covariates.png")
     pdf_path = os.path.join(results_folder, "scatter_covariates.pdf")
-    fig.tight_layout(pad=0.2)
-    fig.savefig(png_path, dpi=600, bbox_inches="tight")
-    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.tight_layout(pad=0.5)
+    # This makes the figure 10x10 inches
+    fig.savefig(png_path, dpi=600)
+    fig.savefig(pdf_path)
+
+    return png_path
+
+
+def histograms_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
+    """
+    Create a 2x2 grid of histograms showing the distribution of network_strength
+    for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
+    """
+    apply_nature_style()
+
+    # Filter relevant data
+    df = df[df["model"].isin(["connectome", "residuals"])]
+    df = df[df["network"].isin(["positive", "negative"])]
+
+    # Color mapping
+    color_map = {
+        "positive": "#FF5768",  # red
+        "negative": "#6C88C4"   # blue
+    }
+
+    def histplot_colored(data, color=None, **kwargs):
+        # Override color based on 'network' value
+        network = data["network"].iloc[0]
+        color = {"positive": "#FF5768", "negative": "#6C88C4"}[network]
+        sns.histplot(
+            data=data,
+            x="network_strength",
+            bins=30,
+            edgecolor="white",
+            linewidth=0.3,
+            color=color,  # This now safely overrides the one passed by FacetGrid
+            **kwargs
+        )
+
+    # Create 2x2 facet grid
+    g = sns.FacetGrid(
+        df,
+        row="model",
+        col="network",
+        margin_titles=True,
+        height=1.5,
+        aspect=1
+    )
+    g.map_dataframe(histplot_colored)
+    g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
+    g.set_axis_labels("network strength", "count")
+    sns.despine(trim=True)
+    g.fig.tight_layout(pad=0.5)
+
+    # Save
+    png_path = os.path.join(results_folder, "histograms_network_strengths.png")
+    pdf_path = os.path.join(results_folder, "histograms_network_strengths.pdf")
+    g.fig.savefig(png_path, dpi=600, bbox_inches="tight")
+    g.fig.savefig(pdf_path, bbox_inches="tight")
+
+    return png_path
+
+
+def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
+    """
+    Create a 2x2 scatter plot of y_true vs network_strength
+    for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
+    """
+    apply_nature_style()
+
+    # Define color mapping
+    color_map = {
+        "positive": "#FF5768",  # red
+        "negative": "#6C88C4"   # blue
+    }
+
+    # Plotting function with custom color per network
+    def regplot_colored(data, **kwargs):
+        network = data["network"].iloc[0]
+        color = color_map.get(network, "black")
+        sns.regplot(
+            data=data,
+            x="network_strength",
+            y="y_true",
+            scatter_kws={"alpha": 0.7, "s": 14, "edgecolor": "white", "color": color},
+            line_kws={"color": color, "linewidth": 0.75},
+            **kwargs
+        )
+
+    # Create 2x2 facet grid: rows = model, cols = network
+    g = sns.FacetGrid(
+        df,
+        row="model",
+        col="network",
+        margin_titles=True,
+        height=1.5,
+        aspect=1
+    )
+    g.map_dataframe(regplot_colored)
+    g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
+    g.set_axis_labels("network strength", "target score")
+    sns.despine(trim=True)
+    g.fig.tight_layout(pad=0.5)
+
+    # Save
+    png_path = os.path.join(results_folder, "scatter_network_strengths.png")
+    pdf_path = os.path.join(results_folder, "scatter_network_strengths.pdf")
+    g.fig.savefig(png_path, dpi=600, bbox_inches="tight")
+    g.fig.savefig(pdf_path, bbox_inches="tight")
 
     return png_path
 
