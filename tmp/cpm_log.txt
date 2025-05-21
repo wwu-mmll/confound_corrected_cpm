@@ -1,0 +1,17 @@
+Starting CPM Regression Analysis
+==================================================
+Results Directory:       ./tmp
+Outer CV strategy:       KFold(n_splits=10, random_state=42, shuffle=True)
+Inner CV strategy:       None
+Edge selection method:   UnivariateEdgeSelection(edge_selection=[PThreshold(correction=['fdr_by'],
+                                                   threshold=[0.05])],
+                        edge_statistic=EdgeStatistic(edge_statistic=['pearson']))
+Select stable edges:     No
+Stability threshold:     0.8
+Impute Missing Values:   Yes
+Number of Permutations:  2
+==================================================
+Checking data...
+Your input contains NaN values. Fix NaNs or use impute_missing_values=True.
+Checking data...
+y contains NaN values. Only missing values in X and covariates can be imputed.
