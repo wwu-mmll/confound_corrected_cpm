@@ -34,6 +34,7 @@ class ResultsManager:
         self.cv_predictions = pd.DataFrame()
         self.cv_edges = self.initialize_edges(n_folds=self.n_folds, n_features=self.n_features,
                                               n_params=self.n_params)
+        self.cv_network_strengths = pd.DataFrame()
         self.agg_results = None
 
     def update_results_directory(self, output_dir: Union[str, None]):
@@ -157,6 +158,24 @@ class ResultsManager:
         self.cv_predictions = pd.concat([self.cv_predictions, preds], axis=0)
         return
 
+    def store_network_strengths(self, network_strengths, y_true, fold):
+        dfs = list()
+        models = ['connectome', 'residuals']
+        networks = ['positive', 'negative']
+        for model in models:
+            for network in networks:
+                df = pd.DataFrame()
+                df['y_true'] = y_true
+                df['network_strength'] = np.squeeze(network_strengths[model][network])
+                df['model'] = [model] * network_strengths[model][network].shape[0]
+                df['fold'] = [fold] * network_strengths[model][network].shape[0]
+                df['network'] = [network] * network_strengths[model][network].shape[0]
+                dfs.append(df)
+
+        df = pd.concat(dfs, axis=0)
+        self.cv_network_strengths = pd.concat([self.cv_network_strengths, df], axis=0)
+        return
+
     @staticmethod
     def load_cv_results(folder):
         """
@@ -173,11 +192,14 @@ class ResultsManager:
     def save_predictions(self):
         """
         Save predictions to CSV.
-
-        :param predictions: DataFrame containing predictions.
-        :param results_directory: Directory to save the predictions.
         """
         self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
+
+    def save_network_strengths(self):
+        """
+        Save network strengths to CSV.
+        """
+        self.cv_network_strengths.to_csv(os.path.join(self.results_directory, 'cv_network_strengths.csv'))
 
     def calculate_final_cv_results(self):
         """

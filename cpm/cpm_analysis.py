@@ -95,7 +95,8 @@ class CPMRegression:
         self.logger.info(f"Inner CV strategy:       {self.inner_cv}")
         self.logger.info(f"Edge selection method:   {self.edge_selection}")
         self.logger.info(f"Select stable edges:     {'Yes' if self.select_stable_edges else 'No'}")
-        self.logger.info(f"Stability threshold:     {self.stability_threshold}")
+        if self.select_stable_edges:
+            self.logger.info(f"Stability threshold:     {self.stability_threshold}")
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info("="*50)
@@ -227,11 +228,14 @@ class CPMRegression:
             results_manager.store_edges(edges=edges, fold=outer_fold)
 
             # Build model and make predictions
-            y_pred = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train).predict(X_test, cov_test)
+            model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
+            y_pred = model.predict(X_test, cov_test)
+            network_strengths = model.get_network_strengths(X_test, cov_test)
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
             results_manager.store_predictions(y_pred=y_pred, y_true=y_test, params=best_params, fold=outer_fold,
                                               param_id=0)
             results_manager.store_metrics(metrics=metrics, params=best_params, fold=outer_fold, param_id=0)
+            results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test, fold=outer_fold)
 
         # once all outer folds are done, calculate final results and edge stability
         results_manager.calculate_final_cv_results()
@@ -240,3 +244,4 @@ class CPMRegression:
         if not perm_run:
             self.logger.info(results_manager.agg_results.round(4).to_string())
             results_manager.save_predictions()
+            results_manager.save_network_strengths()
