@@ -8,22 +8,27 @@ authors = [
     "Nils Winter <nils.r.winter@uni-muenster.de>",
     "MMLL <nils.r.winter@uni-muenster.de>"
 ]
+packages = [{ include = "cpm" }]
 license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.11"
+python = "<4.0,>=3.10"
 numpy = "*"
 pandas = "*"
 scikit-learn = "*"
 pingouin = "*"
-streamlit = "*"
 nilearn = "*"
 typer = "*"
 pytest = "*"
 pytest-cov = "*"
 bleach = "*"
 tinycss2 = "*"
+plotly = "*"
+arakawa = "*"
+netplotbrain = "*"
+networkx = "*"
+scikit-image = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
