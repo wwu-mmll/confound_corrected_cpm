@@ -138,7 +138,7 @@ class ResultsManager:
         self.cv_results = pd.concat([self.cv_results, df], axis=0)
         return
 
-    def store_predictions(self, y_pred, y_true, params, fold, param_id):
+    def store_predictions(self, y_pred, y_true, params, fold, param_id, test_indices):
         """
         Update predictions DataFrame with new predictions and parameters.
 
@@ -148,13 +148,22 @@ class ResultsManager:
         :param fold: Current fold number.
         :return: Updated predictions DataFrame.
         """
-        preds = (pd.DataFrame.from_dict(y_pred).stack().explode().reset_index().rename(
-            {'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1).set_index(['network', 'model']))
+        #preds = (pd.DataFrame.from_dict(y_pred).stack().explode().reset_index().rename(
+        #    {'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1).set_index(['network', 'model']))
+        preds = (
+            pd.DataFrame.from_dict(y_pred)
+            .stack()
+            .explode()
+            .reset_index()
+            .rename({'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1)
+            .set_index(['network', 'model'])
+        )
         n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
         preds['y_true'] = np.tile(y_true, n_network_model)
         preds['params'] = [params] * y_true.shape[0] * n_network_model
         preds['fold'] = [fold] * y_true.shape[0] * n_network_model
         preds['param_id'] = [param_id] * y_true.shape[0] * n_network_model
+        preds['sample_index'] = np.tile(test_indices, n_network_model)  # include indices
         self.cv_predictions = pd.concat([self.cv_predictions, preds], axis=0)
         return
 
@@ -189,11 +198,16 @@ class ResultsManager:
         results.columns = results.columns.droplevel(1)
         return results
 
-    def save_predictions(self):
+    def save_predictions(self):  # update save function to sort by index prior to saving
         """
         Save predictions to CSV.
         """
-        self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
+        df = self.cv_predictions.copy()
+        if 'sample_index' in df.columns:
+            df.sort_values(by='sample_index', inplace=True)
+            df.drop(columns='sample_index', inplace=True)
+        df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
+        # self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
 
     def save_network_strengths(self):
         """
