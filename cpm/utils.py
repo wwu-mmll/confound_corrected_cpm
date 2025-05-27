@@ -14,6 +14,8 @@ import warnings
 
 import logging
 
+from cpm.reporting.plots.plots import pairplot_flexible
+
 
 logger = logging.getLogger(__name__)
 
@@ -326,8 +328,36 @@ def generate_data_insights(X, y, covariates, results_directory):
 
 
 def get_variable_names(X, y, covariates):
+    """
+    Generate names for features, target, and covariates based on input types.
+
+    Parameters
+    ----------
+    X : array-like or pandas.DataFrame
+        Feature data. If DataFrame, column names are returned; otherwise,
+        generic names "feature_{i}" are generated for each feature (i from
+        0 to n_features - 1).
+    y : array-like, pandas.Series, or pandas.DataFrame
+        Target vector. If Series, its name is used; if DataFrame, the first
+        column name is used; otherwise, the default name "target" is returned.
+    covariates : array-like, pandas.Series, or pandas.DataFrame
+        Covariate data. If Series, its name is returned as a single-element
+        list; if DataFrame, its column names are returned; otherwise, generic
+        names "covariate_{i}" are generated for each covariate column.
+
+    Returns
+    -------
+    X_names : list of str
+        Names for each feature column.
+    y_name : str
+        Name for the target variable.
+    covar_names : list of str
+        Names for each covariate column.
+    """
     # Features
-    X_names = list(X.columns) if isinstance(X, pd.DataFrame) else [f"feature_{i}" for i in range(X.shape[1])]
+    X_names = list(X.columns) if isinstance(X, pd.DataFrame) else [
+        f"feature_{i}" for i in range(X.shape[1])
+    ]
 
     # Target
     if isinstance(y, (pd.Series, pd.DataFrame)):
@@ -337,68 +367,14 @@ def get_variable_names(X, y, covariates):
 
     # Covariates
     if isinstance(covariates, (pd.Series, pd.DataFrame)):
-        covar_names = [covariates.name] if isinstance(covariates, pd.Series) else list(covariates.columns)
+        covar_names = (
+            [covariates.name]
+            if isinstance(covariates, pd.Series)
+            else list(covariates.columns)
+        )
     else:
-        covar_names = [f"covariate_{i}" for i in range(covariates.shape[1])]
+        covar_names = [
+            f"covariate_{i}" for i in range(covariates.shape[1])
+        ]
 
     return X_names, y_name, covar_names
-
-import os
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from pandas.api.types import is_numeric_dtype
-
-
-def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
-    sns.set_theme(style="white")
-    variables = df.columns
-    n = len(variables)
-    fig, axes = plt.subplots(n, n, figsize=(2.5 * n, 2.5 * n))
-
-    for i, row_var in enumerate(variables):
-        for j, col_var in enumerate(variables):
-            ax = axes[i, j]
-            ax.set_xlabel("")
-            ax.set_ylabel("")
-
-            x = df[col_var]
-            y = df[row_var]
-
-            is_x_cont = is_numeric_dtype(x)
-            is_y_cont = is_numeric_dtype(y)
-
-            if i == j:
-                if is_x_cont:
-                    sns.histplot(x, bins=20, ax=ax, color="gray", edgecolor="white")
-                else:
-                    counts = x.value_counts().sort_index()
-                    sns.barplot(x=counts.index.astype(str), y=counts.values, ax=ax, palette="pastel")
-                    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
-                ax.set_title(row_var, fontsize=9)
-                sns.despine(ax=ax)
-                continue
-
-            if is_x_cont and is_y_cont:
-                sns.scatterplot(x=x, y=y, ax=ax, s=15, alpha=0.6, edgecolor="white", linewidth=0.3)
-            elif is_x_cont and not is_y_cont:
-                sns.histplot(data=df, x=col_var, hue=row_var, ax=ax, element="step", stat="count",
-                             common_norm=False, bins=20, palette="Set2")
-            elif not is_x_cont and is_y_cont:
-                sns.histplot(data=df, x=row_var, hue=col_var, ax=ax, element="step", stat="count",
-                             common_norm=False, bins=20, palette="Set2")
-            else:
-                ctab = pd.crosstab(y, x)
-                sns.heatmap(ctab, annot=True, fmt='d', cmap="Blues", cbar=False, ax=ax)
-                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-                ax.set_yticklabels(ax.get_yticklabels(), rotation=0, va='center')
-
-            ax.tick_params(axis='both', labelsize=6)
-            sns.despine(ax=ax)
-
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=600)
-    plt.close(fig)
-    return output_path
-

@@ -10,7 +10,6 @@ from cpm.reporting.plots.plots import (scatter_plot, scatter_plot_covariates_mod
                                        histograms_network_strengths)
 from cpm.reporting.plots.cpm_chord_plot import plot_netplotbrain, extract_edges
 from cpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
-from cpm.utils import matrix_to_upper_triangular_vector
 
 
 class HTMLReporter:
