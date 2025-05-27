@@ -295,8 +295,19 @@ def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
                     sns.histplot(x, bins=20, ax=ax, color="gray", edgecolor="white")
                 else:
                     counts = x.value_counts().sort_index()
-                    sns.barplot(x=counts.index.astype(str), y=counts.values, ax=ax, palette="pastel")
-                    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
+
+                    sns.barplot(
+                        x=counts.index.astype(str),
+                        y=counts.values,
+                        hue=counts.index.astype(str),  # ← now we have a hue
+                        palette="pastel",
+                        legend=False,
+                        ax=ax
+                    )
+
+                    # rotate labels (you can also use tick_params as shown earlier)
+                    ax.set_xticks(range(len(counts)))
+                    ax.set_xticklabels(counts.index.astype(str), rotation=45, ha="right")
                 ax.set_title(row_var, fontsize=9)
                 sns.despine(ax=ax)
                 continue
