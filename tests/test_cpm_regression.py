@@ -30,6 +30,8 @@ class TestCPMRegression(unittest.TestCase):
     def test_run(self):
         self.cpm.run(self.X, self.y, self.covariates)
 
+    def test_input_is_dataframe(self):
+        self.cpm.run(pd.DataFrame(self.X), pd.DataFrame(self.y), pd.DataFrame(self.covariates))
 
 class TestMissingValues(unittest.TestCase):
     def setUp(self):

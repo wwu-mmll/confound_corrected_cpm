@@ -1,9 +1,13 @@
 import os
+
 import pandas as pd
 import seaborn as sns
+
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import matplotlib.gridspec as gridspec
+
+from pandas.api.types import is_numeric_dtype
 
 
 # Shared plotting settings
@@ -29,7 +33,7 @@ def apply_nature_style():
     })
 
 
-def scatter_plot(df: pd.DataFrame, results_folder: str) -> str:
+def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     apply_nature_style()
 
     df = df[df['model'].isin(['connectome', 'residuals', 'full'])]
@@ -47,8 +51,8 @@ def scatter_plot(df: pd.DataFrame, results_folder: str) -> str:
     g = sns.FacetGrid(df, row="model", col="network", margin_titles=True, height=1.5, aspect=1)
     g.map_dataframe(regplot_colored)
     g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
-    g.set_xlabels("true")
-    g.set_ylabels("predicted")
+    g.set_xlabels(y_name)
+    g.set_ylabels(f"predicted {y_name}")
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
@@ -60,7 +64,7 @@ def scatter_plot(df: pd.DataFrame, results_folder: str) -> str:
     return png_path
 
 
-def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str) -> str:
+def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Generate a single scatter plot with regression line for the 'covariates' model.
     """
@@ -85,8 +89,8 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str) -> str:
     )
 
     sns.despine(trim=True)
-    ax.set_xlabel("true")
-    ax.set_ylabel("predicted")
+    ax.set_xlabel(y_name)
+    ax.set_ylabel(f"predicted {y_name}")
     ax.set_title('covariates')
     png_path = os.path.join(results_folder, "scatter_covariates.png")
     pdf_path = os.path.join(results_folder, "scatter_covariates.pdf")
@@ -98,7 +102,7 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str) -> str:
     return png_path
 
 
-def histograms_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
+def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 grid of histograms showing the distribution of network_strength
     for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
@@ -140,7 +144,7 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
     )
     g.map_dataframe(histplot_colored)
     g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
-    g.set_axis_labels("network strength", "count")
+    g.set_axis_labels("network strength", y_name)
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
@@ -153,7 +157,7 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
     return png_path
 
 
-def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
+def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 scatter plot of y_true vs network_strength
     for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
@@ -190,7 +194,7 @@ def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str) -> str
     )
     g.map_dataframe(regplot_colored)
     g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
-    g.set_axis_labels("network strength", "target score")
+    g.set_axis_labels("network strength", y_name)
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
@@ -266,3 +270,66 @@ def boxplot_model_performance(
     fig.savefig(pdf_path, bbox_inches="tight")
 
     return png_path
+
+
+def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
+    sns.set_theme(style="white")
+    variables = df.columns
+    n = len(variables)
+    fig, axes = plt.subplots(n, n, figsize=(2.5 * n, 2.5 * n))
+
+    for i, row_var in enumerate(variables):
+        for j, col_var in enumerate(variables):
+            ax = axes[i, j]
+            ax.set_xlabel("")
+            ax.set_ylabel("")
+
+            x = df[col_var]
+            y = df[row_var]
+
+            is_x_cont = is_numeric_dtype(x)
+            is_y_cont = is_numeric_dtype(y)
+
+            if i == j:
+                if is_x_cont:
+                    sns.histplot(x, bins=20, ax=ax, color="gray", edgecolor="white")
+                else:
+                    counts = x.value_counts().sort_index()
+
+                    sns.barplot(
+                        x=counts.index.astype(str),
+                        y=counts.values,
+                        hue=counts.index.astype(str),  # ← now we have a hue
+                        palette="pastel",
+                        legend=False,
+                        ax=ax
+                    )
+
+                    # rotate labels (you can also use tick_params as shown earlier)
+                    ax.set_xticks(range(len(counts)))
+                    ax.set_xticklabels(counts.index.astype(str), rotation=45, ha="right")
+                ax.set_title(row_var, fontsize=9)
+                sns.despine(ax=ax)
+                continue
+
+            if is_x_cont and is_y_cont:
+                sns.scatterplot(x=x, y=y, ax=ax, s=15, alpha=0.6, edgecolor="white", linewidth=0.3)
+            elif is_x_cont and not is_y_cont:
+                sns.histplot(data=df, x=col_var, hue=row_var, ax=ax, element="step", stat="count",
+                             common_norm=False, bins=20, palette="Set2")
+            elif not is_x_cont and is_y_cont:
+                sns.histplot(data=df, x=row_var, hue=col_var, ax=ax, element="step", stat="count",
+                             common_norm=False, bins=20, palette="Set2")
+            else:
+                ctab = pd.crosstab(y, x)
+                sns.heatmap(ctab, annot=True, fmt='d', cmap="Blues", cbar=False, ax=ax)
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+                ax.set_yticklabels(ax.get_yticklabels(), rotation=0, va='center')
+
+            ax.tick_params(axis='both', labelsize=6)
+            sns.despine(ax=ax)
+
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=600)
+    plt.close(fig)
+    return output_path
