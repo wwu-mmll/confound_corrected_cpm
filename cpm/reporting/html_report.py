@@ -59,12 +59,12 @@ class HTMLReporter:
         report_blocks = [
             info_page,
             data_insight_page,
+            data_description_page,
             main_results_page,
+            hyperparameters_page,
             network_strength_page,
             edges_page,
-            edges_table_page,
-            data_description_page,
-            hyperparameters_page
+            edges_table_page
         ]
 
         main_tabs = ar.Select(blocks=report_blocks)
@@ -87,6 +87,12 @@ class HTMLReporter:
                                  label='Hyperparameters')
 
             hyper_df = self.df[['fold', 'model', 'params']].copy()
+            hyper_df = (
+                hyper_df
+                .drop(columns='model')  # we don’t need the model any more
+                .drop_duplicates(subset=['fold'])  # keep first row per fold
+                .reset_index(drop=True)
+            )
 
             if isinstance(hyper_df['params'].iloc[0], dict):
                 hyper_df['params'] = hyper_df['params'].apply(
