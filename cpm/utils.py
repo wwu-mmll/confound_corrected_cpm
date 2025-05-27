@@ -72,6 +72,54 @@ def vector_to_upper_triangular_matrix(vector):
     return matrix
 
 
+def matrix_to_vector_3d(matrix_3d):
+    """
+    Convert a 3D connectivity matrix to a 2D array of upper-triangular vectors.
+
+    Parameters
+    ----------
+    matrix_3d: np.ndarray
+        Input 3D array of shape (n_samples, n, n), where each 2D matrix is square.
+
+    Returns
+    -------
+    upper: np.ndarray
+        2D array of shape (n_samples, n*(n - 1)/2) containing strictly upper-triangular elements of each matrix.
+    """
+    n_samples, n, _ = matrix_3d.shape
+    row_idx, col_idx = np.triu_indices(n, k=1)
+    flat = matrix_3d.reshape(n_samples, n * n)
+    upper = flat[:, np.ravel_multi_index((row_idx, col_idx), (n, n))]
+    return upper
+
+
+def vector_to_matrix_3d(vector_2d, shape):
+    """
+    Convert a vector containing strictly upper triangular parts back to a 3D matrix.
+
+    Parameters:
+    vector_2d (np.ndarray): A 2D array where each row is a vector of the strictly upper triangular part of a 2D matrix.
+    shape (tuple): The shape of the original 3D matrix, (n_samples, n, n).
+
+    Returns:
+    np.ndarray: The reconstructed 3D matrix of shape (n_samples, n, n).
+    """
+    n_samples, n, _ = shape
+    # Create an empty 3D matrix to fill
+    matrix_3d = np.zeros((n_samples, n, n))
+
+    # Create an index matrix for the strictly upper triangular indices
+    row_indices, col_indices = np.tril_indices(n, k=-1)  # k=1 excludes the diagonal
+    upper_tri_indices = np.ravel_multi_index((row_indices, col_indices), (n, n))
+
+    # Flatten the 3D matrix along the last two dimensions
+    flat_matrix = matrix_3d.reshape(n_samples, -1)
+
+    # Place the strictly upper triangular elements into the corresponding positions
+    np.put_along_axis(flat_matrix, upper_tri_indices[None, :], vector_2d, axis=1)
+
+    return matrix_3d
+
 def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     """
     Get a set of distinct colors from a specified colormap.
@@ -89,26 +137,97 @@ def get_colors_from_colormap(n_colors, colormap_name='tab10'):
 
 
 def check_data(X, y, covariates, impute_missings: bool = False):
-    logger.info("Checking data...")
+    """
+    Validate and format input data for modeling.
+
+    Parameters
+    ----------
+    X: array-like
+        Feature data of shape (n_samples, n_features) or
+        connectivity matrices of shape (n_samples, n, n). 3D matrices are vectorized.
+    y: array-like
+        Target values; 1D array of shape (n_samples,) or
+        2D array of shape (n_samples, 1) to be squeezed.
+    covariates: array-like or pandas.Series or pandas.DataFrame
+        Covariate data. Series are converted to 2D; DataFrames are one-hot encoded.
+    impute_missings: bool, default=False
+        If True, allow NaNs in X for imputation; NaNs in y always raise an error.
+
+    Returns
+    -------
+    X_checked: np.ndarray
+        2D array of validated (and vectorized) feature data.
+    y_checked: np.ndarray
+        1D array of target values.
+    cov_arr: np.ndarray
+        2D array of covariates.
+    """
+    # Convert to numpy for dimension checks
+    X_arr = np.asarray(X)
+    # Handle 3D connectivity matrices
+    if X_arr.ndim == 3:
+        X_arr = matrix_to_vector_3d(X_arr)
+    elif X_arr.ndim != 2:
+        raise ValueError(f"X must be 2D or 3D, got shape {X_arr.shape}")
+
+    # Ensure y is 1D vector
+    y_arr = np.asarray(y)
+    if y_arr.ndim == 2:
+        if 1 in y_arr.shape:
+            y_arr = y_arr.ravel()
+        else:
+            raise ValueError(f"y must be a vector, got shape {y_arr.shape}")
+    elif y_arr.ndim != 1:
+        raise ValueError(f"y must be 1D array, got shape {y_arr.shape}")
+
+    # Validate X and y with sklearn
     if impute_missings:
         try:
-            X, y = check_X_y(X, y, force_all_finite='allow-nan', allow_nd=True, y_numeric=True)
-        except ValueError as e:
-            logger.info("y contains NaN values. Only missing values in X and covariates can be imputed.")
-            raise e
+            X_checked, y_checked = check_X_y(
+                X_arr, y_arr,
+                force_all_finite='allow-nan',
+                allow_nd=True,
+                y_numeric=True
+            )
+        except ValueError:
+            logger.info(
+                "y contains NaN values. Only missing values in X and covariates can be imputed."
+            )
+            raise
     else:
         try:
-            X, y = check_X_y(X, y, force_all_finite=True, allow_nd=True, y_numeric=True)
-        except ValueError as e:
-            logger.info("Your input contains NaN values. Fix NaNs or use impute_missing_values=True.")
-            raise e
+            X_checked, y_checked = check_X_y(
+                X_arr, y_arr,
+                force_all_finite=True,
+                allow_nd=True,
+                y_numeric=True
+            )
+        except ValueError:
+            logger.info(
+                "Your input contains NaN values. Fix NaNs or use impute_missing_values=True."
+            )
+            raise
 
+    # Process covariates
     if isinstance(covariates, pd.Series):
-        covariates = covariates.to_frame().to_numpy()
-    if isinstance(covariates, pd.DataFrame):
-        # Convert categorical variables to one-hot encoding
-        covariates = pd.get_dummies(covariates, drop_first=True).to_numpy()
-    return X, y, covariates
+        cov_df = covariates.to_frame()
+    elif isinstance(covariates, pd.DataFrame):
+        cov_df = pd.get_dummies(covariates, drop_first=True)
+    else:
+        cov_df = covariates
+
+    if isinstance(cov_df, (pd.Series, pd.DataFrame)):
+        cov_arr = cov_df.to_numpy()
+    else:
+        cov_arr = np.asarray(cov_df)
+
+    # Ensure covariates are 2D
+    if cov_arr.ndim == 1:
+        cov_arr = cov_arr.reshape(-1, 1)
+    elif cov_arr.ndim != 2:
+        raise ValueError(f"covariates must be 1D or 2D, got shape {cov_arr.shape}")
+
+    return X_checked, y_checked, cov_arr
 
 
 def impute_missing_values(X_train, X_test, cov_train, cov_test):
