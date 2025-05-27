@@ -52,12 +52,14 @@ class HTMLReporter:
         edges_page = self.generate_brain_plot_page()
         edges_table_page = self.generate_edge_page()
         network_strength_page = self.generate_network_strengths_page()
+        data_description_page = self.generate_data_description_page()
         report_blocks = [
             info_page,
             main_results_page,
             network_strength_page,
             edges_page,
-            edges_table_page
+            edges_table_page,
+            data_description_page
         ]
 
         main_tabs = ar.Select(blocks=report_blocks)
@@ -72,6 +74,38 @@ class HTMLReporter:
         report.save(os.path.join(self.results_directory, 'report.html'),
                     open=False, formatting=ar.Formatting(width=ar.Width.FULL, accent_color="orange"))
         return
+
+    def generate_data_description_page(self):
+        target_column_name = 'y_true'  # Or 'y_pred' if that's your target
+        target_series = self.df_predictions[target_column_name]
+
+        target_desc = f"""
+        ## Target Variable Description
+
+        - Number of observations: {len(self.df_predictions)}
+        - Target variable name: {target_column_name}
+        - Range: {target_series.min():.2f} to {target_series.max():.2f}
+        - Mean: {target_series.mean():.2f}
+        - Standard deviation: {target_series.std():.2f}
+        """
+
+        # Create feature description
+        feature_desc = """
+        ## Dummy Feature Description
+
+        Connectivity features were derived from:
+        - Atlas i dont really know
+        - Number of regions: n_regions*e^(i*np.pi)*(-1)
+        - Connectivity measure: Pearson correlation
+        """
+
+        if self.atlas_labels is not None:
+            feature_desc += f"\n- Atlas labels provided: {len(self.atlas_labels)} regions"
+
+        return ar.Blocks(blocks=[
+            ar.Text(target_desc),
+            ar.Text(feature_desc)
+        ], label='Data Description')
 
     def generate_info_page(self):
         log_text = extract_log_block(os.path.join(self.results_directory, "cpm_log.txt"))
