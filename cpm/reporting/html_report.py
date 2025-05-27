@@ -53,13 +53,15 @@ class HTMLReporter:
         edges_table_page = self.generate_edge_page()
         network_strength_page = self.generate_network_strengths_page()
         data_description_page = self.generate_data_description_page()
+        hyperparameters_page = self.generate_hyperparameters_page()
         report_blocks = [
             info_page,
             main_results_page,
             network_strength_page,
             edges_page,
             edges_table_page,
-            data_description_page
+            data_description_page,
+            hyperparameters_page
         ]
 
         main_tabs = ar.Select(blocks=report_blocks)
@@ -75,8 +77,63 @@ class HTMLReporter:
                     open=False, formatting=ar.Formatting(width=ar.Width.FULL, accent_color="orange"))
         return
 
+    def generate_hyperparameters_page(self):
+        try:
+            if 'params' not in self.df.columns:
+                return ar.Blocks(blocks=[ar.Text("No hyperparameters found in results.")],
+                                 label='Hyperparameters')
+
+            hyper_df = self.df[['fold', 'model', 'params']].copy()
+
+            if isinstance(hyper_df['params'].iloc[0], dict):
+                hyper_df['params'] = hyper_df['params'].apply(
+                    lambda x: "\n".join(f"{k}: {v}" for k, v in x.items())
+                )
+
+            hyper_table = ar.DataTable(
+                df=hyper_df,
+                label='Hyperparameters by Fold and Model'
+            )
+
+            try:
+                if isinstance(self.df['params'].iloc[0], dict):
+                    all_params = pd.json_normalize(self.df['params'])
+                    param_summary = all_params.describe().T
+                    summary_table = ar.DataTable(
+                        df=param_summary,
+                        label='Hyperparameter Summary Statistics'
+                    )
+
+                    return ar.Blocks(
+                        blocks=[
+                            ar.Text("## Model Hyperparameters"),
+                            ar.Text("### Parameters Used in Each Fold"),
+                            hyper_table,
+                            ar.Text("### Parameter Summary Across Folds"),
+                            summary_table
+                        ],
+                        label='Hyperparameters'
+                    )
+            except Exception:
+                pass
+
+            return ar.Blocks(
+                blocks=[
+                    ar.Text("## Model Hyperparameters"),
+                    ar.Text("### Parameters Used in Each Fold"),
+                    hyper_table
+                ],
+                label='Hyperparameters'
+            )
+
+        except Exception as e:
+            return ar.Blocks(
+                blocks=[ar.Text(f"Could not generate hyperparameters page: {str(e)}")],
+                label='Hyperparameters'
+            )
+
     def generate_data_description_page(self):
-        target_column_name = 'y_true'  # Or 'y_pred' if that's your target
+        target_column_name = 'y_true'
         target_series = self.df_predictions[target_column_name]
 
         target_desc = f"""
@@ -89,7 +146,6 @@ class HTMLReporter:
         - Standard deviation: {target_series.std():.2f}
         """
 
-        # Create feature description
         feature_desc = """
         ## Dummy Feature Description
 
