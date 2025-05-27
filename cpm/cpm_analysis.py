@@ -13,7 +13,7 @@ from cpm.logging import setup_logging
 from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cpm.results_manager import ResultsManager, PermutationManager
-from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges
+from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
 from cpm.scoring import score_regression_models
 from cpm.reporting import HTMLReporter
 
@@ -154,6 +154,7 @@ class CPMRegression:
         self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
 
         # check data and convert to numpy
+        generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
 
         # Estimate models on actual data
@@ -233,7 +234,7 @@ class CPMRegression:
             network_strengths = model.get_network_strengths(X_test, cov_test)
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
             results_manager.store_predictions(y_pred=y_pred, y_true=y_test, params=best_params, fold=outer_fold,
-                                              param_id=0)
+                                              param_id=0, test_indices=test)
             results_manager.store_metrics(metrics=metrics, params=best_params, fold=outer_fold, param_id=0)
             results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test, fold=outer_fold)
 
