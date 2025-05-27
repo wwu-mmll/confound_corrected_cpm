@@ -140,15 +140,75 @@ class PThreshold(BaseEdgeSelector):
                             fdr_tsbh : two stage fdr correction (non-negative)
                             fdr_tsbky : two stage fdr correction (non-negative)
         """
+        self._threshold = None
+        self._correction = None
         self.threshold = threshold
         self.correction = correction
 
-    def select(self, r, p):
-        if self.correction is not None:
-            _, p, _, _ = multitest.multipletests(p, alpha=0.05, method=self.correction)
-        pos_edges = np.where((p < self.threshold) & (r > 0))[0]
-        neg_edges = np.where((p < self.threshold) & (r < 0))[0]
-        return {'positive': pos_edges, 'negative': neg_edges}
+    @property
+    def threshold(self):
+        if isinstance(self._threshold, (int, float)):
+            return [float(self._threshold)]
+        return self._threshold or [0.05]
+
+    @threshold.setter
+    def threshold(self, value):
+        if isinstance(value, (int, float)):
+            self._threshold = float(value)
+        elif isinstance(value, list):
+            self._threshold = value
+        else:
+            raise ValueError("threshold must be float or list")
+
+    @property
+    def correction(self):
+        if self._correction is None:
+            return [None]
+        if isinstance(self._correction, str):
+            return [self._correction]
+        return self._correction
+
+    @correction.setter
+    def correction(self, value):
+        if value is None:
+            self._correction = None
+        elif isinstance(value, str):
+            self._correction = value
+        elif isinstance(value, list):
+            self._correction = value
+        else:
+            raise ValueError("correction must be None, str, or list")
+
+    # def select(self, r, p):
+    #     if self.correction is not None:
+    #         _, p, _, _ = multitest.multipletests(p, alpha=0.05, method=self.correction)
+    #     pos_edges = np.where((p < self.threshold) & (r > 0))[0]
+    #     neg_edges = np.where((p < self.threshold) & (r < 0))[0]
+    #     return {'positive': pos_edges, 'negative': neg_edges}
+
+    def select(self, r, p):  # now threshold and correction is always list-type, so we have to iterate... however im not
+        # sure yet if this works properly
+
+        # maybe designing PThreshold to only accept single value args (example: threshold=0.01, correction=None)
+        # and then using edge_selection=[PThreshold(t,c) for t in [...] for c in [...]] is better
+
+        all_pos_edges = set()
+        all_neg_edges = set()
+        for thresh in self.threshold:
+            for corr in self.correction:
+                current_p = p.copy()
+                if corr is not None:
+                    _, current_p, _, _ = multitest.multipletests(current_p, alpha=0.05, method=corr)
+
+                # maybe this is quatsch, we could also store positive and negative edges for every combination using
+                # key (example: thresh=.01_corr=None: 'positive' [...], 'negative' [...]): value type data structure
+                all_pos_edges.update(np.where((current_p < thresh) & (r > 0))[0])
+                all_neg_edges.update(np.where((current_p < thresh) & (r < 0))[0])
+
+        return {
+            'positive': np.array(sorted(all_pos_edges), dtype=int),
+            'negative': np.array(sorted(all_neg_edges), dtype=int)
+        }
 
 
 class SelectPercentile(BaseEdgeSelector):
@@ -197,7 +257,7 @@ class UnivariateEdgeSelection(BaseEstimator):
                  edge_statistic: str = 'spearman',
                  t_test_filter: bool = False,
                  edge_selection: list = None,
-                ):
+                 ):
         self.r_edges = None
         self.p_edges = None
         self.t_test_filter = t_test_filter
