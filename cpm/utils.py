@@ -271,7 +271,7 @@ def generate_data_insights(X, y, covariates, results_directory):
 
     # Convert y to Series
     if isinstance(y, np.ndarray):
-        y = pd.Series(y, name="target")
+        y = pd.Series(np.squeeze(y), name="target")
     elif isinstance(y, pd.DataFrame):
         y = y.iloc[:, 0]
         y.name = y.name or "target"

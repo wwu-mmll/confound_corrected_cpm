@@ -51,6 +51,7 @@ nav:
     - Edge Selection: api/edge_selection.md
     - Models: api/models.md
     - Fold: api/fold.md
+    - Results Manager: api/results_manager.md
 
 extra_css:
   - stylesheets/extra.css
