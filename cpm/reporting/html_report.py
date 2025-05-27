@@ -17,6 +17,7 @@ class HTMLReporter:
     def __init__(self, results_directory: str, atlas_labels: str = None):
         self.results_directory = results_directory
         self.plots_dir = os.path.join(results_directory, "plots")
+        self.X_names, self.y_name, self.covariates_names = self.load_variable_names()
         os.makedirs(self.plots_dir, exist_ok=True)
 
         # copy atlas labels file to plotting directory
@@ -52,8 +53,11 @@ class HTMLReporter:
         edges_page = self.generate_brain_plot_page()
         edges_table_page = self.generate_edge_page()
         network_strength_page = self.generate_network_strengths_page()
+        data_insight_page = self.generate_target_cov_features_insights_page()  # <-- add this
+
         report_blocks = [
             info_page,
+            data_insight_page,
             main_results_page,
             network_strength_page,
             edges_page,
@@ -131,8 +135,8 @@ class HTMLReporter:
             bar_plot_blocks.append(plot_block)
 
         # predictions scatter plot
-        scatter_plot_name = scatter_plot(self.df_predictions, self.plots_dir)
-        scatter_covariates_name = scatter_plot_covariates_model(self.df_predictions, self.plots_dir)
+        scatter_plot_name = scatter_plot(self.df_predictions, self.plots_dir, self.y_name)
+        scatter_covariates_name = scatter_plot_covariates_model(self.df_predictions, self.plots_dir, self.y_name)
 
         scatter_block = ar.Media(file=scatter_plot_name, name=f"Predictions", caption="Scatter plot of true versus predicted scores.",
                               label='predictions')
@@ -148,11 +152,11 @@ class HTMLReporter:
         return ar.Blocks(blocks=[first_row, second_row], label='Predictive Performance')
 
     def generate_network_strengths_page(self):
-        scatter_network_strengths = scatter_plot_network_strengths(self.df_network_strengths, self.plots_dir)
+        scatter_network_strengths = scatter_plot_network_strengths(self.df_network_strengths, self.plots_dir, self.y_name)
         scatter_block_network_strength = ar.Media(file=scatter_network_strengths, name=f"NetworkStrengths",
                                  caption="Scatter plot of target versus network strength scores.",
                                  label='Network Strengths')
-        hist = histograms_network_strengths(self.df_network_strengths, self.plots_dir)
+        hist = histograms_network_strengths(self.df_network_strengths, self.plots_dir, self.y_name)
         hist_block_network_strength = ar.Media(file=hist, name=f"NetworkStrengthsHist",
                                                   caption="Histograms of network strength scores.",
                                                   label='Distribution of Network Strengths')
@@ -222,6 +226,38 @@ class HTMLReporter:
         df.set_index(['Region A', 'Region B'], inplace=True)
         return df
 
+    def generate_target_cov_features_insights_page(self):
+        """
+           Generate a page summarizing the input data:
+           - summary statistics from summary.csv
+           - scatter matrix image
+           """
+        summary_path = os.path.join(self.results_directory, "data_insights", "summary.csv")
+        scatter_matrix_path = os.path.join(self.results_directory, "data_insights", "scatter_matrix.png")
+
+        # Load summary table
+        if os.path.exists(summary_path):
+            summary_df = pd.read_csv(summary_path, index_col=0)
+            summary_block = ar.DataTable(df=summary_df, label="Input Data Summary")
+        else:
+            summary_block = ar.Text("Summary file not found.")
+
+        # Load scatter matrix image
+        if os.path.exists(scatter_matrix_path):
+            scatter_block = ar.Media(file=scatter_matrix_path, name="ScatterMatrix",
+                                     caption="Scatter matrix of covariates and target.")
+        else:
+            scatter_block = ar.Text("Scatter matrix image not found.")
+
+        # Combine both into a single report block
+        row = ar.Group(name='data_overview', blocks=[summary_block, scatter_block], columns=2, widths=[1, 1])
+        return ar.Blocks(blocks=[row], label='Target, Covariates & Features')
+
+    def load_variable_names(self):
+        X_names = pd.read_csv(os.path.join(self.results_directory, 'data_insights', "X_names.csv"), header=None)[0].tolist()
+        y_name = pd.read_csv(os.path.join(self.results_directory, 'data_insights', "y_name.csv"), header=None).iloc[0, 0]
+        covar_names = pd.read_csv(os.path.join(self.results_directory, 'data_insights', "covariate_names.csv"), header=None)[0].tolist()
+        return X_names, y_name, covar_names
 
 if __name__=="__main__":
     reporter = HTMLReporter(results_directory='/spm-data/vault-data3/mmll/projects/cpm_python/results_new/hcp_SSAGA_TB_Yrs_Smoked_spearman_partial_p=0.01')

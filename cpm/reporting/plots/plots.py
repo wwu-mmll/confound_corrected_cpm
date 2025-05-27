@@ -29,7 +29,7 @@ def apply_nature_style():
     })
 
 
-def scatter_plot(df: pd.DataFrame, results_folder: str) -> str:
+def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     apply_nature_style()
 
     df = df[df['model'].isin(['connectome', 'residuals', 'full'])]
@@ -47,8 +47,8 @@ def scatter_plot(df: pd.DataFrame, results_folder: str) -> str:
     g = sns.FacetGrid(df, row="model", col="network", margin_titles=True, height=1.5, aspect=1)
     g.map_dataframe(regplot_colored)
     g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
-    g.set_xlabels("true")
-    g.set_ylabels("predicted")
+    g.set_xlabels(y_name)
+    g.set_ylabels(f"predicted {y_name}")
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
@@ -60,7 +60,7 @@ def scatter_plot(df: pd.DataFrame, results_folder: str) -> str:
     return png_path
 
 
-def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str) -> str:
+def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Generate a single scatter plot with regression line for the 'covariates' model.
     """
@@ -85,8 +85,8 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str) -> str:
     )
 
     sns.despine(trim=True)
-    ax.set_xlabel("true")
-    ax.set_ylabel("predicted")
+    ax.set_xlabel(y_name)
+    ax.set_ylabel(f"predicted {y_name}")
     ax.set_title('covariates')
     png_path = os.path.join(results_folder, "scatter_covariates.png")
     pdf_path = os.path.join(results_folder, "scatter_covariates.pdf")
@@ -98,7 +98,7 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str) -> str:
     return png_path
 
 
-def histograms_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
+def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 grid of histograms showing the distribution of network_strength
     for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
@@ -140,7 +140,7 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
     )
     g.map_dataframe(histplot_colored)
     g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
-    g.set_axis_labels("network strength", "count")
+    g.set_axis_labels("network strength", y_name)
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
@@ -153,7 +153,7 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
     return png_path
 
 
-def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str) -> str:
+def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 scatter plot of y_true vs network_strength
     for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
@@ -190,7 +190,7 @@ def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str) -> str
     )
     g.map_dataframe(regplot_colored)
     g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
-    g.set_axis_labels("network strength", "target score")
+    g.set_axis_labels("network strength", y_name)
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
