@@ -28,7 +28,7 @@ class CPMRegression:
                  inner_cv: Union[BaseCrossValidator, BaseShuffleSplit] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
                      edge_statistic='pearson',
-                     edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
+                     edge_selection=PThreshold(threshold=[0.05], correction=None)
                  ),
                  select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,

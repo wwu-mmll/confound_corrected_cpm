@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import torch
 
 from sklearn.utils import check_X_y
 from sklearn.impute import SimpleImputer
@@ -16,11 +17,11 @@ import logging
 
 from cpm.reporting.plots.plots import pairplot_flexible
 
-
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", category=ConstantInputWarning)
 warnings.filterwarnings("ignore", category=NearConstantInputWarning)
+
 
 def train_test_split(train, test, X, y, covariates):
     return X[train], X[test], y[train], y[test], covariates[train], covariates[test]
@@ -122,6 +123,7 @@ def vector_to_matrix_3d(vector_2d, shape):
 
     return matrix_3d
 
+
 def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     """
     Get a set of distinct colors from a specified colormap.
@@ -144,13 +146,13 @@ def check_data(X, y, covariates, impute_missings: bool = False):
 
     Parameters
     ----------
-    X: array-like
+    X: array-like or torch.Tensor
         Feature data of shape (n_samples, n_features) or
         connectivity matrices of shape (n_samples, n, n). 3D matrices are vectorized.
-    y: array-like
+    y: array-like or torch.Tensor
         Target values; 1D array of shape (n_samples,) or
         2D array of shape (n_samples, 1) to be squeezed.
-    covariates: array-like or pandas.Series or pandas.DataFrame
+    covariates: array-like or pandas.Series or pandas.DataFrame or torch.Tensor
         Covariate data. Series are converted to 2D; DataFrames are one-hot encoded.
     impute_missings: bool, default=False
         If True, allow NaNs in X for imputation; NaNs in y always raise an error.
@@ -164,53 +166,38 @@ def check_data(X, y, covariates, impute_missings: bool = False):
     cov_arr: np.ndarray
         2D array of covariates.
     """
-    # Convert to numpy for dimension checks
-    X_arr = np.asarray(X)
+
+    def to_numpy(data):
+        """Ensure tensors are moved to CPU before conversion."""
+        if isinstance(data, torch.Tensor):
+            return data.cpu().numpy()
+        return np.asarray(data)
+
+    # Convert inputs to NumPy arrays safely
+    X_arr = to_numpy(X)
+    y_arr = to_numpy(y)
+    cov_arr = to_numpy(covariates)
+
     # Handle 3D connectivity matrices
     if X_arr.ndim == 3:
         X_arr = matrix_to_vector_3d(X_arr)
     elif X_arr.ndim != 2:
         raise ValueError(f"X must be 2D or 3D, got shape {X_arr.shape}")
 
-    # Ensure y is 1D vector
-    y_arr = np.asarray(y)
-    if y_arr.ndim == 2:
-        if 1 in y_arr.shape:
-            y_arr = y_arr.ravel()
-        else:
-            raise ValueError(f"y must be a vector, got shape {y_arr.shape}")
+    # Ensure y is a 1D vector
+    if y_arr.ndim == 2 and 1 in y_arr.shape:
+        y_arr = y_arr.ravel()
     elif y_arr.ndim != 1:
         raise ValueError(f"y must be 1D array, got shape {y_arr.shape}")
 
     # Validate X and y with sklearn
-    if impute_missings:
-        try:
-            X_checked, y_checked = check_X_y(
-                X_arr, y_arr,
-                force_all_finite='allow-nan',
-                allow_nd=True,
-                y_numeric=True
-            )
-        except ValueError:
-            logger.info(
-                "y contains NaN values. Only missing values in X and covariates can be imputed."
-            )
-            raise
-    else:
-        try:
-            X_checked, y_checked = check_X_y(
-                X_arr, y_arr,
-                force_all_finite=True,
-                allow_nd=True,
-                y_numeric=True
-            )
-        except ValueError:
-            logger.info(
-                "Your input contains NaN values. Fix NaNs or use impute_missing_values=True."
-            )
-            raise
+    force_finite = 'allow-nan' if impute_missings else True
+    try:
+        X_checked, y_checked = check_X_y(X_arr, y_arr, force_all_finite=force_finite, allow_nd=True, y_numeric=True)
+    except ValueError:
+        raise ValueError("Your input contains NaN values. Fix NaNs or use impute_missing_values=True.")
 
-    # Process covariates
+    # Process covariates safely
     if isinstance(covariates, pd.Series):
         cov_df = covariates.to_frame()
     elif isinstance(covariates, pd.DataFrame):
@@ -221,7 +208,7 @@ def check_data(X, y, covariates, impute_missings: bool = False):
     if isinstance(cov_df, (pd.Series, pd.DataFrame)):
         cov_arr = cov_df.to_numpy()
     else:
-        cov_arr = np.asarray(cov_df)
+        cov_arr = to_numpy(cov_df)
 
     # Ensure covariates are 2D
     if cov_arr.ndim == 1:
@@ -244,6 +231,7 @@ def impute_missing_values(X_train, X_test, cov_train, cov_test):
     cov_test = cov_imputer.transform(cov_test)
     return X_train, X_test, cov_train, cov_test
 
+
 def select_stable_edges(stability_edges, stability_threshold):
     return {'positive': np.where(stability_edges['positive'] > stability_threshold)[0],
             'negative': np.where(stability_edges['negative'] > stability_threshold)[0]}
@@ -254,20 +242,41 @@ def generate_data_insights(X, y, covariates, results_directory):
     Generate summary statistics and diagnostic plots about the input data.
     Saves outputs to a subfolder in results_directory.
 
-    Handles both pandas DataFrames and NumPy arrays.
+    Handles pandas DataFrames, NumPy arrays and torch.Tensors.
     """
+    import torch
+    # --- NEW: Torch Tensor → NumPy conversion ---
+    if isinstance(X, torch.Tensor):
+        X = X.cpu().detach().numpy()
+    if isinstance(y, torch.Tensor):
+        y = y.cpu().detach().numpy()
+    if covariates is not None and isinstance(covariates, torch.Tensor):
+        covariates = covariates.cpu().detach().numpy()
+
     # Create output folder
     output_dir = os.path.join(results_directory, "data_insights")
     os.makedirs(output_dir, exist_ok=True)
 
     X_names, y_name, covariates_names = get_variable_names(X, y, covariates)
-    pd.Series(X_names).to_csv(os.path.join(output_dir, "X_names.csv"), index=False, header=False)
-    pd.Series([y_name]).to_csv(os.path.join(output_dir, "y_name.csv"), index=False, header=False)
-    pd.Series(covariates_names).to_csv(os.path.join(output_dir, "covariate_names.csv"), index=False, header=False)
+    pd.Series(X_names).to_csv(
+        os.path.join(output_dir, "X_names.csv"),
+        index=False, header=False
+    )
+    pd.Series([y_name]).to_csv(
+        os.path.join(output_dir, "y_name.csv"),
+        index=False, header=False
+    )
+    pd.Series(covariates_names).to_csv(
+        os.path.join(output_dir, "covariate_names.csv"),
+        index=False, header=False
+    )
 
     # Convert X to DataFrame if needed
     if isinstance(X, np.ndarray):
-        X = pd.DataFrame(X, columns=[f"feature {i + 1}" for i in range(X.shape[1])])
+        X = pd.DataFrame(
+            X,
+            columns=[f"feature {i + 1}" for i in range(X.shape[1])]
+        )
 
     # Convert y to Series
     if isinstance(y, np.ndarray):
@@ -281,7 +290,10 @@ def generate_data_insights(X, y, covariates, results_directory):
     # Convert covariates to DataFrame
     if covariates is not None:
         if isinstance(covariates, np.ndarray):
-            covariates = pd.DataFrame(covariates, columns=[f"covariate {i + 1}" for i in range(covariates.shape[1])])
+            covariates = pd.DataFrame(
+                covariates,
+                columns=[f"covariate {i + 1}" for i in range(covariates.shape[1])]
+            )
         elif isinstance(covariates, pd.Series):
             covariates = covariates.to_frame()
             if covariates.columns[0] is None:

@@ -28,6 +28,7 @@ plotly = "*"
 arakawa = "*"
 netplotbrain = "*"
 networkx = "*"
+torch="*"
 scikit-image = "*"
 
 [build-system]
