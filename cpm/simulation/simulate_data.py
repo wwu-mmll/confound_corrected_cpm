@@ -1,6 +1,14 @@
 import numpy as np
 from sklearn.datasets import make_regression
 from sklearn.preprocessing import StandardScaler
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
+import statsmodels.api as sm
+
+from cpm.edge_selection import pearson_correlation_with_pvalues, semi_partial_correlation_pearson
+
 
 
 def simulate_regression_data(n_samples: int = 500,
@@ -125,3 +133,82 @@ def simulate_regression_data_scenarios(n_samples: int = 500,
     X[:, :n_informative_features:2] = X[:, :n_informative_features:2] * (-1)
 
     return X, y, z
+
+
+def simulate_confounded_data_chyzhyk(link_type='direct_link',
+                                     n_samples=100, n_features=100):
+    """
+    This is code by Darya Chyzhyk et al. 2022
+    https://github.com/darya-chyzhyk/confound_prediction/blob/master/confound_prediction/data_simulation.py
+    :param link_type: str,
+        Type of the links between target and confound. Options: "no_link",
+        "direct_link", "weak_link"
+    :param n_samples: int,
+        number of samples
+    :param n_features: int,
+        number of features
+    :return:
+    """
+    np.random.seed(42)
+
+    mu, sigma = 0, 1.0  # mean and standard deviation
+    x_rand = np.random.normal(mu, sigma, [n_samples, n_features])
+    y_rand = np.random.normal(mu, sigma, n_samples)
+    z_rand = np.random.normal(mu, sigma, n_samples)
+
+    if link_type == 'no_link':
+        y = np.copy(y_rand)
+        z = 1 * y_rand + z_rand
+        X = x_rand + z.reshape(-1, 1)
+    elif link_type == 'direct_link':
+        y = np.copy(y_rand)
+        z = y_rand + z_rand
+        X = x_rand + y_rand.reshape(-1, 1) + z.reshape(-1, 1)
+    elif link_type == 'weak_link':
+        y = np.copy(y_rand)
+        z = 0.5 * y_rand + z_rand
+        X = x_rand + y_rand.reshape(-1, 1) + z.reshape(-1, 1)
+    return X, y, z
+
+
+def plot_confounding_gridspec(X, y, z):
+    """
+    Simulate confounded data and produce:
+     1) Interactive table of feature correlations
+     2) 10×10 grid of X vs y sorted by |r(X,y)|
+     3) 10×10 grid of X vs z sorted by |r(X,z)|
+     4) Single scatter of z vs y
+     5) 10×10 grid of residualized X vs y sorted by |r(resid_X,y)|
+    Returns:
+        pd.DataFrame summary table with columns [feature, r_xy, r_xz, r_resid_y]
+    """
+    n_features = X.shape[1]
+    n_covariates = z.shape[1]
+
+    r_xy, _ = pearson_correlation_with_pvalues(y, X)
+
+    r_xz = dict()
+    r_z_y = dict()
+    for zi in range(z.shape[1]):
+        r, _ = pearson_correlation_with_pvalues(z[:, zi], X)
+        r_xz[f"r_xz{zi}"] = r
+        r_z_y[f"r_yz{zi}"] = np.repeat(pearsonr(z[:, zi], y)[0], n_features)
+    r_xresid_y, _ = semi_partial_correlation_pearson(y, X, z)
+
+    # 3) build summary table
+    features = [f"X{k}" for k in range(n_features)]
+    df_summary = pd.DataFrame({
+        'feature':     features,
+        'r_xy':        r_xy,
+
+    })
+    df_summary = pd.concat([df_summary, pd.DataFrame(r_xz)], axis=1)
+    df_summary = pd.concat([df_summary, pd.DataFrame(r_z_y)], axis=1)
+    df_summary = pd.concat([df_summary, pd.DataFrame(r_xresid_y, columns=['r_xresid_y'])], axis=1)
+
+    # sort by absolute raw correlation
+    df_summary['abs_r_xy'] = df_summary['r_xy'].abs()
+    df_summary.sort_values('abs_r_xy', ascending=False, inplace=True)
+    df_summary.drop('abs_r_xy', axis=1, inplace=True)
+
+    return df_summary

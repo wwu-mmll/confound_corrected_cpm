@@ -1,7 +1,7 @@
-from sklearn.model_selection import KFold, ShuffleSplit, RepeatedKFold
+from sklearn.model_selection import RepeatedKFold
 
 from cpm import CPMRegression
-from cpm.simulate_data import simulate_regression_data_scenarios
+from cpm.simulation.simulate_data import simulate_regression_data_scenarios
 from cpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 

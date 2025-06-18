@@ -2,10 +2,8 @@ import unittest
 
 import numpy as np
 import pandas as pd
-from numpy.random import shuffle
-from pandas.core.common import random_state
 
-from cpm.simulate_data import simulate_regression_data_scenarios
+from cpm.simulation.simulate_data import simulate_regression_data_scenarios
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cpm.cpm_analysis import CPMRegression
 from cpm.utils import check_data

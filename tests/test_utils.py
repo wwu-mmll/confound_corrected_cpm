@@ -1,14 +1,13 @@
 import unittest
 import numpy as np
 import pandas as pd
-from sklearn.utils import check_X_y
 
 from cpm.utils import (
     check_data,
     matrix_to_vector_3d,
     get_variable_names
 )
-from cpm.simulate_data import simulate_regression_data_scenarios
+from cpm.simulation.simulate_data import simulate_regression_data_scenarios
 
 class TestUtils(unittest.TestCase):
     def setUp(self):
