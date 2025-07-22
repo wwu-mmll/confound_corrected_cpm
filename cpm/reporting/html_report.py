@@ -276,21 +276,70 @@ class HTMLReporter:
         blocks = ar.Blocks(blocks=[third_header, third_row], label='Brain Plots')
         return blocks
 
+    # def generate_edge_page(self):
+    #     import numpy as np
+    #
+    #     dfs = dict()
+    #     for network in ['positive', 'negative']:
+    #         edges = {'stability': np.load(os.path.join(self.results_directory, f"stability_{network}_edges.npy")),
+    #                  'stability_significance': np.load(os.path.join(self.results_directory, f"sig_stability_{network}_edges.npy"))}
+    #         dfs[network] = self.create_edge_table(edges, self.atlas_labels)
+    #
+    #
+    #     first_header = ar.Group(blocks=[ar.Text("## Positive Edges"), ar.Text("## Negative Edges")], columns=2)
+    #     first_row = ar.Group(blocks=[ar.DataTable(df=dfs['positive']), ar.DataTable(df=dfs['negative'])], columns=2)
+    #
+    #     blocks = ar.Blocks(blocks=[first_header, first_row], label='Stable Edges')
+    #     return blocks
+
     def generate_edge_page(self):
         import numpy as np
+        from pathlib import Path
 
-        dfs = dict()
+        dfs = {}
+
         for network in ['positive', 'negative']:
-            edges = {'stability': np.load(os.path.join(self.results_directory, f"stability_{network}_edges.npy")),
-                     'stability_significance': np.load(os.path.join(self.results_directory, f"sig_stability_{network}_edges.npy"))}
-            dfs[network] = self.create_edge_table(edges, self.atlas_labels)
+            stability_path = Path(self.results_directory) / f"stability_{network}_edges.npy"
+            sig_path = Path(self.results_directory) / f"sig_stability_{network}_edges.npy"
 
+            if not stability_path.exists() or not sig_path.exists():
+                print(f"Warning: Missing edge files for {network} network")
+                dfs[network] = pd.DataFrame({"Message": [f"No {network} edges data available"]})
+                continue
 
-        first_header = ar.Group(blocks=[ar.Text("## Positive Edges"), ar.Text("## Negative Edges")], columns=2)
-        first_row = ar.Group(blocks=[ar.DataTable(df=dfs['positive']), ar.DataTable(df=dfs['negative'])], columns=2)
+            try:
+                edges = {
+                    'stability': np.load(stability_path),
+                    'stability_significance': np.load(sig_path)
+                }
+                df = self.create_edge_table(edges, self.atlas_labels)
 
-        blocks = ar.Blocks(blocks=[first_header, first_row], label='Stable Edges')
-        return blocks
+                if df.empty:
+                    df = pd.DataFrame({"Message": [f"No significant {network} edges found"]})
+
+                dfs[network] = df
+
+            except Exception as e:
+                print(f"Error loading {network} edges: {str(e)}")
+                dfs[network] = pd.DataFrame({"Error": [f"Failed to load {network} edges"]})
+
+        header = ar.Group(
+            blocks=[
+                ar.Text("## Positive Edges"),
+                ar.Text("## Negative Edges")
+            ],
+            columns=2
+        )
+
+        data_row = ar.Group(
+            blocks=[
+                ar.DataTable(df=dfs['positive']),
+                ar.DataTable(df=dfs['negative'])
+            ],
+            columns=2
+        )
+
+        return ar.Blocks(blocks=[header, data_row], label='Stable Edges')
 
     @staticmethod
     def create_edge_table(matrix, atlas):

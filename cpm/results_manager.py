@@ -6,6 +6,7 @@ from typing import Union
 import numpy as np
 
 from glob import glob
+import torch
 
 from cpm.models import NetworkDict, ModelDict
 from cpm.utils import vector_to_upper_triangular_matrix
@@ -150,6 +151,15 @@ class ResultsManager:
         """
         #preds = (pd.DataFrame.from_dict(y_pred).stack().explode().reset_index().rename(
         #    {'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1).set_index(['network', 'model']))
+
+        def _to_float(val):
+            if isinstance(val, torch.Tensor):
+                return val.item()
+            try:
+                return float(val)
+            except Exception:
+                return np.nan
+
         preds = (
             pd.DataFrame.from_dict(y_pred)
             .stack()
@@ -158,9 +168,17 @@ class ResultsManager:
             .rename({'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1)
             .set_index(['network', 'model'])
         )
+        preds['y_pred'] = preds['y_pred'].apply(_to_float)
         n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
         preds['y_true'] = np.tile(y_true, n_network_model)
-        preds['params'] = [params] * y_true.shape[0] * n_network_model
+        #preds['params'] = [params] * y_true.shape[0] * n_network_model
+        import json
+        params_serialized = (
+            json.dumps(params) if isinstance(params, dict) and params
+            else "None"
+        )
+        preds['params'] = [params_serialized] * y_true.shape[0] * n_network_model
+        preds['params'] = [params_serialized] * y_true.shape[0] * n_network_model
         preds['fold'] = [fold] * y_true.shape[0] * n_network_model
         preds['param_id'] = [param_id] * y_true.shape[0] * n_network_model
         preds['sample_index'] = np.tile(test_indices, n_network_model)  # include indices
@@ -175,7 +193,7 @@ class ResultsManager:
             for network in networks:
                 df = pd.DataFrame()
                 df['y_true'] = y_true
-                df['network_strength'] = np.squeeze(network_strengths[model][network])
+                df['network_strength'] = np.squeeze(network_strengths[model][network].cpu().numpy())
                 df['model'] = [model] * network_strengths[model][network].shape[0]
                 df['fold'] = [fold] * network_strengths[model][network].shape[0]
                 df['network'] = [network] * network_strengths[model][network].shape[0]
@@ -198,7 +216,7 @@ class ResultsManager:
         results.columns = results.columns.droplevel(1)
         return results
 
-    def save_predictions(self):  # update save function to sort by index prior to saving
+    def save_predictions(self):
         """
         Save predictions to CSV.
         """

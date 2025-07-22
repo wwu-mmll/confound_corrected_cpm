@@ -40,9 +40,13 @@ def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
 
     def regplot_colored(data, **kwargs):
         color = COLOR_MAP.get(data['network'].iloc[0], "#000000")
+
+        x = data["y_true"].astype(float)
+        y = data["y_pred"].astype(float)
+
         sns.regplot(
-            data=data,
-            x="y_true", y="y_pred",
+            x=x,
+            y=y,
             scatter_kws={"alpha": 0.7, "s": 14, "edgecolor": "white", "color": color},
             line_kws={"color": color, "linewidth": 0.75},
             **kwargs

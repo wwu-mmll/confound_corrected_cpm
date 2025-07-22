@@ -5,9 +5,11 @@ import shutil
 from typing import Union
 
 import numpy as np
+import torch
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
 
+import cpm.scoring
 from cpm.fold import run_inner_folds
 from cpm.logging import setup_logging
 from cpm.models import LinearCPMModel
@@ -16,6 +18,10 @@ from cpm.results_manager import ResultsManager, PermutationManager
 from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
 from cpm.scoring import score_regression_models
 from cpm.reporting import HTMLReporter
+
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device)
 
 
 class CPMRegression:
@@ -34,7 +40,8 @@ class CPMRegression:
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
                  n_permutations: int = 0,
-                 atlas_labels: str = None):
+                 atlas_labels: str = None,
+                 lambda_reg: float = 1e-5):
         """
         Initialize the CPMRegression object.
 
@@ -55,6 +62,7 @@ class CPMRegression:
         atlas_labels: str
             CSV file containing atlas and regions labels.
         """
+        self.lambda_reg = lambda_reg
         self.results_directory = results_directory
         self.cv = cv
         self.inner_cv = inner_cv
@@ -63,6 +71,8 @@ class CPMRegression:
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
         self.n_permutations = n_permutations
+
+        print(edge_selection)
 
         np.random.seed(42)
         os.makedirs(self.results_directory, exist_ok=True)
@@ -153,19 +163,93 @@ class CPMRegression:
         """
         self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
 
-        # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
 
-        # Estimate models on actual data
-        self._single_run(X=X, y=y, covariates=covariates, perm_run=0)
+
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        for perm_id in range(1, self.n_permutations + 1):
-            self.logger.debug(f"Permutation run {perm_id}")
-            y = np.random.permutation(y)
-            self._single_run(X=X, y=y, covariates=covariates, perm_run=perm_id)
+        p = self.n_permutations + 1
+        cov_tensor = covariates
+        cov_tot = cov_tensor.unsqueeze(0).repeat(p, 1, 1)  # (p, n_samples, n_cov)
+
+        y_tot = torch.zeros((p, y.shape[0]), dtype=y.dtype)
+        X_tot = torch.zeros((p, *X.shape), dtype=X.dtype)
+
+        y_tot[0] = y
+        X_tot[0] = X
+
+        for i in range(1, p):
+            idx = torch.randperm(y.shape[0])
+            y_tot[i] = y[idx]
+            X_tot[i] = X[idx]
+
+        X_tot.to(device)
+        y_tot.to(device)
+        cov_tot.to(device)
+
+
+        import time
+        start = time.time()
+        results = self._batch_run(X=X_tot, y=y_tot, covariates=cov_tot)
+        end = time.time()
+        self.logger.info(f"Estimation took {end-start:.2f} seconds")
+
+        results_managers = []
+        for b in range(len(results["metrics_detailed"])):
+            rm = ResultsManager(output_dir=self.results_directory, perm_run=b,
+                                n_folds=self.cv.get_n_splits(), n_features=X.shape[-1])
+            results_managers.append(rm)
+
+        for b, results_manager in enumerate(results_managers):
+            for fold in range(self.cv.get_n_splits()):
+                edge_mask = results["edge_masks"][b, fold].cpu().numpy()
+
+                edges = {
+                    'positive': np.where(edge_mask > 0)[0],
+                    'negative': np.array([], dtype=int)
+                }
+
+                fold_key = f'fold_{fold}'
+                scores = results["metrics_detailed"][b][fold_key]
+
+                results_manager.store_edges(edges=edges, fold=fold)
+                results_manager.store_metrics(metrics=results["metrics_detailed"][b][f'fold_{fold}'], params={}, fold=fold, param_id=0)
+
+                y_pred = results["predictions"][b][fold_key]
+                y_true = y_tot[b][fold * (y.shape[0] // self.cv.get_n_splits()):(fold + 1) * (
+                            y.shape[0] // self.cv.get_n_splits())].cpu().numpy()
+                test_idx = np.arange(y_true.shape[0])
+                results_manager.store_predictions(
+                    y_pred=y_pred,
+                    y_true=y_true,
+                    params={},
+                    fold=fold,
+                    param_id=0,
+                    test_indices=test_idx
+                )
+
+                network_strengths = results["network_strengths"][b][fold_key]
+                y_true = y_tot[b][fold * (y.shape[0] // self.cv.get_n_splits()):
+                                  (fold + 1) * (y.shape[0] // self.cv.get_n_splits())].cpu().numpy()
+
+                results_manager.store_network_strengths(
+                    network_strengths=network_strengths,
+                    y_true=y_true,
+                    fold=fold
+                )
+
+            results_manager.calculate_final_cv_results()
+            results_manager.calculate_edge_stability()
+
+            results_manager.save_predictions()
+            results_manager.save_network_strengths()
+
+            self.logger.info(results_manager.agg_results.round(4).to_string())
+
+        # reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
+        # reporter.generate_html_report()
 
         if self.n_permutations > 0:
             PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
@@ -174,75 +258,135 @@ class CPMRegression:
         reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
         reporter.generate_html_report()
 
-    def generate_html_report(self):
-        self.logger.info("Generating HTML report.")
-        reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
-        reporter.generate_html_report()
+    # def generate_html_report(self):
+    #     self.logger.info("Generating HTML report.")
+    #     reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
+    #     reporter.generate_html_report()
 
-    def _single_run(self,
-                    X: Union[pd.DataFrame, np.ndarray],
-                    y: Union[pd.Series, pd.DataFrame, np.ndarray],
-                    covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
-                    perm_run: int = 0):
-        """
-        Perform an estimation run (either real or permuted data). Includes outer cross-validation loop. For permutation
-        runs, the same strategy is used, but printing is less verbose and the results folder changes.
+    def _batch_run(self,
+                   X: torch.Tensor,
+                   y: torch.Tensor,
+                   covariates: torch.Tensor,
+                   ) -> dict:
+        B, n, p = X.shape
+        _, _, c = covariates.shape
+        n_folds = self.cv.get_n_splits()
 
-        :param X: Features (predictors).
-        :param y: Labels (target variable).
-        :param covariates: Covariates to control for.
-        :param perm_run: Permutation run identifier.
-        """
-        results_manager = ResultsManager(output_dir=self.results_directory, perm_run=perm_run,
-                                         n_folds=self.cv.get_n_splits(), n_features=X.shape[1])
+        edge_masks_all = torch.zeros(B, n_folds, p, device=device)
+        metrics_all = [{} for _ in range(B)]  # pro Batch ein Metrik-Dict wie score_regression_models
+        all_predictions_dict = [{} for _ in range(B)]  # [batch][fold] -> y_pred_dict
+        all_network_strengths = [{} for _ in range(B)]  # [batch][fold] -> network_strengths
 
-        for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
-            if not perm_run:
-                self.logger.debug(f"Running fold {outer_fold + 1}/{self.cv.get_n_splits()}")
+        for outer_fold, (train_idx, test_idx) in enumerate(self.cv.split(torch.arange(n))):
+            # Split
+            Xtr, Xte = X[:, train_idx].to(device), X[:, test_idx].to(device)
+            ytr, yte = y[:, train_idx].to(device), y[:, test_idx].to(device)
+            covtr, covte = covariates[:, train_idx].to(device), covariates[:, test_idx].to(device)
 
-            # split according to single outer fold
-            X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
+            # Edge Selection
+            r_edges, p_edges = self.edge_selection.fit_transform(Xtr, ytr, covtr)  # [B, p]
+            edge_mask = (p_edges < 0.01).to(dtype=torch.bool).squeeze()  # [B, p]
+            edge_masks_all[:, outer_fold] = edge_mask
 
-            # impute missing values
-            if self.impute_missing_values:
-                X_train, X_test, cov_train, cov_test = impute_missing_values(X_train, X_test, cov_train, cov_test)
+            for b in range(B):
+                mask_np = edge_mask[b].cpu().numpy()
+                edges = {
+                    'positive': np.where(mask_np > 0)[0],
+                    'negative': np.array([], dtype=int)
+                }
 
-            # if the user specified an inner cross-validation, estimate models witin inner loop
-            if self.inner_cv:
-                best_params, stability_edges = run_inner_folds(X=X_train, y=y_train, covariates=cov_train,
-                                                               inner_cv=self.inner_cv,
-                                                               edge_selection=self.edge_selection,
-                                                               results_directory=os.path.join(results_manager.results_directory, 'folds', str(outer_fold)),
-                                                               perm_run=perm_run)
-                if not perm_run:
-                    self.logger.info(f"Best hyperparameters: {best_params}")
-            else:
-                best_params = self.edge_selection.param_grid[0]
+                # Daten für aktuellen Batch
+                Xb_tr, Xb_te = Xtr[b], Xte[b]
+                cov_b_tr, cov_b_te = covtr[b], covte[b]
+                yb_tr = ytr[b]
+                yb_te = yte[b]
 
-            # Use best parameters to estimate performance on outer fold test set
-            if self.select_stable_edges:
-                edges = select_stable_edges(stability_edges, self.stability_threshold)
-            else:
-                self.edge_selection.set_params(**best_params)
-                edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train).return_selected_edges()
+                model = LinearCPMModel(edges=edges, device=device).fit(Xb_tr, yb_tr, cov_b_tr)
+                y_pred_dict = model.predict(Xb_te, cov_b_te)
 
-            results_manager.store_edges(edges=edges, fold=outer_fold)
+                scores = score_regression_models(y_true=yb_te, y_pred_dict=y_pred_dict, primary_metric_only=False)
+                metrics_all[b][f'fold_{outer_fold}'] = scores
 
-            # Build model and make predictions
-            model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
-            y_pred = model.predict(X_test, cov_test)
-            network_strengths = model.get_network_strengths(X_test, cov_test)
-            metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
-            results_manager.store_predictions(y_pred=y_pred, y_true=y_test, params=best_params, fold=outer_fold,
-                                              param_id=0, test_indices=test)
-            results_manager.store_metrics(metrics=metrics, params=best_params, fold=outer_fold, param_id=0)
-            results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test, fold=outer_fold)
+                all_predictions_dict[b][f'fold_{outer_fold}'] = y_pred_dict
 
-        # once all outer folds are done, calculate final results and edge stability
-        results_manager.calculate_final_cv_results()
-        results_manager.calculate_edge_stability()
+                network_strengths = model.get_network_strengths(Xb_te, cov_b_te)
+                all_network_strengths[b][f'fold_{outer_fold}'] = network_strengths
 
-        if not perm_run:
-            self.logger.info(results_manager.agg_results.round(4).to_string())
-            results_manager.save_predictions()
-            results_manager.save_network_strengths()
+        return {
+            "edge_masks": edge_masks_all,  # [B, n_folds, p]
+            "metrics_detailed": metrics_all,
+            "predictions": all_predictions_dict,
+            "network_strengths": all_network_strengths
+        }
+
+        #     for b in range(B):
+        #         print(edge_mask.shape)
+        #         mask_pos = edge_mask[b, :]
+        #         print("mask_pos shape:", mask_pos.shape)  # Sollte [p] sein
+        #         print("Xtr[b] shape:", Xtr[b].shape)
+        #         Xb_tr, Xb_te = Xtr[b][:, mask_pos], Xte[b][:, mask_pos]
+        #         cov_b_tr, cov_b_te = covtr[b], covte[b]
+        #         yb_tr = ytr[b].unsqueeze(1)
+        #         yb_te = yte[b]
+        #
+        #         # Modellvarianten: CONNECTOME ONLY
+        #         X_connectome_train = Xb_tr
+        #         X_connectome_test = Xb_te
+        #
+        #         # COVARIATES ONLY
+        #         X_cov_train = cov_b_tr
+        #         X_cov_test = cov_b_te
+        #
+        #         # FULL MODEL
+        #         X_full_train = torch.cat([Xb_tr, cov_b_tr], dim=1)
+        #         X_full_test = torch.cat([Xb_te, cov_b_te], dim=1)
+        #
+        #         cov_b_tr = cov_b_tr.float()
+        #         yb_tr = yb_tr.float()
+        #
+        #         # RESIDUALS: erst Covariate-Modell, dann Residuen
+        #         beta_cov = torch.linalg.solve(
+        #             cov_b_tr.T @ cov_b_tr + self.lambda_reg * torch.eye(c, device=device),
+        #             cov_b_tr.T @ yb_tr
+        #         ).squeeze()
+        #         y_cov_pred = (cov_b_te @ beta_cov).squeeze()
+        #         y_residual = yb_te - y_cov_pred  # Ziel für residual model
+        #
+        #         # Modellschätzungen
+        #         def osl(X_train, X_test, y_train): # linear regression closed form
+        #             XTX = X_train.T @ X_train + self.lambda_reg * torch.eye(X_train.shape[1], device=device)
+        #             XTy = X_train.T @ y_train
+        #             beta = torch.linalg.solve(XTX, XTy).squeeze()
+        #             return (X_test @ beta).squeeze()
+        #
+        #         y_pred_dict = {
+        #             'connectome': {
+        #                 'positive': osl(X_connectome_train, X_connectome_test, yb_tr),
+        #                 'negative': torch.zeros_like(yb_te),  # Nur positiv verwendet
+        #                 'both': osl(X_connectome_train, X_connectome_test, yb_tr)
+        #             },
+        #             'covariates': {
+        #                 'positive': osl(X_cov_train, X_cov_test, yb_tr),
+        #                 'negative': torch.zeros_like(yb_te),
+        #                 'both': osl(X_cov_train, X_cov_test, yb_tr)
+        #             },
+        #             'full': {
+        #                 'positive': osl(X_full_train, X_full_test, yb_tr),
+        #                 'negative': torch.zeros_like(yb_te),
+        #                 'both': osl(X_full_train, X_full_test, yb_tr)
+        #             },
+        #             'residuals': {
+        #                 'positive': osl(X_connectome_train, X_connectome_test, y_residual.unsqueeze(1)),
+        #                 'negative': torch.zeros_like(yb_te),
+        #                 'both': osl(X_connectome_train, X_connectome_test, y_residual.unsqueeze(1))
+        #             }
+        #         }
+        #
+        #         # Metriken berechnen und sammeln
+        #         scores = score_regression_models(y_true=yb_te, y_pred_dict=y_pred_dict, primary_metric_only=False)
+        #         metrics_all[b][f'fold_{outer_fold}'] = scores
+        #
+        # return {
+        #     "edge_masks": edge_masks_all,  # [B, n_folds, p]
+        #     "metrics_detailed": metrics_all  # Liste von Dictionairies mit Struktur wie score_regression_models
+        # }

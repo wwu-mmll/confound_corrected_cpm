@@ -4,6 +4,7 @@ import pandas as pd
 
 from sklearn.utils import check_X_y
 from sklearn.impute import SimpleImputer
+import torch
 
 from scipy.stats import ConstantInputWarning, NearConstantInputWarning
 
@@ -16,111 +17,177 @@ import logging
 
 from cpm.reporting.plots.plots import pairplot_flexible
 
-
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", category=ConstantInputWarning)
 warnings.filterwarnings("ignore", category=NearConstantInputWarning)
 
-def train_test_split(train, test, X, y, covariates):
-    return X[train], X[test], y[train], y[test], covariates[train], covariates[test]
+
+def train_test_split(train_idx, test_idx, X, y, covariates):
+    return (
+        X[train_idx], X[test_idx],
+        y[train_idx], y[test_idx],
+        covariates[train_idx], covariates[test_idx]
+    )
+
+
+# def matrix_to_upper_triangular_vector(matrix):
+#     """
+#     Convert a 2D square matrix to a vector containing only the elements
+#     of the strictly upper triangular part (excluding the diagonal).
+#
+#     Parameters:
+#     matrix (np.ndarray): Input 2D square matrix of shape (n, n).
+#
+#     Returns:
+#     np.ndarray: A vector containing the strictly upper triangular elements.
+#     """
+#     if not (matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1]):
+#         raise ValueError("Input must be a 2D square matrix.")
+#
+#     n = matrix.shape[0]
+#     # Get the indices of the strictly upper triangular part
+#     row_indices, col_indices = np.triu_indices(n, k=1)
+#     # Extract the elements at these indices
+#     upper_triangular_elements = matrix[row_indices, col_indices]
+#
+#     return upper_triangular_elements
 
 
 def matrix_to_upper_triangular_vector(matrix):
-    """
-    Convert a 2D square matrix to a vector containing only the elements
-    of the strictly upper triangular part (excluding the diagonal).
-
-    Parameters:
-    matrix (np.ndarray): Input 2D square matrix of shape (n, n).
-
-    Returns:
-    np.ndarray: A vector containing the strictly upper triangular elements.
-    """
-    if not (matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1]):
+    # matrix: (n, n)
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
         raise ValueError("Input must be a 2D square matrix.")
-
     n = matrix.shape[0]
-    # Get the indices of the strictly upper triangular part
-    row_indices, col_indices = np.triu_indices(n, k=1)
-    # Extract the elements at these indices
-    upper_triangular_elements = matrix[row_indices, col_indices]
-
-    return upper_triangular_elements
+    row_idx, col_idx = torch.triu_indices(n, n, offset=1, device=matrix.device)
+    return matrix[row_idx, col_idx]
 
 
-def vector_to_upper_triangular_matrix(vector):
-    """
-    Convert a vector containing strictly upper triangular elements back
-    to a 2D square matrix.
+# def vector_to_upper_triangular_matrix(vector):
+#     """
+#     Convert a vector containing strictly upper triangular elements back
+#     to a 2D square matrix.
+#
+#     Parameters:
+#     vector (np.ndarray): A vector containing the strictly upper triangular elements.
+#
+#     Returns:
+#     np.ndarray: The reconstructed 2D square matrix.
+#     """
+#     # Calculate the size of the matrix from the vector length
+#     size = int((np.sqrt(8 * vector.size + 1) - 1) / 2) + 1
+#     if size * (size - 1) // 2 != vector.size:
+#         raise ValueError("Vector size does not match the number of elements for a valid square matrix.")
+#
+#     matrix = np.zeros((size, size))
+#     # Get the indices of the strictly upper triangular part
+#     row_indices, col_indices = np.triu_indices(size, k=1)
+#     # Place the elements into the matrix
+#     matrix[row_indices, col_indices] = vector
+#     matrix[col_indices, row_indices] = vector
+#     return matrix
 
-    Parameters:
-    vector (np.ndarray): A vector containing the strictly upper triangular elements.
 
-    Returns:
-    np.ndarray: The reconstructed 2D square matrix.
-    """
-    # Calculate the size of the matrix from the vector length
-    size = int((np.sqrt(8 * vector.size + 1) - 1) / 2) + 1
-    if size * (size - 1) // 2 != vector.size:
-        raise ValueError("Vector size does not match the number of elements for a valid square matrix.")
+def vector_to_upper_triangular_matrix(vector, include_diagonal=True):
+    import numpy as np
+    import torch
 
-    matrix = np.zeros((size, size))
-    # Get the indices of the strictly upper triangular part
-    row_indices, col_indices = np.triu_indices(size, k=1)
-    # Place the elements into the matrix
-    matrix[row_indices, col_indices] = vector
-    matrix[col_indices, row_indices] = vector
+    if isinstance(vector, torch.Tensor):
+        num_elements = vector.numel()
+        device = vector.device
+    elif isinstance(vector, np.ndarray):
+        num_elements = vector.size
+        device = torch.device("cpu")
+        vector = torch.from_numpy(vector).float()
+    else:
+        raise TypeError("Unsupported type")
+
+    # Rekonstruiere Matrixgröße
+    for size in range(1, 1000):
+        expected = size * (size + 1) // 2 if include_diagonal else size * (size - 1) // 2
+        if expected == num_elements:
+            break
+    else:
+        raise ValueError(f"Invalid vector length for triangular matrix. Got {num_elements}, expected {expected}.")
+
+    matrix = torch.zeros((size, size), device=device)
+    offset = 0 if include_diagonal else 1
+    row_idx, col_idx = torch.triu_indices(size, size, offset=offset, device=device)
+    matrix[row_idx, col_idx] = vector
+    matrix[col_idx, row_idx] = matrix[row_idx, col_idx]
     return matrix
+
+
+# def matrix_to_vector_3d(matrix_3d):
+#     """
+#     Convert a 3D connectivity matrix to a 2D array of upper-triangular vectors.
+#
+#     Parameters
+#     ----------
+#     matrix_3d: np.ndarray
+#         Input 3D array of shape (n_samples, n, n), where each 2D matrix is square.
+#
+#     Returns
+#     -------
+#     upper: np.ndarray
+#         2D array of shape (n_samples, n*(n - 1)/2) containing strictly upper-triangular elements of each matrix.
+#     """
+#     n_samples, n, _ = matrix_3d.shape
+#     row_idx, col_idx = np.triu_indices(n, k=1)
+#     flat = matrix_3d.reshape(n_samples, n * n)
+#     upper = flat[:, np.ravel_multi_index((row_idx, col_idx), (n, n))]
+#     return upper
 
 
 def matrix_to_vector_3d(matrix_3d):
     """
-    Convert a 3D connectivity matrix to a 2D array of upper-triangular vectors.
-
-    Parameters
-    ----------
-    matrix_3d: np.ndarray
-        Input 3D array of shape (n_samples, n, n), where each 2D matrix is square.
-
-    Returns
-    -------
-    upper: np.ndarray
-        2D array of shape (n_samples, n*(n - 1)/2) containing strictly upper-triangular elements of each matrix.
+    matrix_3d: shape (n_samples, n, n)
     """
     n_samples, n, _ = matrix_3d.shape
-    row_idx, col_idx = np.triu_indices(n, k=1)
-    flat = matrix_3d.reshape(n_samples, n * n)
-    upper = flat[:, np.ravel_multi_index((row_idx, col_idx), (n, n))]
-    return upper
+    row_idx, col_idx = torch.triu_indices(n, n, offset=1, device=matrix_3d.device)
+    return matrix_3d[:, row_idx, col_idx]  # shape: (n_samples, upper_tri_size)
+
+
+# def vector_to_matrix_3d(vector_2d, shape):
+#     """
+#     Convert a vector containing strictly upper triangular parts back to a 3D matrix.
+#
+#     Parameters:
+#     vector_2d (np.ndarray): A 2D array where each row is a vector of the strictly upper triangular part of a 2D matrix.
+#     shape (tuple): The shape of the original 3D matrix, (n_samples, n, n).
+#
+#     Returns:
+#     np.ndarray: The reconstructed 3D matrix of shape (n_samples, n, n).
+#     """
+#     n_samples, n, _ = shape
+#     # Create an empty 3D matrix to fill
+#     matrix_3d = np.zeros((n_samples, n, n))
+#
+#     # Create an index matrix for the strictly upper triangular indices
+#     row_indices, col_indices = np.tril_indices(n, k=-1)  # k=1 excludes the diagonal
+#     upper_tri_indices = np.ravel_multi_index((row_indices, col_indices), (n, n))
+#
+#     # Flatten the 3D matrix along the last two dimensions
+#     flat_matrix = matrix_3d.reshape(n_samples, -1)
+#
+#     # Place the strictly upper triangular elements into the corresponding positions
+#     np.put_along_axis(flat_matrix, upper_tri_indices[None, :], vector_2d, axis=1)
+#
+#     return matrix_3d
 
 
 def vector_to_matrix_3d(vector_2d, shape):
     """
-    Convert a vector containing strictly upper triangular parts back to a 3D matrix.
-
-    Parameters:
-    vector_2d (np.ndarray): A 2D array where each row is a vector of the strictly upper triangular part of a 2D matrix.
-    shape (tuple): The shape of the original 3D matrix, (n_samples, n, n).
-
-    Returns:
-    np.ndarray: The reconstructed 3D matrix of shape (n_samples, n, n).
+    vector_2d: (n_samples, vector_length)
+    shape: (n_samples, n, n)
     """
     n_samples, n, _ = shape
-    # Create an empty 3D matrix to fill
-    matrix_3d = np.zeros((n_samples, n, n))
-
-    # Create an index matrix for the strictly upper triangular indices
-    row_indices, col_indices = np.tril_indices(n, k=-1)  # k=1 excludes the diagonal
-    upper_tri_indices = np.ravel_multi_index((row_indices, col_indices), (n, n))
-
-    # Flatten the 3D matrix along the last two dimensions
-    flat_matrix = matrix_3d.reshape(n_samples, -1)
-
-    # Place the strictly upper triangular elements into the corresponding positions
-    np.put_along_axis(flat_matrix, upper_tri_indices[None, :], vector_2d, axis=1)
-
+    matrix_3d = torch.zeros((n_samples, n, n), device=vector_2d.device)
+    row_idx, col_idx = torch.triu_indices(n, n, offset=1, device=vector_2d.device)
+    matrix_3d[:, row_idx, col_idx] = vector_2d
+    matrix_3d[:, col_idx, row_idx] = vector_2d  # symmetric
     return matrix_3d
+
 
 def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     """
@@ -138,79 +205,140 @@ def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     return colors
 
 
-def check_data(X, y, covariates, impute_missings: bool = False):
+# def check_data(X, y, covariates, impute_missings: bool = False):
+#     """
+#     Validate and format input data for modeling.
+#
+#     Parameters
+#     ----------
+#     X: array-like
+#         Feature data of shape (n_samples, n_features) or
+#         connectivity matrices of shape (n_samples, n, n). 3D matrices are vectorized.
+#     y: array-like
+#         Target values; 1D array of shape (n_samples,) or
+#         2D array of shape (n_samples, 1) to be squeezed.
+#     covariates: array-like or pandas.Series or pandas.DataFrame
+#         Covariate data. Series are converted to 2D; DataFrames are one-hot encoded.
+#     impute_missings: bool, default=False
+#         If True, allow NaNs in X for imputation; NaNs in y always raise an error.
+#
+#     Returns
+#     -------
+#     X_checked: np.ndarray
+#         2D array of validated (and vectorized) feature data.
+#     y_checked: np.ndarray
+#         1D array of target values.
+#     cov_arr: np.ndarray
+#         2D array of covariates.
+#     """
+#     # Convert to numpy for dimension checks
+#     X_arr = np.asarray(X)
+#     # Handle 3D connectivity matrices
+#     if X_arr.ndim == 3:
+#         X_arr = matrix_to_vector_3d(X_arr)
+#     elif X_arr.ndim != 2:
+#         raise ValueError(f"X must be 2D or 3D, got shape {X_arr.shape}")
+#
+#     # Ensure y is 1D vector
+#     y_arr = np.asarray(y)
+#     if y_arr.ndim == 2:
+#         if 1 in y_arr.shape:
+#             y_arr = y_arr.ravel()
+#         else:
+#             raise ValueError(f"y must be a vector, got shape {y_arr.shape}")
+#     elif y_arr.ndim != 1:
+#         raise ValueError(f"y must be 1D array, got shape {y_arr.shape}")
+#
+#     # Validate X and y with sklearn
+#     if impute_missings:
+#         try:
+#             X_checked, y_checked = check_X_y(
+#                 X_arr, y_arr,
+#                 force_all_finite='allow-nan',
+#                 allow_nd=True,
+#                 y_numeric=True
+#             )
+#         except ValueError:
+#             logger.info(
+#                 "y contains NaN values. Only missing values in X and covariates can be imputed."
+#             )
+#             raise
+#     else:
+#         try:
+#             X_checked, y_checked = check_X_y(
+#                 X_arr, y_arr,
+#                 force_all_finite=True,
+#                 allow_nd=True,
+#                 y_numeric=True
+#             )
+#         except ValueError:
+#             logger.info(
+#                 "Your input contains NaN values. Fix NaNs or use impute_missing_values=True."
+#             )
+#             raise
+#
+#     # Process covariates
+#     if isinstance(covariates, pd.Series):
+#         cov_df = covariates.to_frame()
+#     elif isinstance(covariates, pd.DataFrame):
+#         cov_df = pd.get_dummies(covariates, drop_first=True)
+#     else:
+#         cov_df = covariates
+#
+#     if isinstance(cov_df, (pd.Series, pd.DataFrame)):
+#         cov_arr = cov_df.to_numpy()
+#     else:
+#         cov_arr = np.asarray(cov_df)
+#
+#     # Ensure covariates are 2D
+#     if cov_arr.ndim == 1:
+#         cov_arr = cov_arr.reshape(-1, 1)
+#     elif cov_arr.ndim != 2:
+#         raise ValueError(f"covariates must be 1D or 2D, got shape {cov_arr.shape}")
+#
+#     return X_checked, y_checked, cov_arr
+
+
+def check_data(X, y, covariates, impute_missings: bool = False, device='cuda'):
     """
-    Validate and format input data for modeling.
+    Validate and format input tensors for modeling.
 
     Parameters
     ----------
-    X: array-like
+    X: torch.Tensor or array-like
         Feature data of shape (n_samples, n_features) or
         connectivity matrices of shape (n_samples, n, n). 3D matrices are vectorized.
-    y: array-like
-        Target values; 1D array of shape (n_samples,) or
-        2D array of shape (n_samples, 1) to be squeezed.
-    covariates: array-like or pandas.Series or pandas.DataFrame
-        Covariate data. Series are converted to 2D; DataFrames are one-hot encoded.
+    y: torch.Tensor or array-like
+        Target values; 1D tensor or 2D with shape (n_samples, 1)
+    covariates: torch.Tensor, array-like, pd.Series or pd.DataFrame
+        Covariates; Series are converted to 2D; DataFrames are one-hot encoded.
     impute_missings: bool, default=False
-        If True, allow NaNs in X for imputation; NaNs in y always raise an error.
+        If True, allows NaNs in X for imputation. NaNs in y raise an error.
+    device: str
+        Device to move tensors to (e.g. "cuda", "cpu")
 
     Returns
     -------
-    X_checked: np.ndarray
-        2D array of validated (and vectorized) feature data.
-    y_checked: np.ndarray
-        1D array of target values.
-    cov_arr: np.ndarray
-        2D array of covariates.
+    X_checked, y_checked, covariates_checked : torch.Tensor
+        Validated and reshaped tensors on the specified device.
     """
-    # Convert to numpy for dimension checks
-    X_arr = np.asarray(X)
-    # Handle 3D connectivity matrices
-    if X_arr.ndim == 3:
-        X_arr = matrix_to_vector_3d(X_arr)
-    elif X_arr.ndim != 2:
-        raise ValueError(f"X must be 2D or 3D, got shape {X_arr.shape}")
+    X = torch.as_tensor(X)
+    if X.ndim == 3:
+        X = matrix_to_vector_3d(X)
+    elif X.ndim != 2:
+        raise ValueError(f"X must be 2D or 3D, got shape {X.shape}")
 
-    # Ensure y is 1D vector
-    y_arr = np.asarray(y)
-    if y_arr.ndim == 2:
-        if 1 in y_arr.shape:
-            y_arr = y_arr.ravel()
-        else:
-            raise ValueError(f"y must be a vector, got shape {y_arr.shape}")
-    elif y_arr.ndim != 1:
-        raise ValueError(f"y must be 1D array, got shape {y_arr.shape}")
+    y = torch.as_tensor(y)
+    if y.ndim == 2 and 1 in y.shape:
+        y = y.flatten()
+    elif y.ndim != 1:
+        raise ValueError(f"y must be 1D or shape (n, 1), got shape {y.shape}")
 
-    # Validate X and y with sklearn
-    if impute_missings:
-        try:
-            X_checked, y_checked = check_X_y(
-                X_arr, y_arr,
-                force_all_finite='allow-nan',
-                allow_nd=True,
-                y_numeric=True
-            )
-        except ValueError:
-            logger.info(
-                "y contains NaN values. Only missing values in X and covariates can be imputed."
-            )
-            raise
-    else:
-        try:
-            X_checked, y_checked = check_X_y(
-                X_arr, y_arr,
-                force_all_finite=True,
-                allow_nd=True,
-                y_numeric=True
-            )
-        except ValueError:
-            logger.info(
-                "Your input contains NaN values. Fix NaNs or use impute_missing_values=True."
-            )
-            raise
+    if torch.isnan(y).any():
+        raise ValueError("y contains NaNs, which are not allowed.")
+    if not impute_missings and torch.isnan(X).any():
+        raise ValueError("X contains NaNs, and impute_missings=False.")
 
-    # Process covariates
     if isinstance(covariates, pd.Series):
         cov_df = covariates.to_frame()
     elif isinstance(covariates, pd.DataFrame):
@@ -219,34 +347,54 @@ def check_data(X, y, covariates, impute_missings: bool = False):
         cov_df = covariates
 
     if isinstance(cov_df, (pd.Series, pd.DataFrame)):
-        cov_arr = cov_df.to_numpy()
+        cov_arr = torch.as_tensor(cov_df.to_numpy(), dtype=torch.float32)
     else:
-        cov_arr = np.asarray(cov_df)
+        cov_arr = torch.as_tensor(cov_df, dtype=torch.float32)
 
-    # Ensure covariates are 2D
     if cov_arr.ndim == 1:
         cov_arr = cov_arr.reshape(-1, 1)
     elif cov_arr.ndim != 2:
         raise ValueError(f"covariates must be 1D or 2D, got shape {cov_arr.shape}")
 
-    return X_checked, y_checked, cov_arr
+    return X.to(device), y.to(device), cov_arr.to(device)
+
+
+# def impute_missing_values(X_train, X_test, cov_train, cov_test):
+#     # Initialize imputers with chosen strategy (e.g., mean, median, most_frequent)
+#     x_imputer = SimpleImputer(strategy='mean')
+#     cov_imputer = SimpleImputer(strategy='mean')
+#
+#     # Fit on training data and transform both training and test data
+#     X_train = x_imputer.fit_transform(X_train)
+#     X_test = x_imputer.transform(X_test)
+#     cov_train = cov_imputer.fit_transform(cov_train)
+#     cov_test = cov_imputer.transform(cov_test)
+#     return X_train, X_test, cov_train, cov_test
 
 
 def impute_missing_values(X_train, X_test, cov_train, cov_test):
-    # Initialize imputers with chosen strategy (e.g., mean, median, most_frequent)
-    x_imputer = SimpleImputer(strategy='mean')
-    cov_imputer = SimpleImputer(strategy='mean')
+    def impute(train, test):
+        means = torch.nanmean(train, dim=0)
+        train_filled = torch.where(torch.isnan(train), means, train)
+        test_filled = torch.where(torch.isnan(test), means, test)
+        return train_filled, test_filled
 
-    # Fit on training data and transform both training and test data
-    X_train = x_imputer.fit_transform(X_train)
-    X_test = x_imputer.transform(X_test)
-    cov_train = cov_imputer.fit_transform(cov_train)
-    cov_test = cov_imputer.transform(cov_test)
-    return X_train, X_test, cov_train, cov_test
+    X_train_filled, X_test_filled = impute(X_train, X_test)
+    cov_train_filled, cov_test_filled = impute(cov_train, cov_test)
 
-def select_stable_edges(stability_edges, stability_threshold):
-    return {'positive': np.where(stability_edges['positive'] > stability_threshold)[0],
-            'negative': np.where(stability_edges['negative'] > stability_threshold)[0]}
+    return X_train_filled, X_test_filled, cov_train_filled, cov_test_filled
+
+
+# def select_stable_edges(stability_edges, stability_threshold):
+#     return {'positive': np.where(stability_edges['positive'] > stability_threshold)[0],
+#             'negative': np.where(stability_edges['negative'] > stability_threshold)[0]}
+
+
+def select_stable_edges(stability_edges: dict, stability_threshold: float):
+    return {
+        'positive': torch.nonzero(stability_edges['positive'] > stability_threshold, as_tuple=True)[0],
+        'negative': torch.nonzero(stability_edges['negative'] > stability_threshold, as_tuple=True)[0],
+    }
 
 
 def generate_data_insights(X, y, covariates, results_directory):
@@ -269,6 +417,9 @@ def generate_data_insights(X, y, covariates, results_directory):
     if isinstance(X, np.ndarray):
         X = pd.DataFrame(X, columns=[f"feature {i + 1}" for i in range(X.shape[1])])
 
+    if isinstance(X, torch.Tensor):
+        X = pd.DataFrame(X.numpy(), columns=[f"feature {i + 1}" for i in range(X.numpy().shape[1])])
+
     # Convert y to Series
     if isinstance(y, np.ndarray):
         y = pd.Series(np.squeeze(y), name="target")
@@ -277,11 +428,15 @@ def generate_data_insights(X, y, covariates, results_directory):
         y.name = y.name or "target"
     elif isinstance(y, pd.Series):
         y.name = y.name or "target"
+    elif isinstance(y, torch.Tensor):
+        y = pd.Series(torch.squeeze(y).numpy(), name="target")
 
     # Convert covariates to DataFrame
     if covariates is not None:
         if isinstance(covariates, np.ndarray):
             covariates = pd.DataFrame(covariates, columns=[f"covariate {i + 1}" for i in range(covariates.shape[1])])
+        elif isinstance(covariates, torch.Tensor):
+            covariates = pd.DataFrame(covariates.numpy(), columns=[f"covariate {i + 1}" for i in range(covariates.numpy().shape[1])])
         elif isinstance(covariates, pd.Series):
             covariates = covariates.to_frame()
             if covariates.columns[0] is None:
