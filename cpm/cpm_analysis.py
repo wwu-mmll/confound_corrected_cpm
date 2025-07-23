@@ -7,6 +7,7 @@ from typing import Union
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
+from sklearn.linear_model import LinearRegression
 
 from cpm.fold import run_inner_folds
 from cpm.logging import setup_logging
@@ -33,6 +34,7 @@ class CPMRegression:
                  select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
+                 calculate_residuals: bool = False,
                  n_permutations: int = 0,
                  atlas_labels: str = None):
         """
@@ -62,6 +64,7 @@ class CPMRegression:
         self.select_stable_edges = select_stable_edges
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
+        self.calculate_residuals = calculate_residuals
         self.n_permutations = n_permutations
 
         np.random.seed(42)
@@ -98,6 +101,7 @@ class CPMRegression:
         if self.select_stable_edges:
             self.logger.info(f"Stability threshold:     {self.stability_threshold}")
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
+        self.logger.info(f"Calculate residuals:     {'Yes' if self.calculate_residuals else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info("="*50)
 
@@ -206,6 +210,12 @@ class CPMRegression:
             # impute missing values
             if self.impute_missing_values:
                 X_train, X_test, cov_train, cov_test = impute_missing_values(X_train, X_test, cov_train, cov_test)
+
+            # residualize X to remove effect of covariates
+            if self.calculate_residuals:
+                residual_model = LinearRegression().fit(cov_train, X_train)
+                X_train = X_train - residual_model.predict(cov_train)
+                X_test = X_test - residual_model.predict(cov_test)
 
             # if the user specified an inner cross-validation, estimate models witin inner loop
             if self.inner_cv:
