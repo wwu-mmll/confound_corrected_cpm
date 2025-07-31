@@ -3,6 +3,7 @@ import logging
 import shutil
 
 from typing import Union
+from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
@@ -87,6 +88,9 @@ class CPMRegression:
         # check and copy atlas labels file
         self.atlas_labels = self._validate_and_copy_atlas_file(atlas_labels)
 
+        # results are saved to the results manager instance
+        self.results_manager = None
+
     def _log_analysis_details(self):
         """
         Log important information about the analysis in a structured format.
@@ -166,8 +170,8 @@ class CPMRegression:
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        for perm_id in range(1, self.n_permutations + 1):
-            self.logger.debug(f"Permutation run {perm_id}")
+        for perm_id in tqdm(range(1, self.n_permutations + 1), desc="Permutation runs", unit="run",
+                            total=self.n_permutations):
             y = np.random.permutation(y)
             self._single_run(X=X, y=y, covariates=covariates, perm_run=perm_id)
 
@@ -200,10 +204,17 @@ class CPMRegression:
         results_manager = ResultsManager(output_dir=self.results_directory, perm_run=perm_run,
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1])
 
-        for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
-            if not perm_run:
-                self.logger.debug(f"Running fold {outer_fold + 1}/{self.cv.get_n_splits()}")
-
+        iterator = (
+            tqdm(
+                enumerate(self.cv.split(X, y)),
+                total=self.cv.get_n_splits(),
+                desc="Running outer folds",
+                unit="fold"
+            )
+            if not perm_run else
+            enumerate(self.cv.split(X, y))
+        )
+        for outer_fold, (train, test) in iterator:
             # split according to single outer fold
             X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 
@@ -224,8 +235,6 @@ class CPMRegression:
                                                                edge_selection=self.edge_selection,
                                                                results_directory=os.path.join(results_manager.results_directory, 'folds', str(outer_fold)),
                                                                perm_run=perm_run)
-                if not perm_run:
-                    self.logger.info(f"Best hyperparameters: {best_params}")
             else:
                 best_params = self.edge_selection.param_grid[0]
 
@@ -256,3 +265,4 @@ class CPMRegression:
             self.logger.info(results_manager.agg_results.round(4).to_string())
             results_manager.save_predictions()
             results_manager.save_network_strengths()
+            self.results_manager = results_manager

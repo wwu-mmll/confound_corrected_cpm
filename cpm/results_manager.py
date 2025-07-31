@@ -204,9 +204,8 @@ class ResultsManager:
         Save predictions to CSV.
         """
         df = self.cv_predictions.copy()
-        if 'sample_index' in df.columns:
-            df.sort_values(by='sample_index', inplace=True)
-            df.drop(columns='sample_index', inplace=True)
+        df.sort_values(by='sample_index', inplace=True)
+        #df.drop(columns='sample_index', inplace=True)
         df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
         # self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
 

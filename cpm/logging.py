@@ -1,3 +1,4 @@
+import sys
 import logging
 
 
@@ -10,7 +11,7 @@ def setup_logging(log_file: str = "analysis_log.txt"):
         logger.handlers.clear()
 
     # Console handler: logs all levels (DEBUG and above) to the console
-    console_handler = logging.StreamHandler()
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.DEBUG)
     console_handler.setFormatter(SimpleFormatter())
 
