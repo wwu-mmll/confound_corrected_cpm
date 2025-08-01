@@ -207,11 +207,17 @@ class EdgeStatistic(BaseEstimator):
                       y: Union[pd.Series, pd.DataFrame, np.ndarray],
                       covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
         r_edges, p_edges = np.zeros(X.shape[1]), np.ones(X.shape[1])
-        if self.t_test_filter:
-            _, p_values = one_sample_t_test(X, 0)
-            valid_edges = p_values < 0.05
-        else:
-            valid_edges = np.bool(np.ones(X.shape[1]))
+        #if self.t_test_filter:
+        #    _, p_values = one_sample_t_test(X, 0)
+        #    valid_edges = p_values < 0.05
+        #else:
+        #    valid_edges = np.bool(np.ones(X.shape[1]))
+
+        from sklearn.feature_selection import VarianceThreshold
+        selector = VarianceThreshold(threshold=0.01)
+        selector.fit(X)
+        valid_edges = selector.get_support()
+
 
         if self.edge_statistic == 'pearson':
             r_edges_masked, p_edges_masked = pearson_correlation_with_pvalues(y, X[:, valid_edges])
