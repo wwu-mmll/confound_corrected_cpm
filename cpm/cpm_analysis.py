@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
+from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold, RepeatedKFold, StratifiedKFold
 from sklearn.linear_model import LinearRegression
 
 from cpm.fold import run_inner_folds
@@ -26,8 +26,8 @@ class CPMRegression:
     """
     def __init__(self,
                  results_directory: str,
-                 cv: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
-                 inner_cv: Union[BaseCrossValidator, BaseShuffleSplit] = None,
+                 cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = KFold(n_splits=10, shuffle=True, random_state=42),
+                 inner_cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
                      edge_statistic='pearson',
                      edge_selection=[PThreshold(threshold=[0.05], correction=[None])]

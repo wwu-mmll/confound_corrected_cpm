@@ -73,6 +73,7 @@ def get_residuals(X, Z):
 
 
 def semi_partial_correlation(x, Y, Z, rank=False):
+    # ToDo: THIS IS A PARTIAL CORRELATION, NOT SEMI-PARTIAL
     if rank:
         x = rankdata(x)
         Y = rankdata(Y, axis=0)

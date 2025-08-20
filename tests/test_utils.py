@@ -7,7 +7,7 @@ from cpm.utils import (
     matrix_to_vector_3d,
     get_variable_names
 )
-from cpm.simulation.simulate_data import simulate_regression_data_scenarios
+from simulation.simulate_data_chyzhyk import simulate_regression_data_scenarios
 
 class TestUtils(unittest.TestCase):
     def setUp(self):
