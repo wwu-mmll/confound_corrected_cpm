@@ -360,9 +360,6 @@
 #         selected_edges = self.edge_selection.select(r=self.r_edges, p=self.p_edges)
 #         return selected_edges
 
-import pandas as pd
-import numpy as np
-from scipy.stats import ttest_1samp, t, rankdata
 from typing import Union
 
 from sklearn.base import BaseEstimator

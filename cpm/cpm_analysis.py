@@ -569,7 +569,7 @@ class CPMRegression:
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        p = self.n_permutations + 1
+        p = self.n_permutations + 1  # n_permutations + unpermuted = nperms + 1
         cov_tensor = covariates
         cov_tot = cov_tensor.unsqueeze(0).repeat(p, 1, 1)  # (p, n_samples, n_cov)
 
@@ -657,6 +657,9 @@ class CPMRegression:
         reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
         reporter.generate_html_report()
 
+        endend = time.time()
+        print(f"Total time: {(endend - start):.2f} seconds")
+
     # def generate_html_report(self):
     #     self.logger.info("Generating HTML report.")
     #     reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
@@ -668,6 +671,7 @@ class CPMRegression:
                    covariates: torch.Tensor,
                    ) -> dict:
         B, n, p = X.shape
+        print("X.shape: ", B, n, p)
         _, _, c = covariates.shape
         n_folds = self.cv.get_n_splits()
 
@@ -678,30 +682,22 @@ class CPMRegression:
 
         for outer_fold, (train_idx, test_idx) in enumerate(self.cv.split(torch.arange(n))):
             # Split
+            self.logger.info(f"Running Fold: {outer_fold}")
             Xtr, Xte = X[:, train_idx].to(device), X[:, test_idx].to(device)
             ytr, yte = y[:, train_idx].to(device), y[:, test_idx].to(device)
             covtr, covte = covariates[:, train_idx].to(device), covariates[:, test_idx].to(device)
 
             from torch import vmap
-            import time
-
-            # print(f"Edge selection method: {self.edge_selection.edge_statistic}")
-            start = time.time()
             edge_fn = lambda Xb, yb, covb: EdgeStatistic.edge_statistic_fn(
                 Xb, yb, covb, edge_statistic="pearson", t_test_filter=self.edge_selection.t_test_filter
             )
-            end = time.time()
-            #print("time edge_statistic_fn: ", end - start)
-            start = time.time()
             r_edges, p_edges = vmap(edge_fn)(Xtr, ytr, covtr)
-            end = time.time()
+
             #print("time vmap(edge_fn)(Xtr, ytr, covtr): ", end - start)
             # print(r_edges, p_edges)
 
-            start = time.time()
             # Edge Selection
             #r_edges, p_edges = self.edge_selection.fit_transform(Xtr, ytr, covtr)  # [B, p]
-            end = time.time()
             #print("time fit_transform: ", end - start)
 
             #print(r_edges2, p_edges2)
@@ -712,12 +708,12 @@ class CPMRegression:
             edge_masks_all[:, outer_fold] = edge_mask
 
             for b in range(B):
-                mask_np = edge_mask[b].cpu().numpy()
-                edges = {
-                    'positive': np.where(mask_np > 0)[0],
-                    'negative': np.array([], dtype=int)
-                }
-
+                # mask_np = edge_mask[b].cpu().numpy()
+                # edges = {
+                #     'positive': np.where(mask_np > 0)[0],
+                #     'negative': np.array([], dtype=int)
+                # }
+                self.logger.info(f"Running Permutation: {b+1}")
                 Xb_tr, Xb_te = Xtr[b], Xte[b]
                 cov_b_tr, cov_b_te = covtr[b], covte[b]
                 yb_tr = ytr[b]
@@ -726,8 +722,6 @@ class CPMRegression:
                 model = LinearCPMModel(device=device).fit(Xb_tr, yb_tr, cov_b_tr, edge_mask=edge_mask[b])
                 y_pred_dict = model.predict(Xb_te, cov_b_te, edge_mask=edge_mask[b])
 
-
-                #print(y_pred_dict)
                 scores = score_regression_models(y_true=yb_te, y_pred_dict=y_pred_dict, primary_metric_only=False)
                 metrics_all[b][f'fold_{outer_fold}'] = scores
 
@@ -735,20 +729,6 @@ class CPMRegression:
 
                 network_strengths = model.get_network_strengths(Xb_te, cov_b_te, edge_mask=edge_mask[b])
                 all_network_strengths[b][f'fold_{outer_fold}'] = network_strengths
-
-            # def score_single_batch(y_true_arg, y_pred_dict_arg):
-            #     return score_regression_models(
-            #         y_true=y_true_arg,
-            #         y_pred_dict=y_pred_dict_arg,
-            #         primary_metric_only=False
-            #     )
-            #
-            # #yte_cpu = yte.cpu()  # [B, test_samples]
-            # print(yte.shape, all_predictions_dict)
-            # batch_scores = vmap(score_single_batch)(yte, all_predictions_dict)
-            #
-            # for b in range(B):
-            #     metrics_all[b][f'fold_{outer_fold}'] = batch_scores[b]
 
         return {
             "edge_masks": edge_masks_all,  # [B, n_folds, p]
@@ -828,4 +808,3 @@ class CPMRegression:
         #     "edge_masks": edge_masks_all,  # [B, n_folds, p]
         #     "metrics_detailed": metrics_all  # Liste von Dictionairies mit Struktur wie score_regression_models
         # }
-

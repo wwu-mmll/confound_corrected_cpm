@@ -25,29 +25,48 @@ class ModelDict(dict):
 
 
 class TorchLinearRegression(nn.Module):
-    def __init__(self, input_dim):
-        super().__init__()
-        self.linear = nn.Linear(input_dim, 1, bias=True)
+    # we can choose here, either use linear nn with adam optimizer or use closed form OLS (faster)
 
-    def fit(self, X, y, lr=1e-2, epochs=500):  # time 80%
+    # def __init__(self, input_dim):
+    #     super().__init__()
+    #     self.linear = nn.Linear(input_dim, 1, bias=True)
+    #
+    # def fit(self, X, y, lr=1e-2, epochs=500):  # time 80%
+    #     X = X.float()
+    #     y = y.float()
+    #
+    #     optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+    #     loss_fn = nn.MSELoss()
+    #
+    #     for _ in range(epochs):
+    #         optimizer.zero_grad()
+    #         preds = self.linear(X)
+    #         loss = loss_fn(preds.squeeze(), y)
+    #         loss.backward()
+    #         optimizer.step()
+    #     return self
+    #
+    # def predict(self, X):
+    #     X = X.float()
+    #     with torch.no_grad():
+    #         return self.linear(X).squeeze()
+
+
+    def __init__(self, input_dim=None):
+        self.beta = None
+
+    def fit(self, X: torch.Tensor, y: torch.Tensor):
         X = X.float()
-        y = y.float()
-
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        loss_fn = nn.MSELoss()
-
-        for _ in range(epochs):
-            optimizer.zero_grad()
-            preds = self.linear(X)
-            loss = loss_fn(preds.squeeze(), y)
-            loss.backward()
-            optimizer.step()
+        y = y.float().view(-1, 1)
+        # Closed-form OLS: (X^T X)^-1 X^T y
+        XtX = torch.matmul(X.T, X)
+        Xty = torch.matmul(X.T, y)
+        self.beta = torch.linalg.solve(XtX, Xty)  # [d,1]
         return self
 
-    def predict(self, X):
+    def predict(self, X: torch.Tensor):
         X = X.float()
-        with torch.no_grad():
-            return self.linear(X).squeeze()
+        return (torch.matmul(X, self.beta)).squeeze()
 
 
 class LinearCPMModel:
@@ -79,7 +98,7 @@ class LinearCPMModel:
         connectome["negative"] = conn_neg
 
         for net in ["positive", "negative"]:
-            reg = TorchLinearRegression(covariates.size(1)).to(self.device).fit(
+            reg = TorchLinearRegression(covariates.size(1)).fit(  # .to(self.device)
                 covariates, connectome[net].squeeze()
             )
             self.models_residuals[net] = reg
@@ -90,17 +109,17 @@ class LinearCPMModel:
         connectome["both"] = torch.cat([connectome["positive"], connectome["negative"]], dim=1)
 
         for net in ["positive", "negative", "both"]:
-            self.models["connectome"][net] = TorchLinearRegression(connectome[net].size(1)).to(self.device).fit(
+            self.models["connectome"][net] = TorchLinearRegression(connectome[net].size(1)).fit(  # .to(self.device)
                 connectome[net], y
             )
-            self.models["covariates"][net] = TorchLinearRegression(covariates.size(1)).to(self.device).fit(
+            self.models["covariates"][net] = TorchLinearRegression(covariates.size(1)).fit(
                 covariates, y
             )
-            self.models["residuals"][net] = TorchLinearRegression(residuals[net].size(1)).to(self.device).fit(
+            self.models["residuals"][net] = TorchLinearRegression(residuals[net].size(1)).fit(
                 residuals[net], y
             )
             full_input = torch.cat([connectome[net], covariates], dim=1)
-            self.models["full"][net] = TorchLinearRegression(full_input.size(1)).to(self.device).fit(full_input, y)
+            self.models["full"][net] = TorchLinearRegression(full_input.size(1)).fit(full_input, y)
 
         return self
 
