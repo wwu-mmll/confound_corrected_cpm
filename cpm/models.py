@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 class NetworkDict(dict):
     def __init__(self):
         super().__init__(self)
@@ -27,7 +29,7 @@ class TorchLinearRegression(nn.Module):
         super().__init__()
         self.linear = nn.Linear(input_dim, 1, bias=True)
 
-    def fit(self, X, y, lr=1e-2, epochs=500):
+    def fit(self, X, y, lr=1e-2, epochs=500):  # time 80%
         X = X.float()
         y = y.float()
 
@@ -49,86 +51,212 @@ class TorchLinearRegression(nn.Module):
 
 
 class LinearCPMModel:
-    def __init__(self, edges, device='cuda'):
+    def __init__(self, device='cuda'):
         self.models = ModelDict()
         self.models_residuals = {}
-        self.edges = edges
         self.device = torch.device(device)
 
-    def fit(self, X, y, covariates):
+        self.output_keys = [
+            "connectome_pos", "connectome_neg", "connectome_both",
+            "covariates",
+            "residual_pos", "residual_neg", "residual_both",
+            "full_pos", "full_neg", "full_both"
+        ]
+
+    def fit(self, X, y, covariates, edge_mask: torch.Tensor):
         X = X.to(self.device)
         y = y.to(self.device)
         covariates = covariates.to(self.device)
+        mask = edge_mask.to(self.device).to(dtype=X.dtype)
 
         connectome = {}
         residuals = {}
 
-        for net in ['positive', 'negative']:
-            edge_idx = self.edges[net]
-            connectome[net] = X[:, edge_idx].sum(dim=1, keepdim=True)
-            reg = TorchLinearRegression(covariates.size(1)).to(self.device).fit(covariates, connectome[net].squeeze())
+        conn_pos = (X * mask).sum(dim=1, keepdim=True)  # [n,1]
+        conn_neg = (X * (1 - mask)).sum(dim=1, keepdim=True)  # [n,1]
+
+        connectome["positive"] = conn_pos
+        connectome["negative"] = conn_neg
+
+        for net in ["positive", "negative"]:
+            reg = TorchLinearRegression(covariates.size(1)).to(self.device).fit(
+                covariates, connectome[net].squeeze()
+            )
             self.models_residuals[net] = reg
             preds = reg.predict(covariates).unsqueeze(1)
             residuals[net] = connectome[net] - preds
 
-        residuals['both'] = torch.cat([residuals['positive'], residuals['negative']], dim=1)
-        connectome['both'] = torch.cat([connectome['positive'], connectome['negative']], dim=1)
+        residuals["both"] = torch.cat([residuals["positive"], residuals["negative"]], dim=1)
+        connectome["both"] = torch.cat([connectome["positive"], connectome["negative"]], dim=1)
 
-        for net in ['positive', 'negative', 'both']:
-            # Connectome-only model
-            self.models['connectome'][net] = TorchLinearRegression(connectome[net].size(1)).to(self.device).fit(
-                connectome[net], y)
-            # Covariate-only model
-            self.models['covariates'][net] = TorchLinearRegression(covariates.size(1)).to(self.device).fit(covariates,
-                                                                                                           y)
-            # Residual model
-            self.models['residuals'][net] = TorchLinearRegression(residuals[net].size(1)).to(self.device).fit(
-                residuals[net], y)
-            # Full model
+        for net in ["positive", "negative", "both"]:
+            self.models["connectome"][net] = TorchLinearRegression(connectome[net].size(1)).to(self.device).fit(
+                connectome[net], y
+            )
+            self.models["covariates"][net] = TorchLinearRegression(covariates.size(1)).to(self.device).fit(
+                covariates, y
+            )
+            self.models["residuals"][net] = TorchLinearRegression(residuals[net].size(1)).to(self.device).fit(
+                residuals[net], y
+            )
             full_input = torch.cat([connectome[net], covariates], dim=1)
-            self.models['full'][net] = TorchLinearRegression(full_input.size(1)).to(self.device).fit(full_input, y)
+            self.models["full"][net] = TorchLinearRegression(full_input.size(1)).to(self.device).fit(full_input, y)
 
         return self
 
-    def predict(self, X, covariates):
-        X = X.to(self.device)
-        covariates = covariates.to(self.device)
+        # connectome = {}
+        # residuals = {}
+        #
+        # for net in ['positive', 'negative']:
+        #     edge_idx = self.edges[net]
+        #     connectome[net] = X[:, edge_idx].sum(dim=1, keepdim=True)
+        #     reg = TorchLinearRegression(covariates.size(1)).to(self.device).fit(covariates, connectome[net].squeeze())
+        #     self.models_residuals[net] = reg
+        #     preds = reg.predict(covariates).unsqueeze(1)
+        #     residuals[net] = connectome[net] - preds
+        #
+        # residuals['both'] = torch.cat([residuals['positive'], residuals['negative']], dim=1)
+        # connectome['both'] = torch.cat([connectome['positive'], connectome['negative']], dim=1)
+        #
+        # for net in ['positive', 'negative', 'both']:
+        #     # Connectome-only model
+        #     self.models['connectome'][net] = TorchLinearRegression(connectome[net].size(1)).to(self.device).fit(
+        #         connectome[net], y)
+        #     # Covariate-only model
+        #     self.models['covariates'][net] = TorchLinearRegression(covariates.size(1)).to(self.device).fit(covariates,
+        #                                                                                                    y)
+        #     # Residual model
+        #     self.models['residuals'][net] = TorchLinearRegression(residuals[net].size(1)).to(self.device).fit(
+        #         residuals[net], y)
+        #     # Full model
+        #     full_input = torch.cat([connectome[net], covariates], dim=1)
+        #     self.models['full'][net] = TorchLinearRegression(full_input.size(1)).to(self.device).fit(full_input, y)
+        #
+        # return self
 
-        connectome = {}
-        residuals = {}
+    def predict(self, X: torch.Tensor, covariates: torch.Tensor, edge_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Predict all models. Returns tensor [n, n_outputs].
+        """
+        X, covariates, edge_mask = X.to(self.device), covariates.to(self.device), edge_mask.to(self.device)
 
-        for net in ['positive', 'negative']:
-            edge_idx = self.edges[net]
-            connectome[net] = X[:, edge_idx].sum(dim=1, keepdim=True)
-            preds = self.models_residuals[net].predict(covariates).unsqueeze(1)
-            residuals[net] = connectome[net] - preds
+        conn_pos = X[:, edge_mask].sum(dim=1, keepdim=True)
+        conn_neg = X[:, ~edge_mask].sum(dim=1, keepdim=True)
+        conn_both = torch.cat([conn_pos, conn_neg], dim=1)
 
-        residuals['both'] = torch.cat([residuals['positive'], residuals['negative']], dim=1)
-        connectome['both'] = torch.cat([connectome['positive'], connectome['negative']], dim=1)
+        preds_pos_resid = self.models_residuals["positive"].predict(covariates).unsqueeze(1)
+        preds_neg_resid = self.models_residuals["negative"].predict(covariates).unsqueeze(1)
+        resid_pos = conn_pos - preds_pos_resid
+        resid_neg = conn_neg - preds_neg_resid
+        resid_both = torch.cat([resid_pos, resid_neg], dim=1)
 
-        predictions = ModelDict()
-        for net in ['positive', 'negative', 'both']:
-            predictions['connectome'][net] = self.models['connectome'][net].predict(connectome[net])
-            predictions['covariates'][net] = self.models['covariates'][net].predict(covariates)
-            predictions['residuals'][net] = self.models['residuals'][net].predict(residuals[net])
-            full_input = torch.cat([connectome[net], covariates], dim=1)
-            predictions['full'][net] = self.models['full'][net].predict(full_input)
+        # outputs = [
+        #     self.models["connectome"]["positive"].predict(conn_pos),
+        #     self.models["connectome"]["negative"].predict(conn_neg),
+        #     self.models["connectome"]["both"].predict(conn_both),
+        #     self.models["covariates"]["positive"].predict(covariates),
+        #     self.models["covariates"]["negative"].predict(covariates),
+        #     self.models["covariates"]["both"].predict(covariates),
+        #     self.models["residuals"]["positive"].predict(resid_pos),
+        #     self.models["residuals"]["negative"].predict(resid_neg),
+        #     self.models["residuals"]["both"].predict(resid_both),
+        #     self.models["full"]["positive"].predict(torch.cat([conn_pos, covariates], dim=1)),
+        #     self.models["full"]["negative"].predict(torch.cat([conn_neg, covariates], dim=1)),
+        #     self.models["full"]["both"].predict(torch.cat([conn_both, covariates], dim=1)),
+        # ]
+        # stack = torch.stack(outputs, dim=1)  # [n, 12]
+        outputs = {
+            "connectome": {
+                "positive": self.models["connectome"]["positive"].predict(conn_pos),
+                "negative": self.models["connectome"]["negative"].predict(conn_neg),
+                "both": self.models["connectome"]["both"].predict(conn_both),
+            },
+            "covariates": {
+                "positive": self.models["covariates"]["positive"].predict(covariates),
+                "negative": self.models["covariates"]["negative"].predict(covariates),
+                "both": self.models["covariates"]["both"].predict(covariates),
+            },
+            "residuals": {
+                "positive": self.models["residuals"]["positive"].predict(resid_pos),
+                "negative": self.models["residuals"]["negative"].predict(resid_neg),
+                "both": self.models["residuals"]["both"].predict(resid_both),
+            },
+            "full": {
+                "positive": self.models["full"]["positive"].predict(torch.cat([conn_pos, covariates], dim=1)),
+                "negative": self.models["full"]["negative"].predict(torch.cat([conn_neg, covariates], dim=1)),
+                "both": self.models["full"]["both"].predict(torch.cat([conn_both, covariates], dim=1)),
+            }
+        }
+        return outputs
 
-        return predictions
+    # def predict(self, X, covariates):
+    #     X = X.to(self.device)
+    #     covariates = covariates.to(self.device)
+    #
+    #     connectome = {}
+    #     residuals = {}
+    #
+    #     for net in ['positive', 'negative']:
+    #         edge_idx = self.edges[net]
+    #         connectome[net] = X[:, edge_idx].sum(dim=1, keepdim=True)
+    #         preds = self.models_residuals[net].predict(covariates).unsqueeze(1)
+    #         residuals[net] = connectome[net] - preds
+    #
+    #     residuals['both'] = torch.cat([residuals['positive'], residuals['negative']], dim=1)
+    #     connectome['both'] = torch.cat([connectome['positive'], connectome['negative']], dim=1)
+    #
+    #     predictions = ModelDict()
+    #     for net in ['positive', 'negative', 'both']:
+    #         predictions['connectome'][net] = self.models['connectome'][net].predict(connectome[net])
+    #         predictions['covariates'][net] = self.models['covariates'][net].predict(covariates)
+    #         predictions['residuals'][net] = self.models['residuals'][net].predict(residuals[net])
+    #         full_input = torch.cat([connectome[net], covariates], dim=1)
+    #         predictions['full'][net] = self.models['full'][net].predict(full_input)
+    #
+    #     return predictions
 
-    def get_network_strengths(self, X, covariates):
-        X = X.to(self.device)
-        covariates = covariates.to(self.device)
+    def get_network_strengths(self, X: torch.Tensor, covariates: torch.Tensor, edge_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Return [n, 4]: [conn_pos, conn_neg, resid_pos, resid_neg].
+        """
+        X, covariates, edge_mask = X.to(self.device), covariates.to(self.device), edge_mask.to(self.device)
 
-        connectome = {}
-        residuals = {}
-        for net in ['positive', 'negative']:
-            edge_idx = self.edges[net]
-            connectome[net] = X[:, edge_idx].sum(dim=1, keepdim=True)
-            preds = self.models_residuals[net].predict(covariates).unsqueeze(1)
-            residuals[net] = connectome[net] - preds
+        conn_pos = X[:, edge_mask].sum(dim=1, keepdim=True)
+        conn_neg = X[:, ~edge_mask].sum(dim=1, keepdim=True)
 
-        return {"connectome": connectome, "residuals": residuals}
+        preds_pos = self.models_residuals["positive"].predict(covariates).unsqueeze(1)
+        preds_neg = self.models_residuals["negative"].predict(covariates).unsqueeze(1)
+
+        resid_pos = conn_pos - preds_pos
+        resid_neg = conn_neg - preds_neg
+
+        stacked = torch.cat([conn_pos, conn_neg, resid_pos, resid_neg], dim=1)  # [n, 4]
+        out = {
+            "connectome": {
+                "positive": conn_pos,
+                "negative": conn_neg,
+            },
+            "residuals": {
+                "positive": resid_pos,
+                "negative": resid_neg,
+            },
+        }
+
+        return out
+
+    # def get_network_strengths(self, X, covariates):
+    #     X = X.to(self.device)
+    #     covariates = covariates.to(self.device)
+    #
+    #     connectome = {}
+    #     residuals = {}
+    #     for net in ['positive', 'negative']:
+    #         edge_idx = self.edges[net]
+    #         connectome[net] = X[:, edge_idx].sum(dim=1, keepdim=True)
+    #         preds = self.models_residuals[net].predict(covariates).unsqueeze(1)
+    #         residuals[net] = connectome[net] - preds
+    #
+    #     return {"connectome": connectome, "residuals": residuals}
 
 # class LinearCPMModel:
 #     """
