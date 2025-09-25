@@ -564,6 +564,7 @@ class CPMRegression:
         self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
 
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
+
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values, device='cpu')
 
         self.logger.info("=" * 50)
@@ -660,11 +661,6 @@ class CPMRegression:
         endend = time.time()
         print(f"Total time: {(endend - start):.2f} seconds")
 
-    # def generate_html_report(self):
-    #     self.logger.info("Generating HTML report.")
-    #     reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
-    #     reporter.generate_html_report()
-
     def _batch_run(self,
                    X: torch.Tensor,
                    y: torch.Tensor,
@@ -676,135 +672,50 @@ class CPMRegression:
         n_folds = self.cv.get_n_splits()
 
         edge_masks_all = torch.zeros(B, n_folds, p, device=device)
-        metrics_all = [{} for _ in range(B)]  # pro Batch ein Metrik-Dict wie score_regression_models
+        metrics_all = [{} for _ in range(B)]
         all_predictions_dict = [{} for _ in range(B)]  # [batch][fold] -> y_pred_dict
         all_network_strengths = [{} for _ in range(B)]  # [batch][fold] -> network_strengths
 
-        for outer_fold, (train_idx, test_idx) in enumerate(self.cv.split(torch.arange(n))):
-            # Split
-            self.logger.info(f"Running Fold: {outer_fold}")
-            Xtr, Xte = X[:, train_idx].to(device), X[:, test_idx].to(device)
-            ytr, yte = y[:, train_idx].to(device), y[:, test_idx].to(device)
-            covtr, covte = covariates[:, train_idx].to(device), covariates[:, test_idx].to(device)
+        for b in range(B):
+            self.logger.info(f"Running Permutation: {b + 1}")
 
-            from torch import vmap
-            edge_fn = lambda Xb, yb, covb: EdgeStatistic.edge_statistic_fn(
-                Xb, yb, covb, edge_statistic="pearson", t_test_filter=self.edge_selection.t_test_filter
-            )
-            r_edges, p_edges = vmap(edge_fn)(Xtr, ytr, covtr)
+            Xb, yb, covb = X[b], y[b], covariates[b]
 
-            #print("time vmap(edge_fn)(Xtr, ytr, covtr): ", end - start)
-            # print(r_edges, p_edges)
+            for outer_fold, (train_idx, test_idx) in enumerate(self.cv.split(torch.arange(n))):
+                self.logger.info(f"  Fold {outer_fold + 1}/{n_folds}")
 
-            # Edge Selection
-            #r_edges, p_edges = self.edge_selection.fit_transform(Xtr, ytr, covtr)  # [B, p]
-            #print("time fit_transform: ", end - start)
+                # Split
+                Xtr, Xte = Xb[train_idx].to(device), Xb[test_idx].to(device)
+                ytr, yte = yb[train_idx].to(device), yb[test_idx].to(device)
+                covtr, covte = covb[train_idx].to(device), covb[test_idx].to(device)
 
-            #print(r_edges2, p_edges2)
-            #print("=" * 50)
-            #print(r_edges, p_edges)
+                # Edge statistics
+                edge_fn = lambda Xs, ys, cs: EdgeStatistic.edge_statistic_fn(
+                    Xs, ys, cs, edge_statistic="pearson",
+                    t_test_filter=self.edge_selection.t_test_filter
+                )
+                r_edges, p_edges = edge_fn(Xtr, ytr, covtr)
 
-            edge_mask = (p_edges < 0.01).to(dtype=torch.bool).squeeze()  # [B, p]
-            edge_masks_all[:, outer_fold] = edge_mask
+                # Edge selection
+                edge_mask = (p_edges < 0.01).to(dtype=torch.bool).squeeze()  # [p]
+                edge_masks_all[b, outer_fold] = edge_mask
 
-            for b in range(B):
-                # mask_np = edge_mask[b].cpu().numpy()
-                # edges = {
-                #     'positive': np.where(mask_np > 0)[0],
-                #     'negative': np.array([], dtype=int)
-                # }
-                self.logger.info(f"Running Permutation: {b+1}")
-                Xb_tr, Xb_te = Xtr[b], Xte[b]
-                cov_b_tr, cov_b_te = covtr[b], covte[b]
-                yb_tr = ytr[b]
-                yb_te = yte[b]
+                # Fit CPM model
+                model = LinearCPMModel(device=device).fit(Xtr, ytr, covtr, edge_mask=edge_mask)
+                y_pred_dict = model.predict(Xte, covte, edge_mask=edge_mask)
 
-                model = LinearCPMModel(device=device).fit(Xb_tr, yb_tr, cov_b_tr, edge_mask=edge_mask[b])
-                y_pred_dict = model.predict(Xb_te, cov_b_te, edge_mask=edge_mask[b])
-
-                scores = score_regression_models(y_true=yb_te, y_pred_dict=y_pred_dict, primary_metric_only=False)
+                # Evaluate
+                scores = score_regression_models(y_true=yte, y_pred_dict=y_pred_dict,
+                                                 primary_metric_only=False)
                 metrics_all[b][f'fold_{outer_fold}'] = scores
-
                 all_predictions_dict[b][f'fold_{outer_fold}'] = y_pred_dict
 
-                network_strengths = model.get_network_strengths(Xb_te, cov_b_te, edge_mask=edge_mask[b])
+                network_strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
                 all_network_strengths[b][f'fold_{outer_fold}'] = network_strengths
 
         return {
             "edge_masks": edge_masks_all,  # [B, n_folds, p]
-            "metrics_detailed": metrics_all,
-            "predictions": all_predictions_dict,
+            "metrics_detailed": metrics_all,  # list of dicts
+            "predictions": all_predictions_dict,  # list of dicts
             "network_strengths": all_network_strengths
         }
-
-        #     for b in range(B):
-        #         print(edge_mask.shape)
-        #         mask_pos = edge_mask[b, :]
-        #         print("mask_pos shape:", mask_pos.shape)  # Sollte [p] sein
-        #         print("Xtr[b] shape:", Xtr[b].shape)
-        #         Xb_tr, Xb_te = Xtr[b][:, mask_pos], Xte[b][:, mask_pos]
-        #         cov_b_tr, cov_b_te = covtr[b], covte[b]
-        #         yb_tr = ytr[b].unsqueeze(1)
-        #         yb_te = yte[b]
-        #
-        #         # Modellvarianten: CONNECTOME ONLY
-        #         X_connectome_train = Xb_tr
-        #         X_connectome_test = Xb_te
-        #
-        #         # COVARIATES ONLY
-        #         X_cov_train = cov_b_tr
-        #         X_cov_test = cov_b_te
-        #
-        #         # FULL MODEL
-        #         X_full_train = torch.cat([Xb_tr, cov_b_tr], dim=1)
-        #         X_full_test = torch.cat([Xb_te, cov_b_te], dim=1)
-        #
-        #         cov_b_tr = cov_b_tr.float()
-        #         yb_tr = yb_tr.float()
-        #
-        #         # RESIDUALS: erst Covariate-Modell, dann Residuen
-        #         beta_cov = torch.linalg.solve(
-        #             cov_b_tr.T @ cov_b_tr + self.lambda_reg * torch.eye(c, device=device),
-        #             cov_b_tr.T @ yb_tr
-        #         ).squeeze()
-        #         y_cov_pred = (cov_b_te @ beta_cov).squeeze()
-        #         y_residual = yb_te - y_cov_pred  # Ziel für residual model
-        #
-        #         # Modellschätzungen
-        #         def osl(X_train, X_test, y_train): # linear regression closed form
-        #             XTX = X_train.T @ X_train + self.lambda_reg * torch.eye(X_train.shape[1], device=device)
-        #             XTy = X_train.T @ y_train
-        #             beta = torch.linalg.solve(XTX, XTy).squeeze()
-        #             return (X_test @ beta).squeeze()
-        #
-        #         y_pred_dict = {
-        #             'connectome': {
-        #                 'positive': osl(X_connectome_train, X_connectome_test, yb_tr),
-        #                 'negative': torch.zeros_like(yb_te),  # Nur positiv verwendet
-        #                 'both': osl(X_connectome_train, X_connectome_test, yb_tr)
-        #             },
-        #             'covariates': {
-        #                 'positive': osl(X_cov_train, X_cov_test, yb_tr),
-        #                 'negative': torch.zeros_like(yb_te),
-        #                 'both': osl(X_cov_train, X_cov_test, yb_tr)
-        #             },
-        #             'full': {
-        #                 'positive': osl(X_full_train, X_full_test, yb_tr),
-        #                 'negative': torch.zeros_like(yb_te),
-        #                 'both': osl(X_full_train, X_full_test, yb_tr)
-        #             },
-        #             'residuals': {
-        #                 'positive': osl(X_connectome_train, X_connectome_test, y_residual.unsqueeze(1)),
-        #                 'negative': torch.zeros_like(yb_te),
-        #                 'both': osl(X_connectome_train, X_connectome_test, y_residual.unsqueeze(1))
-        #             }
-        #         }
-        #
-        #         # Metriken berechnen und sammeln
-        #         scores = score_regression_models(y_true=yb_te, y_pred_dict=y_pred_dict, primary_metric_only=False)
-        #         metrics_all[b][f'fold_{outer_fold}'] = scores
-        #
-        # return {
-        #     "edge_masks": edge_masks_all,  # [B, n_folds, p]
-        #     "metrics_detailed": metrics_all  # Liste von Dictionairies mit Struktur wie score_regression_models
-        # }
