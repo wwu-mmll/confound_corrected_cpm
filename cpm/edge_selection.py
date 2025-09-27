@@ -450,7 +450,7 @@ def one_sample_t_test(matrix, population_mean):
 
 
 def compute_t_and_p_values(correlations, df) -> tuple[torch.Tensor, torch.Tensor]:
-    correlations = correlations
+    correlations = correlations.to(cuda)
     df = torch.tensor(df, dtype=torch.float32, device=cuda)
 
     t_stats = correlations * torch.sqrt(df / (1 - correlations ** 2))

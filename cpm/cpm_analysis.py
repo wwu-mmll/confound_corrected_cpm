@@ -666,56 +666,115 @@ class CPMRegression:
                    y: torch.Tensor,
                    covariates: torch.Tensor,
                    ) -> dict:
+        """
+        Run CPM with batched edge statistics.
+        X: [B, n, p]
+        y: [B, n]
+        covariates: [B, n, c]
+        """
+
+        def _collect_folds(Xb, yb, covb):
+            """Collect train/test splits into stacked tensors for all folds."""
+            n_folds = self.cv.get_n_splits()
+            train_splits_X, train_splits_y, train_splits_cov = [], [], []
+            test_splits_X, test_splits_y, test_splits_cov = [], [], []
+
+            for train_idx, test_idx in self.cv.split(torch.arange(Xb.shape[0])):
+                train_splits_X.append(Xb[train_idx])
+                train_splits_y.append(yb[train_idx])
+                train_splits_cov.append(covb[train_idx])
+
+                test_splits_X.append(Xb[test_idx])
+                test_splits_y.append(yb[test_idx])
+                test_splits_cov.append(covb[test_idx])
+
+            # Stack: [n_folds, n_train/n_test, ...]
+            return (
+                torch.stack(train_splits_X, dim=0),
+                torch.stack(train_splits_y, dim=0),
+                torch.stack(train_splits_cov, dim=0),
+                torch.stack(test_splits_X, dim=0),
+                torch.stack(test_splits_y, dim=0),
+                torch.stack(test_splits_cov, dim=0),
+            )
+
+        def _edge_statistics_batch(Xtr: torch.Tensor, ytr: torch.Tensor, covtr: torch.Tensor):
+            """
+            Vectorized edge statistics across folds.
+            Xtr: [n_folds, n_train, p]
+            ytr: [n_folds, n_train]
+            covtr: [n_folds, n_train, c]
+            Returns:
+                r_edges: [n_folds, p]
+                p_edges: [n_folds, p]
+            """
+
+            def edge_stat_fn(Xf, yf, covf):
+                r, p = EdgeStatistic.edge_statistic_fn(
+                    Xf, yf, covf,
+                    edge_statistic="pearson",
+                    t_test_filter=self.edge_selection.t_test_filter
+                )
+                return r, p
+
+            return torch.vmap(edge_stat_fn)(Xtr, ytr, covtr)
+
         B, n, p = X.shape
-        print("X.shape: ", B, n, p)
         _, _, c = covariates.shape
         n_folds = self.cv.get_n_splits()
 
         edge_masks_all = torch.zeros(B, n_folds, p, device=device)
         metrics_all = [{} for _ in range(B)]
-        all_predictions_dict = [{} for _ in range(B)]  # [batch][fold] -> y_pred_dict
-        all_network_strengths = [{} for _ in range(B)]  # [batch][fold] -> network_strengths
+        all_predictions_dict = [{} for _ in range(B)]
+        all_network_strengths = [{} for _ in range(B)]
 
         for b in range(B):
             self.logger.info(f"Running Permutation: {b + 1}")
 
             Xb, yb, covb = X[b], y[b], covariates[b]
 
-            for outer_fold, (train_idx, test_idx) in enumerate(self.cv.split(torch.arange(n))):
+            # 1. Collect all folds into tensors
+            Xtr_all, ytr_all, covtr_all, Xte_all, yte_all, covte_all = _collect_folds(Xb, yb, covb)
+
+            # 2. Run batched edge statistics
+            r_edges, p_edges = _edge_statistics_batch(Xtr_all, ytr_all, covtr_all)
+
+            # 3. Loop folds for fitting/prediction
+            for outer_fold in range(n_folds):
                 self.logger.info(f"  Fold {outer_fold + 1}/{n_folds}")
 
-                # Split
-                Xtr, Xte = Xb[train_idx].to(device), Xb[test_idx].to(device)
-                ytr, yte = yb[train_idx].to(device), yb[test_idx].to(device)
-                covtr, covte = covb[train_idx].to(device), covb[test_idx].to(device)
+                # Select fold-specific data from precomputed edgestatistic
+                Xtr, ytr, covtr = Xtr_all[outer_fold].to(device), ytr_all[outer_fold].to(device), covtr_all[
+                    outer_fold].to(device)
+                Xte, yte, covte = Xte_all[outer_fold].to(device), yte_all[outer_fold].to(device), covte_all[
+                    outer_fold].to(device)
 
-                # Edge statistics
-                edge_fn = lambda Xs, ys, cs: EdgeStatistic.edge_statistic_fn(
-                    Xs, ys, cs, edge_statistic="pearson",
-                    t_test_filter=self.edge_selection.t_test_filter
-                )
-                r_edges, p_edges = edge_fn(Xtr, ytr, covtr)
-
-                # Edge selection
-                edge_mask = (p_edges < 0.01).to(dtype=torch.bool).squeeze()  # [p]
+                # Edge mask from precomputed stats
+                edge_mask = (p_edges[outer_fold] < 0.01).to(dtype=torch.bool).squeeze()
                 edge_masks_all[b, outer_fold] = edge_mask
 
-                # Fit CPM model
+                # Fit model
                 model = LinearCPMModel(device=device).fit(Xtr, ytr, covtr, edge_mask=edge_mask)
                 y_pred_dict = model.predict(Xte, covte, edge_mask=edge_mask)
 
                 # Evaluate
-                scores = score_regression_models(y_true=yte, y_pred_dict=y_pred_dict,
-                                                 primary_metric_only=False)
+                scores = score_regression_models(
+                    y_true=yte,
+                    y_pred_dict=y_pred_dict,
+                    primary_metric_only=False
+                )
                 metrics_all[b][f'fold_{outer_fold}'] = scores
                 all_predictions_dict[b][f'fold_{outer_fold}'] = y_pred_dict
 
-                network_strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
-                all_network_strengths[b][f'fold_{outer_fold}'] = network_strengths
+                # Network strengths
+                strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
+                all_network_strengths[b][f'fold_{outer_fold}'] = strengths
 
+        # --- Return results
         return {
             "edge_masks": edge_masks_all,  # [B, n_folds, p]
             "metrics_detailed": metrics_all,  # list of dicts
             "predictions": all_predictions_dict,  # list of dicts
             "network_strengths": all_network_strengths
         }
+
