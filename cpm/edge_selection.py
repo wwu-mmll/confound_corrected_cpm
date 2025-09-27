@@ -366,7 +366,10 @@ from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
 import statsmodels.stats.multitest as multitest
 from warnings import filterwarnings
+
 import torch
+from torch.distributions import StudentT
+from torch import erf, sqrt
 
 cuda = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -374,15 +377,16 @@ cuda = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 def beta_func(a, b):
     a = torch.as_tensor(a)
     b = torch.as_tensor(b)
-    dev = a.device
-    if not b.device == a.device:
+    dev = cuda
+    if not b.device == cuda or not a.device == cuda:
         b.to(dev)
-    return torch.exp(torch.lgamma(a.to(dev)) + torch.lgamma(b.to(dev)) - torch.lgamma((a + b).to(dev)))
+        a.to(dev)
+    return torch.exp(torch.lgamma(a) + torch.lgamma(b) - torch.lgamma((a + b)))
 
 
 def incomplete_beta(x, a, b, n=1000) -> torch.Tensor:
     x = x.clamp(min=1e-8, max=1 - 1e-8)
-    device = x.device
+    device = cuda
     a = torch.as_tensor(a, dtype=torch.float32, device=device)
     b = torch.as_tensor(b, dtype=torch.float32, device=device)
 
@@ -407,7 +411,6 @@ def regularized_incomplete_beta(x, a, b, n=1000):
 
 
 def student_t_cdf(t, df, n=1000):
-    device = t.device
     x = df / (df + t ** 2)
     a = df / 2
     b = 0.5
@@ -428,7 +431,7 @@ def one_sample_t_test(matrix, population_mean):
     t_stats = (sample_means - population_mean) / (
             sample_stds / torch.sqrt(torch.tensor(n, dtype=torch.float32, device=cuda)))
     df = n - 1
-    cdf_vals = student_t_cdf(torch.abs(t_stats.to(cuda)), df)
+    cdf_vals = student_t_cdf(torch.abs(t_stats), df)
     p_values = 2 * (1 - cdf_vals)
     return t_stats, p_values
 
@@ -449,13 +452,29 @@ def one_sample_t_test(matrix, population_mean):
 #     return t_stats, p_values
 
 
-def compute_t_and_p_values(correlations, df) -> tuple[torch.Tensor, torch.Tensor]:
-    correlations = correlations.to(cuda)
-    df = torch.tensor(df, dtype=torch.float32, device=cuda)
+# def compute_t_and_p_values(correlations, df) -> tuple[torch.Tensor, torch.Tensor]:
+#     correlations = correlations.to(cuda)
+#     df = torch.tensor(df, dtype=torch.float32, device=cuda)
+#
+#     t_stats = correlations * torch.sqrt(df / (1 - correlations ** 2))
+#     cdf_vals = student_t_cdf(torch.abs(t_stats), df)
+#     p_values = 2 * (1 - cdf_vals)
+#     return t_stats, p_values
 
+
+def compute_t_and_p_values(correlations, df):
+    # Ensure df is a tensor on the same device as correlations
+    correlations = correlations.to(cuda)
+    print(correlations.device)
+    df = torch.tensor(df, dtype=correlations.dtype, device=cuda)
+
+    # Compute t-statistics
     t_stats = correlations * torch.sqrt(df / (1 - correlations ** 2))
-    cdf_vals = student_t_cdf(torch.abs(t_stats.to(cuda)), df)
-    p_values = 2 * (1 - cdf_vals)
+
+    # Crude normal approximation for p-values
+    z = t_stats / torch.sqrt(df / (df + 1))
+    p_values = 2 * (0.5 * (1 + torch.erf(-torch.abs(z) / torch.sqrt(torch.tensor(2.0, device=cuda)))))
+
     return t_stats, p_values
 
 
@@ -485,10 +504,12 @@ def torch_rankdata(x: torch.Tensor, axis=None):
 
 def compute_correlation_and_pvalues(x, Y, rank=False, valid_edges=None):
     B, n, p = Y.shape
+    x = x.to(cuda)
+    Y = Y.to(cuda)
 
     if rank:
-        x = x.argsort(dim=1).argsort(dim=1).float()
-        Y = Y.argsort(dim=1).argsort(dim=1).float()
+        x = x.argsort(dim=1).argsort(dim=1).float().to(cuda)
+        Y = Y.argsort(dim=1).argsort(dim=1).float().to(cuda)
 
     # Mean-centering
     x_centered = x - x.mean(dim=1, keepdim=True)  # [B, n]
@@ -496,6 +517,7 @@ def compute_correlation_and_pvalues(x, Y, rank=False, valid_edges=None):
 
     # Numerator
     corr_numerator = torch.einsum('bnp,bn->bp', Y_centered, x_centered)  # [B, p]
+    #corr_numerator = (Y_centered * x_centered.unsqueeze(2)).sum(dim=1)  # same but slower
 
     # Denominator
     x_sq = x_centered.pow(2).sum(dim=1).unsqueeze(1)  # [B, 1]
@@ -671,7 +693,7 @@ class EdgeStatistic(BaseEstimator):
             _, p_values = one_sample_t_test(X, 0)  # [B, p]
             valid_edges = p_values < 0.05  # [B, p]
         else:
-            valid_edges = torch.ones(B, p, dtype=torch.bool, device=X.device)
+            valid_edges = torch.ones(B, p, dtype=torch.bool, device=cuda)
 
         if self.edge_statistic == 'pearson':
             r_masked, p_masked = pearson_correlation_with_pvalues(y, X, valid_edges=valid_edges)  # [B, p]
@@ -699,7 +721,7 @@ class EdgeStatistic(BaseEstimator):
             _, p_values = one_sample_t_test(Xb.unsqueeze(0), 0)  # Output: [1, p]
             valid_edges = p_values[0] < 0.05  # [p]
         else:
-            valid_edges = torch.ones(p, dtype=torch.bool, device=Xb.device)
+            valid_edges = torch.ones(p, dtype=torch.bool, device=cuda)
 
         if edge_statistic == 'pearson':
             r, pval = pearson_correlation_with_pvalues(yb.unsqueeze(0), Xb.unsqueeze(0), valid_edges.unsqueeze(0))
