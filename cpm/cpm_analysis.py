@@ -667,61 +667,63 @@ class CPMRegression:
                    covariates: torch.Tensor,
                    ) -> dict:
         """
-        Run CPM with batched edge statistics.
+        Run CPM with batched edge statistics across permutations and folds.
         X: [B, n, p]
         y: [B, n]
         covariates: [B, n, c]
         """
-
-        def _collect_folds(Xb, yb, covb):
-            """Collect train/test splits into stacked tensors for all folds."""
-            n_folds = self.cv.get_n_splits()
-            train_splits_X, train_splits_y, train_splits_cov = [], [], []
-            test_splits_X, test_splits_y, test_splits_cov = [], [], []
-
-            for train_idx, test_idx in self.cv.split(torch.arange(Xb.shape[0])):
-                train_splits_X.append(Xb[train_idx])
-                train_splits_y.append(yb[train_idx])
-                train_splits_cov.append(covb[train_idx])
-
-                test_splits_X.append(Xb[test_idx])
-                test_splits_y.append(yb[test_idx])
-                test_splits_cov.append(covb[test_idx])
-
-            # Stack: [n_folds, n_train/n_test, ...]
-            return (
-                torch.stack(train_splits_X, dim=0),
-                torch.stack(train_splits_y, dim=0),
-                torch.stack(train_splits_cov, dim=0),
-                torch.stack(test_splits_X, dim=0),
-                torch.stack(test_splits_y, dim=0),
-                torch.stack(test_splits_cov, dim=0),
-            )
-
-        def _edge_statistics_batch(Xtr: torch.Tensor, ytr: torch.Tensor, covtr: torch.Tensor):
-            """
-            Vectorized edge statistics across folds.
-            Xtr: [n_folds, n_train, p]
-            ytr: [n_folds, n_train]
-            covtr: [n_folds, n_train, c]
-            Returns:
-                r_edges: [n_folds, p]
-                p_edges: [n_folds, p]
-            """
-
-            def edge_stat_fn(Xf, yf, covf):
-                r, p = EdgeStatistic.edge_statistic_fn(
-                    Xf, yf, covf,
-                    edge_statistic="pearson",
-                    t_test_filter=self.edge_selection.t_test_filter
-                )
-                return r, p
-
-            return torch.vmap(edge_stat_fn)(Xtr, ytr, covtr)
-
         B, n, p = X.shape
         _, _, c = covariates.shape
         n_folds = self.cv.get_n_splits()
+
+        def _collect_folds(Xb, yb, covb):
+            train_X, train_y, train_cov = [], [], []
+            test_X, test_y, test_cov = [], [], []
+
+            for train_idx, test_idx in self.cv.split(torch.arange(Xb.shape[0])):
+                train_X.append(Xb[train_idx])
+                train_y.append(yb[train_idx])
+                train_cov.append(covb[train_idx])
+
+                test_X.append(Xb[test_idx])
+                test_y.append(yb[test_idx])
+                test_cov.append(covb[test_idx])
+
+            return (
+                torch.stack(train_X, dim=0),  # [n_folds, n_train, p]
+                torch.stack(train_y, dim=0),  # [n_folds, n_train]
+                torch.stack(train_cov, dim=0),  # [n_folds, n_train, c]
+                torch.stack(test_X, dim=0),
+                torch.stack(test_y, dim=0),
+                torch.stack(test_cov, dim=0),
+            )
+
+        # Collect folds for all permutations
+        folds_all = [_collect_folds(X[b], y[b], covariates[b]) for b in range(B)]
+        Xtr_all, ytr_all, covtr_all, Xte_all, yte_all, covte_all = map(
+            lambda parts: torch.stack(parts, dim=0), zip(*folds_all)
+        )
+
+        def edge_stat_fn(Xf, yf, covf):
+            r, p = EdgeStatistic.edge_statistic_fn(
+                Xf, yf, covf,
+                edge_statistic="pearson",
+                t_test_filter=self.edge_selection.t_test_filter
+            )
+            return r, p
+
+        def _edge_statistics(Xtr_all, ytr_all, covtr_all):
+            # vmap over folds, then over permutations
+            return torch.vmap(
+                lambda Xtr_b, ytr_b, covtr_b: torch.vmap(edge_stat_fn)(Xtr_b, ytr_b, covtr_b)
+            )(Xtr_all, ytr_all, covtr_all)
+
+        import time
+        start = time.time()
+        r_edges, p_edges = _edge_statistics(Xtr_all, ytr_all, covtr_all)
+        end = time.time()
+        print(f"Total _edge_statistics time: {(end - start):.2f} seconds")
+        # Shapes: [B, n_folds, p]
 
         edge_masks_all = torch.zeros(B, n_folds, p, device=device)
         metrics_all = [{} for _ in range(B)]
@@ -731,31 +733,29 @@ class CPMRegression:
         for b in range(B):
             self.logger.info(f"Running Permutation: {b + 1}")
 
-            Xb, yb, covb = X[b], y[b], covariates[b]
-
-            # 1. Collect all folds into tensors
-            Xtr_all, ytr_all, covtr_all, Xte_all, yte_all, covte_all = _collect_folds(Xb, yb, covb)
-
-            r_edges, p_edges = _edge_statistics_batch(Xtr_all, ytr_all, covtr_all)
-
-            # 3. Loop folds for fitting/prediction
             for outer_fold in range(n_folds):
                 self.logger.info(f"  Fold {outer_fold + 1}/{n_folds}")
 
-                # Select fold-specific data from precomputed edgestatistic
-                Xtr, ytr, covtr = Xtr_all[outer_fold].to(device), ytr_all[outer_fold].to(device), covtr_all[
-                    outer_fold].to(device)
-                Xte, yte, covte = Xte_all[outer_fold].to(device), yte_all[outer_fold].to(device), covte_all[
-                    outer_fold].to(device)
+                Xtr, ytr, covtr = (
+                    Xtr_all[b, outer_fold].to(device),
+                    ytr_all[b, outer_fold].to(device),
+                    covtr_all[b, outer_fold].to(device),
+                )
+                Xte, yte, covte = (
+                    Xte_all[b, outer_fold].to(device),
+                    yte_all[b, outer_fold].to(device),
+                    covte_all[b, outer_fold].to(device),
+                )
 
                 # Edge mask from precomputed stats
-                edge_mask = (p_edges[outer_fold] < 0.01).to(dtype=torch.bool).squeeze()
+                edge_mask = (p_edges[b, outer_fold] < 0.01).to(dtype=torch.bool).squeeze()
                 edge_masks_all[b, outer_fold] = edge_mask
 
-                # Fit model
+                # Fit/predict
                 model = LinearCPMModel(device=device).fit(Xtr, ytr, covtr, edge_mask=edge_mask)
                 y_pred_dict = model.predict(Xte, covte, edge_mask=edge_mask)
 
+                # Evaluate
                 scores = score_regression_models(
                     y_true=yte,
                     y_pred_dict=y_pred_dict,
@@ -764,14 +764,14 @@ class CPMRegression:
                 metrics_all[b][f'fold_{outer_fold}'] = scores
                 all_predictions_dict[b][f'fold_{outer_fold}'] = y_pred_dict
 
-                # Network strengths
                 strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
                 all_network_strengths[b][f'fold_{outer_fold}'] = strengths
 
         return {
             "edge_masks": edge_masks_all,  # [B, n_folds, p]
-            "metrics_detailed": metrics_all,  # list of dicts
-            "predictions": all_predictions_dict,  # list of dicts
-            "network_strengths": all_network_strengths
+            "metrics_detailed": metrics_all,
+            "predictions": all_predictions_dict,
+            "network_strengths": all_network_strengths,
         }
+
 
