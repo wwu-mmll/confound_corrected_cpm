@@ -736,7 +736,6 @@ class CPMRegression:
             # 1. Collect all folds into tensors
             Xtr_all, ytr_all, covtr_all, Xte_all, yte_all, covte_all = _collect_folds(Xb, yb, covb)
 
-            # 2. Run batched edge statistics
             r_edges, p_edges = _edge_statistics_batch(Xtr_all, ytr_all, covtr_all)
 
             # 3. Loop folds for fitting/prediction
@@ -757,7 +756,6 @@ class CPMRegression:
                 model = LinearCPMModel(device=device).fit(Xtr, ytr, covtr, edge_mask=edge_mask)
                 y_pred_dict = model.predict(Xte, covte, edge_mask=edge_mask)
 
-                # Evaluate
                 scores = score_regression_models(
                     y_true=yte,
                     y_pred_dict=y_pred_dict,
@@ -770,7 +768,6 @@ class CPMRegression:
                 strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
                 all_network_strengths[b][f'fold_{outer_fold}'] = strengths
 
-        # --- Return results
         return {
             "edge_masks": edge_masks_all,  # [B, n_folds, p]
             "metrics_detailed": metrics_all,  # list of dicts
