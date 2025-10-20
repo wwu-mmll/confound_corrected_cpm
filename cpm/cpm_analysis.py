@@ -401,11 +401,15 @@
 import os
 import logging
 import shutil
+import gc
 
 from typing import Union
 
+import math
 import numpy as np
 import torch
+from torch.utils.data import DataLoader, TensorDataset
+import psutil
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
 
@@ -580,15 +584,18 @@ class CPMRegression:
         y_tot[0] = y
         X_tot[0] = X
 
+        print("Permuting data..")
         for i in range(1, p):
             idx = torch.randperm(y.shape[0])
             y_tot[i] = y[idx]
             X_tot[i] = X[idx]
+            print(i)
 
-        X_tot.to(device)
-        y_tot.to(device)
-        cov_tot.to(device)
+        print("Permuted data..")
+        torch.cuda.empty_cache()
+        gc.collect()
 
+        print("Estimating..")
         import time
         start = time.time()
         results = self._batch_run(X=X_tot, y=y_tot, covariates=cov_tot)
@@ -603,7 +610,7 @@ class CPMRegression:
 
         for b, results_manager in enumerate(results_managers):
             for fold in range(self.cv.get_n_splits()):
-                edge_mask = results["edge_masks"][b, fold].cpu().numpy()
+                edge_mask = results["edge_masks"][b][fold].cpu().numpy()
 
                 edges = {
                     'positive': np.where(edge_mask > 0)[0],
@@ -661,114 +668,215 @@ class CPMRegression:
         endend = time.time()
         print(f"Total time: {(endend - start):.2f} seconds")
 
+    def _get_safe_batch_size(self, X: torch.Tensor, safety_factor: float = 0.6) -> int:
+        """
+        Estimate a safe batch size based on available GPU/CPU memory.
+        Uses safety_factor (0.6 means use 60% of available memory).
+        """
+        element_size = X.element_size()  # bytes per element
+        total_elements = X[0].numel()  # elements per permutation
+        bytes_per_batch = total_elements * element_size
+
+        if torch.cuda.is_available():
+            mem_info = torch.cuda.mem_get_info()
+            free_mem = mem_info[0]  # bytes
+        else:
+            free_mem = psutil.virtual_memory().available
+
+        max_batches = max(int((free_mem * safety_factor) // bytes_per_batch), 1)
+        return max_batches
+
     def _batch_run(self,
                    X: torch.Tensor,
                    y: torch.Tensor,
-                   covariates: torch.Tensor,
-                   ) -> dict:
+                   covariates: torch.Tensor) -> dict:
         """
         Run CPM with batched edge statistics across permutations and folds.
         X: [B, n, p]
         y: [B, n]
         covariates: [B, n, c]
         """
+        import time
+        import gc
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         B, n, p = X.shape
         _, _, c = covariates.shape
         n_folds = self.cv.get_n_splits()
 
-        def _collect_folds(Xb, yb, covb):
-            train_X, train_y, train_cov = [], [], []
-            test_X, test_y, test_cov = [], [], []
+        batch_size = self._get_safe_batch_size(X)
+        batch_size = 1
+        self.logger.info(f"Auto-detected safe batch size: {batch_size} (B={B})")
 
-            for train_idx, test_idx in self.cv.split(torch.arange(Xb.shape[0])):
-                train_X.append(Xb[train_idx])
-                train_y.append(yb[train_idx])
-                train_cov.append(covb[train_idx])
+        dataset = TensorDataset(X, y, covariates)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-                test_X.append(Xb[test_idx])
-                test_y.append(yb[test_idx])
-                test_cov.append(covb[test_idx])
+        edge_masks_all = []
+        metrics_all = []
+        all_predictions_dict = []
+        all_network_strengths = []
 
-            return (
-                torch.stack(train_X, dim=0),  # [n_folds, n_train, p]
-                torch.stack(train_y, dim=0),  # [n_folds, n_train]
-                torch.stack(train_cov, dim=0),  # [n_folds, n_train, c]
-                torch.stack(test_X, dim=0),
-                torch.stack(test_y, dim=0),
-                torch.stack(test_cov, dim=0),
-            )
-
-        # Collect folds for all permutations
-        folds_all = [_collect_folds(X[b], y[b], covariates[b]) for b in range(B)]
-        Xtr_all, ytr_all, covtr_all, Xte_all, yte_all, covte_all = map(
-            lambda parts: torch.stack(parts, dim=0), zip(*folds_all)
-        )
-
+        # Edge statistic function
         def edge_stat_fn(Xf, yf, covf):
-            r, p = EdgeStatistic.edge_statistic_fn(
+            r, p_val = EdgeStatistic.edge_statistic_fn(
                 Xf, yf, covf,
                 edge_statistic="pearson",
                 t_test_filter=self.edge_selection.t_test_filter
             )
-            return r, p
+            return r, p_val
 
-        def _edge_statistics(Xtr_all, ytr_all, covtr_all):
-            # vmap over folds, then over permutations
-            return torch.vmap(
-                lambda Xtr_b, ytr_b, covtr_b: torch.vmap(edge_stat_fn)(Xtr_b, ytr_b, covtr_b)
-            )(Xtr_all, ytr_all, covtr_all)
+        start_total = time.time()
 
-        import time
-        start = time.time()
-        r_edges, p_edges = _edge_statistics(Xtr_all, ytr_all, covtr_all)
-        end = time.time()
-        print(f"Total _edge_statistics time: {(end - start):.2f} seconds")
-        # Shapes: [B, n_folds, p]
+        for batch_idx, (X_batch, y_batch, cov_batch) in enumerate(loader):
+            self.logger.info(f"Processing batch {batch_idx + 1}/{len(loader)}")
 
-        edge_masks_all = torch.zeros(B, n_folds, p, device=device)
-        metrics_all = [{} for _ in range(B)]
-        all_predictions_dict = [{} for _ in range(B)]
-        all_network_strengths = [{} for _ in range(B)]
+            #X_batch = X_batch
+            #y_batch = y_batch
+            #cov_batch = cov_batch  # .to(device)
+            batch_B = X_batch.shape[0]
 
-        for b in range(B):
-            self.logger.info(f"Running Permutation: {b + 1}")
+            # Loop over permutations in this batch
+            for b in range(batch_B):
+                self.logger.info(f"  Permutation {b + 1 + batch_idx * batch_size}/{B}")
+                Xb, yb, covb = X_batch[b], y_batch[b], cov_batch[b]
+                # Xb = Xb.to(device)
+                # yb = yb.to(device)
+                # covb = covb.to(device)
 
-            for outer_fold in range(n_folds):
-                self.logger.info(f"  Fold {outer_fold + 1}/{n_folds}")
+                # Collect all train/test splits for folds
+                folds = list(self.cv.split(torch.arange(n)))
+                n_folds = len(folds)
 
-                Xtr, ytr, covtr = (
-                    Xtr_all[b, outer_fold].to(device),
-                    ytr_all[b, outer_fold].to(device),
-                    covtr_all[b, outer_fold].to(device),
-                )
-                Xte, yte, covte = (
-                    Xte_all[b, outer_fold].to(device),
-                    yte_all[b, outer_fold].to(device),
-                    covte_all[b, outer_fold].to(device),
-                )
+                Xtr_all = torch.stack([Xb[train_idx] for train_idx, _ in folds], dim=0)  # [n_folds, n_train, p] .to(device)
+                ytr_all = torch.stack([yb[train_idx] for train_idx, _ in folds], dim=0)
+                covtr_all = torch.stack([covb[train_idx] for train_idx, _ in folds], dim=0)
 
-                # Edge mask from precomputed stats
-                edge_mask = (p_edges[b, outer_fold] < 0.01).to(dtype=torch.bool).squeeze()
-                edge_masks_all[b, outer_fold] = edge_mask
+                Xte_all = torch.stack([Xb[test_idx] for _, test_idx in folds], dim=0)
+                yte_all = torch.stack([yb[test_idx] for _, test_idx in folds], dim=0)
+                covte_all = torch.stack([covb[test_idx] for _, test_idx in folds], dim=0)
 
-                # Fit/predict
-                model = LinearCPMModel(device=device).fit(Xtr, ytr, covtr, edge_mask=edge_mask)
-                y_pred_dict = model.predict(Xte, covte, edge_mask=edge_mask)
+                gc.collect()
 
-                # Evaluate
-                scores = score_regression_models(
-                    y_true=yte,
-                    y_pred_dict=y_pred_dict,
-                    primary_metric_only=False
-                )
-                metrics_all[b][f'fold_{outer_fold}'] = scores
-                all_predictions_dict[b][f'fold_{outer_fold}'] = y_pred_dict
+                def vmap_edge_stat_in_chunks(Xtr_all, ytr_all, covtr_all, chunk_size=4):
+                    """
+                    Apply vmap in chunks to avoid OOM.
+                    Xtr_all, ytr_all, covtr_all: [n_folds, n_train, p] / [n_folds, n_train] / [n_folds, n_train, c]
+                    chunk_size: number of folds to process at once
+                    """
+                    n_folds = Xtr_all.shape[0]
+                    r_edges_list = []
+                    p_edges_list = []
 
-                strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
-                all_network_strengths[b][f'fold_{outer_fold}'] = strengths
+                    import time
+                    tik = time.time()
+
+                    for start in range(0, n_folds, chunk_size):
+                        end = min(start + chunk_size, n_folds)
+                        self.logger.info("    Calculating folds {start}-{end}".format(start=start, end=end))
+                        X_chunk = Xtr_all[start:end].to(device)
+                        y_chunk = ytr_all[start:end].to(device)
+                        cov_chunk = covtr_all[start:end].to(device)
+
+                        r_chunk, p_chunk = torch.vmap(edge_stat_fn)(X_chunk, y_chunk, cov_chunk)
+                        r_edges_list.append(r_chunk)
+                        p_edges_list.append(p_chunk)
+
+                        # free GPU memory
+                        del X_chunk, y_chunk, cov_chunk
+                        torch.cuda.empty_cache()
+                        gc.collect()
+
+                    tok = time.time()
+                    self.logger.info(f"    Took {tok - tik:.2f} seconds")
+
+                    r_edges = torch.cat(r_edges_list, dim=0)
+                    p_edges = torch.cat(p_edges_list, dim=0)
+                    return r_edges, p_edges
+
+                def estimate_vram_per_fold(n_train, p, c, dtype_bytes=4):
+                    # Xtr + ytr + covtr + outputs (roughly)
+                    return (n_train * (p + 1 + c) + p) * dtype_bytes * 1 # * 0.5 is risky but speeds up
+
+                def get_free_gpu_memory(device=None):
+                    if device is None:
+                        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                    if device.type != 'cuda':
+                        return float('inf')
+                    free_bytes, _ = torch.cuda.mem_get_info()
+                    return free_bytes
+
+                def compute_safe_chunk_size(n_train, p, c, device=None, dtype_bytes=4, safety_factor=0.85):
+                    """Compute maximum number of folds to process at once"""
+                    free_bytes = get_free_gpu_memory(device)
+                    vram_per_fold = estimate_vram_per_fold(n_train, p, c, dtype_bytes)
+
+                    self.logger.info(f"    Estimated VRAM per fold: {vram_per_fold / 1e6:.2f} MB")
+                    self.logger.info(f"    Free GPU memory: {free_bytes / 1e6:.2f} MB")
+                    chunk_size = max(1, int(free_bytes * safety_factor / vram_per_fold))
+                    return chunk_size
+
+                chunk_size = compute_safe_chunk_size(n_train=Xtr_all.shape[1],
+                                                     p=Xtr_all.shape[2],
+                                                     c=covtr_all.shape[2],
+                                                     device=device)
+                self.logger.info(f"    -> Safe to use chunksize: {chunk_size} chunks")
+
+                #chunk_size = 1
+                r_edges, p_edges = vmap_edge_stat_in_chunks(Xtr_all, ytr_all, covtr_all, chunk_size=chunk_size)
+
+                # Compute edge statistics over folds with vmap
+                #r_edges, p_edges = torch.vmap(edge_stat_fn)(Xtr_all, ytr_all, covtr_all)  # [n_folds, p]
+
+                # Loop over folds for model fitting and evaluation
+                metrics_fold = {}
+                predictions_fold = {}
+                strengths_fold = {}
+                edge_masks_fold = torch.zeros(n_folds, p, dtype=torch.bool)
+
+                for fold_idx in range(n_folds):
+                    Xtr, ytr, covtr = Xtr_all[fold_idx].to(device), ytr_all[fold_idx].to(device), covtr_all[fold_idx].to(device)
+                    Xte, yte, covte = Xte_all[fold_idx].to(device), yte_all[fold_idx].to(device), covte_all[fold_idx].to(device)
+
+                    edge_mask = (p_edges[fold_idx] < 0.01).to(dtype=torch.bool)
+                    edge_masks_fold[fold_idx] = edge_mask
+
+                    model = LinearCPMModel(device=device).fit(Xtr, ytr, covtr, edge_mask=edge_mask)
+                    y_pred_dict = model.predict(Xte, covte, edge_mask=edge_mask)
+
+                    scores = score_regression_models(
+                        y_true=yte,
+                        y_pred_dict=y_pred_dict,
+                        primary_metric_only=False
+                    )
+                    strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
+
+                    metrics_fold[f'fold_{fold_idx}'] = scores
+                    predictions_fold[f'fold_{fold_idx}'] = y_pred_dict
+                    strengths_fold[f'fold_{fold_idx}'] = strengths
+
+                    del Xtr, ytr, covtr, Xte, yte, covte, model
+                    torch.cuda.empty_cache()
+                    gc.collect()
+
+                edge_masks_all.append(edge_masks_fold.detach().cpu())
+                metrics_all.append(metrics_fold)
+                all_predictions_dict.append(predictions_fold)
+                all_network_strengths.append(strengths_fold)
+
+                del Xtr_all, ytr_all, covtr_all
+                del Xte_all, yte_all, covte_all
+                torch.cuda.empty_cache()
+                gc.collect()
+
+            del X_batch, y_batch, cov_batch
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        end_total = time.time()
+        self.logger.info(f"Total _batch_run time: {(end_total - start_total):.2f} seconds")
 
         return {
-            "edge_masks": edge_masks_all,  # [B, n_folds, p]
+            "edge_masks": edge_masks_all,  # list of [n_folds, p] tensors
             "metrics_detailed": metrics_all,
             "predictions": all_predictions_dict,
             "network_strengths": all_network_strengths,

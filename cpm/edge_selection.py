@@ -465,7 +465,6 @@ def one_sample_t_test(matrix, population_mean):
 def compute_t_and_p_values(correlations, df):
     # Ensure df is a tensor on the same device as correlations
     correlations = correlations.to(cuda)
-    print(correlations.device)
     df = torch.tensor(df, dtype=correlations.dtype, device=cuda)
 
     # Compute t-statistics
