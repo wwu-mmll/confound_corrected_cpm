@@ -140,18 +140,6 @@ class ResultsManager:
         return
 
     def store_predictions(self, y_pred, y_true, params, fold, param_id, test_indices):
-        """
-        Update predictions DataFrame with new predictions and parameters.
-
-        :param y_pred: Predicted values.
-        :param y_true: True values.
-        :param params: Best hyperparameters from inner cross-validation.
-        :param fold: Current fold number.
-        :return: Updated predictions DataFrame.
-        """
-        #preds = (pd.DataFrame.from_dict(y_pred).stack().explode().reset_index().rename(
-        #    {'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1).set_index(['network', 'model']))
-
         def _to_float(val):
             if isinstance(val, torch.Tensor):
                 return val.item()
@@ -169,39 +157,50 @@ class ResultsManager:
             .set_index(['network', 'model'])
         )
         preds['y_pred'] = preds['y_pred'].apply(_to_float)
-        n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
-        preds['y_true'] = np.tile(y_true, n_network_model)
-        #preds['params'] = [params] * y_true.shape[0] * n_network_model
+
+        y_true = np.asarray(y_true).flatten()
+        test_indices = np.asarray(test_indices).flatten()
+
+        n_samples = len(y_true)
+        n_total = len(preds)
+
+        n_repeats = n_total // n_samples
+
+        preds['y_true'] = np.tile(y_true, n_repeats)
+        preds['sample_index'] = np.tile(test_indices, n_repeats)
+
         import json
-        params_serialized = (
-            json.dumps(params) if isinstance(params, dict) and params
-            else "None"
-        )
-        preds['params'] = [params_serialized] * y_true.shape[0] * n_network_model
-        preds['params'] = [params_serialized] * y_true.shape[0] * n_network_model
-        preds['fold'] = [fold] * y_true.shape[0] * n_network_model
-        preds['param_id'] = [param_id] * y_true.shape[0] * n_network_model
-        preds['sample_index'] = np.tile(test_indices, n_network_model)  # include indices
+        params_serialized = json.dumps(params) if isinstance(params, dict) and params else "None"
+        preds['params'] = [params_serialized] * len(preds)
+        preds['fold'] = [fold] * len(preds)
+        preds['param_id'] = [param_id] * len(preds)
+
         self.cv_predictions = pd.concat([self.cv_predictions, preds], axis=0)
-        return
 
     def store_network_strengths(self, network_strengths, y_true, fold):
-        dfs = list()
+        dfs = []
         models = ['connectome', 'residuals']
         networks = ['positive', 'negative']
+
         for model in models:
             for network in networks:
-                df = pd.DataFrame()
-                df['y_true'] = y_true
-                df['network_strength'] = np.squeeze(network_strengths[model][network].cpu().numpy())
-                df['model'] = [model] * network_strengths[model][network].shape[0]
-                df['fold'] = [fold] * network_strengths[model][network].shape[0]
-                df['network'] = [network] * network_strengths[model][network].shape[0]
+                strength_values = np.squeeze(network_strengths[model][network].cpu().numpy())
+                n_samples = strength_values.shape[0]
+
+                y_true_trimmed = np.asarray(y_true).flatten()[:n_samples]
+
+                df = pd.DataFrame({
+                    'y_true': y_true_trimmed,
+                    'network_strength': strength_values,
+                    'model': [model] * n_samples,
+                    'fold': [fold] * n_samples,
+                    'network': [network] * n_samples
+                })
+
                 dfs.append(df)
 
-        df = pd.concat(dfs, axis=0)
-        self.cv_network_strengths = pd.concat([self.cv_network_strengths, df], axis=0)
-        return
+        df_all = pd.concat(dfs, axis=0)
+        self.cv_network_strengths = pd.concat([self.cv_network_strengths, df_all], axis=0)
 
     @staticmethod
     def load_cv_results(folder):
