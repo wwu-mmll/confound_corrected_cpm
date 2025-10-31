@@ -37,17 +37,6 @@ def apply_metrics(y_true, y_pred, primary_metric_only: bool = False):
     return result
 
 
-# def apply_metrics(y_true, y_pred, primary_metric_only: bool = False):
-#     result = {}
-#     result['spearman_score'] = regression_metrics_functions['spearman_score'](y_true, y_pred)
-#     for metric_name, metric_func in regression_metrics_functions.items():
-#         if metric_name == 'spearman_score':
-#             pass
-#         if not primary_metric_only:
-#             result[metric_name] = regression_metrics_functions[metric_name](y_true, y_pred)
-#     return result
-
-
 def score_regression_models(y_true, y_pred_dict, primary_metric_only: bool = False):
     scores = {}
     for model in ['full', 'covariates', 'connectome', 'residuals']:
@@ -56,13 +45,3 @@ def score_regression_models(y_true, y_pred_dict, primary_metric_only: bool = Fal
             preds = y_pred_dict[model][network]
             scores[model][network] = apply_metrics(y_true, preds, primary_metric_only)
     return scores
-
-
-# def score_regression_models(y_true, y_pred, primary_metric_only: bool = False):
-#     scores = {}
-#     for model in ['full', 'covariates', 'connectome', 'residuals']:
-#         scores[model] = {}
-#         for network in ['positive', 'negative', 'both']:
-#             scores[model][network] = apply_metrics(y_true, y_pred[model][network], primary_metric_only = primary_metric_only)
-#     return scores
-

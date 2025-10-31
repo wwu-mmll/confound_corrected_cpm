@@ -16,7 +16,7 @@ from cpm.logging import setup_logging
 from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold, EdgeStatistic
 from cpm.results_manager import ResultsManager, PermutationManager
-from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
+from cpm.utils import check_data, impute_missing_values, select_stable_edges, generate_data_insights
 from cpm.scoring import score_regression_models
 from cpm.reporting import HTMLReporter
 
@@ -78,10 +78,8 @@ class CPMRegression:
         setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
         self.logger = logging.getLogger(__name__)
 
-        # Log important configuration details
         self._log_analysis_details()
 
-        # check inner cv and param grid
         if self.inner_cv is None:
             if len(self.edge_selection.param_grid) > 1:
                 raise RuntimeError("Multiple hyperparameter configurations but no inner cv defined. "
@@ -89,7 +87,6 @@ class CPMRegression:
             if self.select_stable_edges:
                 raise RuntimeError("Stable edges can only be selected when using an inner cv.")
 
-        # check and copy atlas labels file
         self.atlas_labels = self._validate_and_copy_atlas_file(atlas_labels)
 
     def _log_analysis_details(self):
@@ -120,11 +117,9 @@ class CPMRegression:
         required_columns = {"x", "y", "z", "region"}
         csv_path = os.path.abspath(csv_path)
 
-        # Check if file exists
         if not os.path.isfile(csv_path):
             raise RuntimeError(f"CSV file does not exist: {csv_path}")
 
-        # Try to read and validate columns
         try:
             df = pd.read_csv(csv_path)
             missing = required_columns - set(df.columns)
@@ -134,7 +129,6 @@ class CPMRegression:
         except Exception as e:
             raise RuntimeError(f"Error reading CSV file {csv_path}: {e}")
 
-        # File and columns valid, proceed to copy
         dest_path = os.path.join(self.results_directory, "edges", os.path.basename(csv_path))
 
         try:
@@ -177,18 +171,17 @@ class CPMRegression:
         y_tot[0] = y
         X_tot[0] = X
 
-        print("Permuting data..")
+        self.logger.info("Permuting data..")
         for i in range(1, p):
             idx = torch.randperm(y.shape[0])
             y_tot[i] = y[idx]
             X_tot[i] = X[idx]
-            print(i)
 
-        print("Permuted data..")
+        self.logger.info("Permuted data..")
         torch.cuda.empty_cache()
         gc.collect()
 
-        print("Estimating..")
+        self.logger.info("Estimating..")
         import time
         start = time.time()
         results = self._batch_run(X=X_tot, y=y_tot, covariates=cov_tot)
@@ -211,7 +204,6 @@ class CPMRegression:
                 }
 
                 fold_key = f'fold_{fold}'
-                scores = results["metrics_detailed"][b][fold_key]
 
                 results_manager.store_edges(edges=edges, fold=fold)
                 results_manager.store_metrics(metrics=results["metrics_detailed"][b][f'fold_{fold}'], params={},
@@ -257,7 +249,7 @@ class CPMRegression:
         reporter.generate_html_report()
 
         endend = time.time()
-        print(f"Total time: {(endend - start):.2f} seconds")
+        self.logger.info("Total runtime: {:.2f} seconds".format(endend - start))
 
     def _get_safe_batch_size(self, X: torch.Tensor, safety_factor: float = 0.6) -> int:
         """
@@ -277,6 +269,58 @@ class CPMRegression:
         max_batches = max(int((free_mem * safety_factor) // bytes_per_batch), 1)
         return max_batches
 
+    # X_tot: [p, n, f]
+    # Contains feature data (X) for all permutations.
+    # p = number of permutations + 1 (includes original data)
+    # n = number of samples
+    # f = number of features
+
+    # y_tot: [p, n]
+    # Target variable (y) for all permutations.
+    # First row is the original data, remaining rows are permuted versions.
+
+    # cov_tot: [p, n, c]
+    # Covariate data for all permutations.
+    # c = number of covariates
+
+    # X_batch, y_batch, cov_batch: [B, n, f], [B, n], [B, n, c]
+    # A batch of B permutations selected from X_tot, y_tot, cov_tot for processing.
+
+    # Xtr_all: [B, n_folds, n_train, f]
+    # Training feature data for each permutation and fold.
+    # n_folds = number of cross-validation folds
+    # n_train = number of training samples per fold
+
+    # ytr_all: [B, n_folds, n_train]
+    # Training target values corresponding to Xtr_all.
+
+    # covtr_all: [B, n_folds, n_train, c]
+    # Training covariates corresponding to Xtr_all.
+
+    # Xte_all: [B, n_folds, n_test, f]
+    # Test feature data for each permutation and fold.
+
+    # yte_all: [B, n_folds, n_test]
+    # Test target values corresponding to Xte_all.
+
+    # covte_all: [B, n_folds, n_test, c]
+    # Test covariates corresponding to Xte_all.
+
+    # edge_masks_fold: [n_folds, f]
+    # Binary mask indicating selected edges (features) per fold.
+    # True where p-value < threshold (e.g., 0.01)
+
+    # predictions_fold: Dict[str, np.ndarray]
+    # Predicted values for each fold, e.g., {'fold_0': y_pred_array}
+
+    # metrics_fold: Dict[str, Dict]
+    # Evaluation metrics for each fold, e.g., R², MAE, etc.
+
+    # strengths_fold: Dict[str, np.ndarray]
+    # Network strengths computed from selected edges per fold.
+
+    # test_indices_fold: Dict[str, np.ndarray]
+    # Indices of test samples per fold, used to align predictions with ground truth.
     def _batch_run(self,
                    X: torch.Tensor,
                    y: torch.Tensor,
@@ -301,6 +345,7 @@ class CPMRegression:
         dataset = TensorDataset(X, y, covariates)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
+        # Containers for final results across all permutations
         edge_masks_all = []
         metrics_all = []
         all_predictions_dict = []
@@ -317,9 +362,6 @@ class CPMRegression:
 
         def estimate_vram_per_fold(n_train, p, c, dtype_bytes=4):
             return (n_train * (p + 1 + c) + p) * dtype_bytes
-
-        def estimate_vram_per_perm(n_folds, n_train, p, c, dtype_bytes=4):
-            return n_folds * estimate_vram_per_fold(n_train, p, c, dtype_bytes)
 
         def get_free_gpu_memory():
             if torch.cuda.is_available():
@@ -340,7 +382,7 @@ class CPMRegression:
 
         def compute_safe_perm_batch_size(n_folds, n_train, p, c, dtype_bytes=4, safety_factor=0.7):
             free_bytes = get_free_gpu_memory()
-            vram_per_perm = estimate_vram_per_perm(n_folds, n_train, p, c, dtype_bytes)
+            vram_per_perm = n_folds * estimate_vram_per_fold(n_train, p, c, dtype_bytes)  # VRAM per permutation
             self.logger.info(f"    Estimated VRAM per permutation: {vram_per_perm / 1e6:.2f} MB")
             self.logger.info(f"    Free GPU memory: {free_bytes / 1e6:.2f} MB")
             batch_size = max(1, int(free_bytes * safety_factor / vram_per_perm))
@@ -394,6 +436,7 @@ class CPMRegression:
                 self.logger.info(
                     f"  Processing permutations {start + 1 + batch_idx * batch_size}-{end + batch_idx * batch_size}")
 
+                # Slice current permutation batch
                 Xb_batch = X_batch[start:end]
                 yb_batch = y_batch[start:end]
                 covb_batch = cov_batch[start:end]
@@ -401,36 +444,33 @@ class CPMRegression:
                 folds = list(self.cv.split(torch.arange(n)))
                 n_folds = len(folds)
 
+                # Prepare training and test splits for each fold and permutation
                 Xtr_all = torch.stack([
                     torch.stack([Xb[train_idx] for train_idx, _ in folds], dim=0)
                     for Xb in Xb_batch
                 ], dim=0)
-
                 ytr_all = torch.stack([
                     torch.stack([yb[train_idx] for train_idx, _ in folds], dim=0)
                     for yb in yb_batch
                 ], dim=0)
-
                 covtr_all = torch.stack([
                     torch.stack([covb[train_idx] for train_idx, _ in folds], dim=0)
                     for covb in covb_batch
                 ], dim=0)
-
                 Xte_all = torch.stack([
                     torch.stack([Xb[test_idx] for _, test_idx in folds], dim=0)
                     for Xb in Xb_batch
                 ], dim=0)
-
                 yte_all = torch.stack([
                     torch.stack([yb[test_idx] for _, test_idx in folds], dim=0)
                     for yb in yb_batch
                 ], dim=0)
-
                 covte_all = torch.stack([
                     torch.stack([covb[test_idx] for _, test_idx in folds], dim=0)
                     for covb in covb_batch
                 ], dim=0)
 
+                # Compute edge statistics with adaptive chunking to avoid memory overflow
                 safe = .7
                 success = False
                 while not success:  # this is a memory-critical computation
@@ -467,7 +507,7 @@ class CPMRegression:
 
                         edge_mask = (p_edges[perm_idx, fold_idx] < 0.01).to(dtype=torch.bool)
                         edge_masks_fold[fold_idx] = edge_mask
-
+                        # Fit and evaluate CPM model
                         model = LinearCPMModel(device=device).fit(Xtr, ytr, covtr, edge_mask=edge_mask)
                         y_pred_dict = model.predict(Xte, covte, edge_mask=edge_mask)
 
@@ -477,7 +517,7 @@ class CPMRegression:
                             primary_metric_only=False
                         )
                         strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
-
+                        # Store fold results
                         metrics_fold[f'fold_{fold_idx}'] = scores
                         predictions_fold[f'fold_{fold_idx}'] = y_pred_dict
                         strengths_fold[f'fold_{fold_idx}'] = strengths
@@ -486,6 +526,7 @@ class CPMRegression:
                         torch.cuda.empty_cache()
                         gc.collect()
 
+                    # Store permutation-level results
                     edge_masks_all.append(edge_masks_fold.detach().cpu())
                     metrics_all.append(metrics_fold)
                     all_predictions_dict.append(predictions_fold)
@@ -510,4 +551,3 @@ class CPMRegression:
             "network_strengths": all_network_strengths,
             "test_indices": all_test_indices
         }
-
