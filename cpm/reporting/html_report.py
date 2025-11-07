@@ -159,9 +159,6 @@ class HTMLReporter:
         ## Dummy Feature Description
 
         Connectivity features were derived from:
-        - Atlas i dont really know
-        - Number of regions: n_regions*e^(i*np.pi)*(-1)
-        - Connectivity measure: Pearson correlation
         """
 
         if self.atlas_labels is not None:
