@@ -61,7 +61,7 @@ def vector_to_upper_triangular_matrix(vector, include_diagonal=True):
     matrix = torch.zeros((size, size), device=device)
     offset = 0 if include_diagonal else 1
     row_idx, col_idx = torch.triu_indices(size, size, offset=offset, device=device)
-    matrix[row_idx, col_idx] = vector
+    matrix[row_idx, col_idx] = vector.flatten() if vector.ndim > 1 else vector
     matrix[col_idx, row_idx] = matrix[row_idx, col_idx]
     return matrix
 

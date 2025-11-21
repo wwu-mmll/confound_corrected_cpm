@@ -4,6 +4,7 @@ from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
 import statsmodels.stats.multitest as multitest
 
+import numpy as np
 import torch
 
 cuda = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -255,9 +256,16 @@ class PThreshold(BaseEdgeSelector):
 
     def select(self, r, p):
         if self._correction is not None:
-            _, p, _, _ = multitest.multipletests(p, alpha=0.05, method=self._correction)
-        pos_edges = torch.where((p < self.threshold) & (r > 0))[0]
-        neg_edges = torch.where((p < self.threshold) & (r < 0))[0]
+            _, p_corrected, _, _ = multitest.multipletests(p.cpu().numpy(), alpha=0.05, method=self._correction)
+            p = torch.tensor(p_corrected, device=r.device, dtype=r.dtype)
+        if p.ndim > 1:
+            p = p.view(-1)
+        if r.ndim > 1:
+            r = r.view(-1)
+
+        threshold = float(self.threshold[0] if isinstance(self.threshold, (list, np.ndarray)) else self.threshold)
+        pos_edges = torch.where((p < threshold) & (r > 0))[0]
+        neg_edges = torch.where((p < threshold) & (r < 0))[0]
         return {'positive': pos_edges, 'negative': neg_edges}
 
 
@@ -281,10 +289,23 @@ class EdgeStatistic(BaseEstimator):
                       y: torch.Tensor,  # [B, n]
                       covariates: torch.Tensor  # [B, n, c]
                       ):
+        # ---- Ensure PyTorch tensors ----
+        if isinstance(X, np.ndarray):
+            X = torch.from_numpy(X).float()
+        if isinstance(y, np.ndarray):
+            y = torch.from_numpy(y).float()
+        if covariates is not None and isinstance(covariates, np.ndarray):
+            covariates = torch.from_numpy(covariates).float()
+
+        X = X.to(cuda)
+        y = y.to(cuda)
+        if covariates is not None:
+            covariates = covariates.to(cuda)
+
         B, n, p = X.shape
 
-        # r_edges = torch.zeros(B, p, device=X.device)
-        # p_edges = torch.ones(B, p, device=X.device)
+        r_edges = torch.zeros(B, p, device=X.device)
+        p_edges = torch.ones(B, p, device=X.device)
 
         if self.t_test_filter:
             _, p_values = one_sample_t_test(X, 0)  # [B, p]
@@ -292,22 +313,49 @@ class EdgeStatistic(BaseEstimator):
         else:
             valid_edges = torch.ones(B, p, dtype=torch.bool, device=cuda)
 
+        X_valid = X.clone()
+        X_valid[:, :, ~valid_edges[0]] = 0
+
         if self.edge_statistic == 'pearson':
-            r_masked, p_masked = pearson_correlation_with_pvalues(y, X, valid_edges=valid_edges)  # [B, p]
+            r_masked, p_masked = pearson_correlation_with_pvalues(
+                y, X_valid, valid_edges=valid_edges
+            )
         elif self.edge_statistic == 'spearman':
-            r_masked, p_masked = spearman_correlation_with_pvalues(y, X, valid_edges=valid_edges)
+            r_masked, p_masked = spearman_correlation_with_pvalues(
+                y, X_valid, valid_edges=valid_edges
+            )
         elif self.edge_statistic == 'pearson_partial':
-            r_masked, p_masked = semi_partial_correlation_pearson(y, X, covariates)
+            r_masked, p_masked = semi_partial_correlation_pearson(
+                y, X_valid, covariates
+            )
         elif self.edge_statistic == 'spearman_partial':
-            r_masked, p_masked = semi_partial_correlation_spearman(y, X, covariates)
+            r_masked, p_masked = semi_partial_correlation_spearman(
+                y, X_valid, covariates
+            )
         else:
             raise NotImplementedError("Unsupported edge selection method")
 
-        # Store masked correlations directly
-        r_edges = r_masked
-        p_edges = p_masked
+        r_edges[valid_edges] = r_masked[valid_edges]
+        p_edges[valid_edges] = p_masked[valid_edges]
 
-        return r_edges, p_edges  # shape: [B, p]
+        return r_edges, p_edges
+
+        # if self.edge_statistic == 'pearson':
+        #     r_masked, p_masked = pearson_correlation_with_pvalues(y, X, valid_edges=valid_edges)  # [B, p]
+        # elif self.edge_statistic == 'spearman':
+        #     r_masked, p_masked = spearman_correlation_with_pvalues(y, X, valid_edges=valid_edges)
+        # elif self.edge_statistic == 'pearson_partial':
+        #     r_masked, p_masked = semi_partial_correlation_pearson(y, X, covariates)
+        # elif self.edge_statistic == 'spearman_partial':
+        #     r_masked, p_masked = semi_partial_correlation_spearman(y, X, covariates)
+        # else:
+        #     raise NotImplementedError("Unsupported edge selection method")
+        #
+        # # Store masked correlations directly
+        # r_edges = r_masked
+        # p_edges = p_masked
+        #
+        # return r_edges, p_edges  # shape: [B, p]
 
     @staticmethod
     def edge_statistic_fn(Xb, yb, covb, edge_statistic: str = 'spearman', t_test_filter: bool = False):
@@ -353,13 +401,18 @@ class UnivariateEdgeSelection(BaseEstimator):
             params = {}
             params['edge_selection'] = [selector]
             for key, value in selector.get_params().items():
-                params['edge_selection__' + key] = value
+                if isinstance(value, list):
+                    params['edge_selection__' + key] = value
+                else:
+                    params['edge_selection__' + key] = [value]
             grid_elements.append(params)
         return ParameterGrid(grid_elements)
 
     def fit_transform(self, X, y=None, covariates=None):
-        self.r_edges, self.p_edges = self.edge_statistic.fit_transform(X=X, y=y, covariates=covariates)
-        return self.r_edges, self.p_edges
+        self.r_edges, self.p_edges = self.edge_statistic.fit_transform(
+            X=X, y=y, covariates=covariates
+        )
+        return self
 
     def return_selected_edges(self):
         selected_edges = self.edge_selection.select(r=self.r_edges, p=self.p_edges)

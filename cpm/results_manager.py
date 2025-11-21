@@ -71,12 +71,25 @@ class ResultsManager:
                     'negative': np.zeros((n_folds, n_features, n_params))}
 
     def store_edges(self, edges: dict, fold: int, param_id: int = None):
-        if param_id is None:
-            self.cv_edges['positive'][fold, edges['positive']] = 1
-            self.cv_edges['negative'][fold, edges['negative']] = 1
+        # Convert to tensor on CPU if not already
+        pos_edges = edges['positive']
+        if not isinstance(pos_edges, torch.Tensor):
+            pos_edges = torch.tensor(pos_edges, dtype=torch.long)
         else:
-            self.cv_edges['positive'][fold, edges['positive'], param_id] = 1
-            self.cv_edges['negative'][fold, edges['negative'], param_id] = 1
+            pos_edges = pos_edges.cpu().long()  # <-- move to CPU
+
+        neg_edges = edges['negative']
+        if not isinstance(neg_edges, torch.Tensor):
+            neg_edges = torch.tensor(neg_edges, dtype=torch.long)
+        else:
+            neg_edges = neg_edges.cpu().long()  # <-- move to CPU
+
+        if param_id is None:
+            self.cv_edges['positive'][fold, pos_edges] = 1
+            self.cv_edges['negative'][fold, neg_edges] = 1
+        else:
+            self.cv_edges['positive'][fold, pos_edges, param_id] = 1
+            self.cv_edges['negative'][fold, neg_edges, param_id] = 1
 
     def calculate_edge_stability(self, write: bool = True, best_param_id: int = None):
         """
@@ -170,7 +183,17 @@ class ResultsManager:
         preds['sample_index'] = np.tile(test_indices, n_repeats)
 
         import json
-        params_serialized = json.dumps(params) if isinstance(params, dict) and params else "None"
+        def serialize_param(val):
+            if isinstance(val, dict):
+                return {k: serialize_param(v) for k, v in val.items()}
+            elif isinstance(val, list):
+                return [serialize_param(v) for v in val]
+            elif isinstance(val, (int, float, str, bool)) or val is None:
+                return val
+            else:
+                return str(val)
+        params_serialized = json.dumps(serialize_param(params)) if params else "None"
+        #params_serialized = json.dumps(params) if isinstance(params, dict) and params else "None"
         preds['params'] = [params_serialized] * len(preds)
         preds['fold'] = [fold] * len(preds)
         preds['param_id'] = [param_id] * len(preds)

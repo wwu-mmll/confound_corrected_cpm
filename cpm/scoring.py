@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from torchmetrics.functional import (
     mean_squared_error,
     mean_absolute_error,
@@ -6,6 +7,7 @@ from torchmetrics.functional import (
     pearson_corrcoef,
     spearman_corrcoef,
 )
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 regression_metrics_functions = {
     'mean_squared_error': mean_squared_error,
@@ -26,8 +28,15 @@ def score_regression(y_true: torch.Tensor, y_pred: torch.Tensor):
 
 
 def apply_metrics(y_true, y_pred, primary_metric_only: bool = False):
+    if isinstance(y_true, np.ndarray):
+        y_true = torch.from_numpy(y_true).float()
+    if isinstance(y_pred, np.ndarray):
+        y_pred = torch.from_numpy(y_pred).float()
+
+    y_true = y_true.to(device)
+    y_pred = y_pred.to(device)
+
     result = {}
-    # Spearman immer drin
     result['spearman_score'] = regression_metrics_functions['spearman_score'](y_pred, y_true).item()
 
     if not primary_metric_only:
