@@ -235,6 +235,10 @@ def boxplot_model_performance(
     height = 0.75 if models == ["increment"] else 2
     fig, ax = plt.subplots(figsize=(7, height))
 
+    print(df.head())
+    print(metric)
+    print(models)
+
     sns.boxplot(
         data=df,
         x=metric,

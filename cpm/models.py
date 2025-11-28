@@ -29,17 +29,27 @@ class TorchLinearRegression(nn.Module):
     def __init__(self, input_dim=None):
         self.beta = None
 
+
     def fit(self, X: torch.Tensor, y: torch.Tensor):
-        X = X.float()
-        y = y.float().view(-1, 1)
-        # Closed-form OLS: (X^T X)^-1 X^T y
-        XtX = torch.matmul(X.T, X)
-        Xty = torch.matmul(X.T, y)
-        self.beta = torch.linalg.solve(XtX, Xty)  # [d,1]
+        def add_intercept(X: torch.Tensor) -> torch.Tensor:
+            ones = torch.ones(X.size(0), 1, device=X.device, dtype=X.dtype)
+            return torch.cat([ones, X], dim=1)
+        X = X.to(dtype=torch.float64)
+        X = add_intercept(X)
+        y = y.to(dtype=torch.float64).view(-1, 1)
+        # Least squares solution (handles singular matrices)
+        self.beta = torch.linalg.lstsq(X, y).solution
+        #print(torch.isnan(self.beta).any())
+        #print(self.beta[:10])
         return self
 
     def predict(self, X: torch.Tensor):
-        X = X.float()
+        def add_intercept(X: torch.Tensor) -> torch.Tensor:
+            ones = torch.ones(X.size(0), 1, device=X.device, dtype=X.dtype)
+            return torch.cat([ones, X], dim=1)
+
+        X = add_intercept(X)
+        X = X.to(dtype=torch.float64)
         return (torch.matmul(X, self.beta)).squeeze()
 
 
@@ -56,61 +66,93 @@ class LinearCPMModel:
             "full_pos", "full_neg", "full_both"
         ]
 
+    def fit(self, X, y, covariates, pos_edges: torch.Tensor, neg_edges: torch.Tensor):
+        """
+        vmap-safe CPM fit.
+        X:          [n, P]
+        y:          [n]
+        covariates: [n, C]
+        pos_edges:  [P] boolean mask
+        neg_edges:  [P] boolean mask
+        """
 
-    def fit(self, X, y, covariates, edge_mask: torch.Tensor):
         X = X.to(self.device)
         y = y.to(self.device)
         covariates = covariates.to(self.device)
-        mask = edge_mask.to(self.device).to(dtype=X.dtype)
+
+        pos_mask = pos_edges.to(self.device).float()
+        neg_mask = neg_edges.to(self.device).float()
 
         connectome = {}
         residuals = {}
 
-        conn_pos = (X * mask).sum(dim=1, keepdim=True)  # [n,1]
-        conn_neg = (X * (1 - mask)).sum(dim=1, keepdim=True)  # [n,1]
+        conn_pos = (X * pos_mask).sum(dim=1, keepdim=True)  # [n,1]
+        conn_neg = (X * neg_mask).sum(dim=1, keepdim=True)  # [n,1]
+
+        #print("connpos connneg", conn_pos, conn_neg)
 
         connectome["positive"] = conn_pos
         connectome["negative"] = conn_neg
 
         for net in ["positive", "negative"]:
-            reg = TorchLinearRegression(covariates.size(1)).fit(  # .to(self.device)
-                covariates, connectome[net].squeeze()
+            reg = TorchLinearRegression(covariates.size(1)).fit(
+                covariates, connectome[net].squeeze(1)
             )
             self.models_residuals[net] = reg
-            preds = reg.predict(covariates).unsqueeze(1)
-            residuals[net] = connectome[net] - preds
+
+            preds = reg.predict(covariates).unsqueeze(1)  # [n,1]
+            residuals[net] = connectome[net] - preds  # [n,1]
 
         residuals["both"] = torch.cat([residuals["positive"], residuals["negative"]], dim=1)
         connectome["both"] = torch.cat([connectome["positive"], connectome["negative"]], dim=1)
 
         for net in ["positive", "negative", "both"]:
-            self.models["connectome"][net] = TorchLinearRegression(connectome[net].size(1)).fit(  # .to(self.device)
-                connectome[net], y
-            )
-            self.models["covariates"][net] = TorchLinearRegression(covariates.size(1)).fit(
-                covariates, y
-            )
-            self.models["residuals"][net] = TorchLinearRegression(residuals[net].size(1)).fit(
-                residuals[net], y
-            )
+            # connectome-only model
+            self.models["connectome"][net] = TorchLinearRegression(
+                connectome[net].size(1)
+            ).fit(connectome[net], y)
+
+            # covariates-only model
+            self.models["covariates"][net] = TorchLinearRegression(
+                covariates.size(1)
+            ).fit(covariates, y)
+
+            # residuals-only model
+            self.models["residuals"][net] = TorchLinearRegression(
+                residuals[net].size(1)
+            ).fit(residuals[net], y)
+
+            # full model
             full_input = torch.cat([connectome[net], covariates], dim=1)
-            self.models["full"][net] = TorchLinearRegression(full_input.size(1)).fit(full_input, y)
+            self.models["full"][net] = TorchLinearRegression(
+                full_input.size(1)
+            ).fit(full_input, y)
 
         return self
 
-
-    def predict(self, X: torch.Tensor, covariates: torch.Tensor, edge_mask: torch.Tensor) -> torch.Tensor:
+    def predict(self, X: torch.Tensor, covariates: torch.Tensor,
+                pos_edges: torch.Tensor, neg_edges: torch.Tensor):
         """
-        Predict all models. Returns tensor [n, n_outputs].
+        vmap-compatible CPM prediction.
+        X:          [n, P]
+        covariates: [n, C]
+        pos_edges:  [P] boolean mask of positive edges
+        neg_edges:  [P] boolean mask of negative edges
         """
-        X, covariates, edge_mask = X.to(self.device), covariates.to(self.device), edge_mask.to(self.device)
 
-        conn_pos = X[:, edge_mask].sum(dim=1, keepdim=True)
-        conn_neg = X[:, ~edge_mask].sum(dim=1, keepdim=True)
-        conn_both = torch.cat([conn_pos, conn_neg], dim=1)
+        X = X.to(self.device)
+        covariates = covariates.to(self.device)
+
+        pos_mask = pos_edges.to(self.device).float()  # [P]
+        neg_mask = neg_edges.to(self.device).float()  # [P]
+
+        conn_pos = (X * pos_mask).sum(dim=1, keepdim=True)  # [n,1]
+        conn_neg = (X * neg_mask).sum(dim=1, keepdim=True)  # [n,1]
+        conn_both = torch.cat([conn_pos, conn_neg], dim=1)  # [n,2]
 
         preds_pos_resid = self.models_residuals["positive"].predict(covariates).unsqueeze(1)
         preds_neg_resid = self.models_residuals["negative"].predict(covariates).unsqueeze(1)
+
         resid_pos = conn_pos - preds_pos_resid
         resid_neg = conn_neg - preds_neg_resid
         resid_both = torch.cat([resid_pos, resid_neg], dim=1)
@@ -132,31 +174,66 @@ class LinearCPMModel:
                 "both": self.models["residuals"]["both"].predict(resid_both),
             },
             "full": {
-                "positive": self.models["full"]["positive"].predict(torch.cat([conn_pos, covariates], dim=1)),
-                "negative": self.models["full"]["negative"].predict(torch.cat([conn_neg, covariates], dim=1)),
-                "both": self.models["full"]["both"].predict(torch.cat([conn_both, covariates], dim=1)),
+                "positive": self.models["full"]["positive"].predict(
+                    torch.cat([conn_pos, covariates], dim=1)
+                ),
+                "negative": self.models["full"]["negative"].predict(
+                    torch.cat([conn_neg, covariates], dim=1)
+                ),
+                "both": self.models["full"]["both"].predict(
+                    torch.cat([conn_both, covariates], dim=1)
+                ),
             }
         }
+
         return outputs
 
-
-    def get_network_strengths(self, X: torch.Tensor, covariates: torch.Tensor, edge_mask: torch.Tensor) -> torch.Tensor:
+    def get_network_strengths(
+            self,
+            X: torch.Tensor,
+            covariates: torch.Tensor,
+            pos_edges: torch.Tensor,
+            neg_edges: torch.Tensor,
+    ):
         """
-        Return [n, 4]: [conn_pos, conn_neg, resid_pos, resid_neg].
+        GPU version matching CPU behavior.
+        Computes:
+            connectome['positive'] = sum over pos_edges
+            connectome['negative'] = sum over neg_edges
+            residuals[...] = connectome[...] - model.predict(covariates)
+
+        Parameters
+        ----------
+        X : [n, p] tensor
+        covariates : [n, c] tensor
+        pos_edges : LongTensor of indices
+        neg_edges : LongTensor of indices
+
+        Returns
+        -------
+        {
+          "connectome": { "positive": ..., "negative": ... },
+          "residuals": { "positive": ..., "negative": ... }
+        }
         """
-        X, covariates, edge_mask = X.to(self.device), covariates.to(self.device), edge_mask.to(self.device)
 
-        conn_pos = X[:, edge_mask].sum(dim=1, keepdim=True)
-        conn_neg = X[:, ~edge_mask].sum(dim=1, keepdim=True)
+        X = X.to(self.device)
+        covariates = covariates.to(self.device)
+        pos_edges = pos_edges.to(self.device)
+        neg_edges = neg_edges.to(self.device)
 
+        # --- network strengths ---
+        conn_pos = X[:, pos_edges].sum(dim=1, keepdim=True)  # [n,1]
+        conn_neg = X[:, neg_edges].sum(dim=1, keepdim=True)  # [n,1]
+
+        # --- covariate regression residuals ---
         preds_pos = self.models_residuals["positive"].predict(covariates).unsqueeze(1)
         preds_neg = self.models_residuals["negative"].predict(covariates).unsqueeze(1)
 
         resid_pos = conn_pos - preds_pos
         resid_neg = conn_neg - preds_neg
 
-        stacked = torch.cat([conn_pos, conn_neg, resid_pos, resid_neg], dim=1)  # [n, 4]
-        out = {
+        return {
             "connectome": {
                 "positive": conn_pos,
                 "negative": conn_neg,
@@ -167,4 +244,3 @@ class LinearCPMModel:
             },
         }
 
-        return out

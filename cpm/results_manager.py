@@ -153,51 +153,38 @@ class ResultsManager:
         return
 
     def store_predictions(self, y_pred, y_true, params, fold, param_id, test_indices):
-        def _to_float(val):
-            if isinstance(val, torch.Tensor):
-                return val.item()
-            try:
-                return float(val)
-            except Exception:
-                return np.nan
 
+        # Step 1 — flatten dict into rows
         preds = (
             pd.DataFrame.from_dict(y_pred)
             .stack()
-            .explode()
             .reset_index()
             .rename({'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1)
-            .set_index(['network', 'model'])
         )
-        preds['y_pred'] = preds['y_pred'].apply(_to_float)
 
-        y_true = np.asarray(y_true).flatten()
-        test_indices = np.asarray(test_indices).flatten()
+        # Step 2 — explode BEFORE setting index
+        preds = preds.explode('y_pred')
 
+        # Now we can safely set index
+        preds = preds.set_index(['network', 'model'])
+
+        # Step 3 — compute expected rows
+        n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
         n_samples = len(y_true)
-        n_total = len(preds)
 
-        n_repeats = n_total // n_samples
+        # Sanity check (optional but recommended)
+        assert preds.shape[0] == n_network_model * n_samples, (
+            f"Expected {n_network_model * n_samples} rows but got {preds.shape[0]}"
+        )
 
-        preds['y_true'] = np.tile(y_true, n_repeats)
-        preds['sample_index'] = np.tile(test_indices, n_repeats)
+        # Step 4 — assign columns
+        preds['y_true'] = np.tile(y_true, n_network_model)
+        preds['params'] = [params] * preds.shape[0]
+        preds['fold'] = fold
+        preds['param_id'] = param_id
+        preds['sample_index'] = np.tile(test_indices, n_network_model)
 
-        import json
-        def serialize_param(val):
-            if isinstance(val, dict):
-                return {k: serialize_param(v) for k, v in val.items()}
-            elif isinstance(val, list):
-                return [serialize_param(v) for v in val]
-            elif isinstance(val, (int, float, str, bool)) or val is None:
-                return val
-            else:
-                return str(val)
-        params_serialized = json.dumps(serialize_param(params)) if params else "None"
-        #params_serialized = json.dumps(params) if isinstance(params, dict) and params else "None"
-        preds['params'] = [params_serialized] * len(preds)
-        preds['fold'] = [fold] * len(preds)
-        preds['param_id'] = [param_id] * len(preds)
-
+        # Store
         self.cv_predictions = pd.concat([self.cv_predictions, preds], axis=0)
 
     def store_network_strengths(self, network_strengths, y_true, fold):
