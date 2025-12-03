@@ -25,32 +25,45 @@ class ModelDict(dict):
         return len(ModelDict().keys())
 
 
-class TorchLinearRegression(nn.Module):
-    def __init__(self, input_dim=None):
+class TorchLinearRegression:
+    def __init__(self, device=None):
+        self.coef_ = None
+        self.intercept_ = None
         self.beta = None
+        self.device = device
 
+    def fit(self, X, y):
+        device = self.device if self.device is not None else X.device
 
-    def fit(self, X: torch.Tensor, y: torch.Tensor):
-        def add_intercept(X: torch.Tensor) -> torch.Tensor:
-            ones = torch.ones(X.size(0), 1, device=X.device, dtype=X.dtype)
-            return torch.cat([ones, X], dim=1)
-        X = X.to(dtype=torch.float64)
-        X = add_intercept(X)
-        y = y.to(dtype=torch.float64).view(-1, 1)
-        # Least squares solution (handles singular matrices)
-        self.beta = torch.linalg.lstsq(X, y).solution
-        #print(torch.isnan(self.beta).any())
-        #print(self.beta[:10])
+        X = X.to(torch.float64).to(device)
+        y = y.to(torch.float64).to(device)
+
+        ones = torch.ones((X.size(0), 1), dtype=torch.float64, device=device)
+        X_design = torch.cat([ones, X], dim=1)
+
+        lambda_reg = 1e-8
+        XtX = X_design.T @ X_design
+        XtX = XtX + lambda_reg * torch.eye(XtX.size(0), dtype=torch.float64, device=device)
+        Xty = X_design.T @ y
+
+        beta = torch.linalg.solve(XtX, Xty)
+        #print("fit beta:", beta)
+        self.beta = beta
+
+        self.intercept_ = beta[0].item()
+        self.coef_ = beta[1:].cpu().numpy()
+
         return self
 
     def predict(self, X: torch.Tensor):
-        def add_intercept(X: torch.Tensor) -> torch.Tensor:
-            ones = torch.ones(X.size(0), 1, device=X.device, dtype=X.dtype)
-            return torch.cat([ones, X], dim=1)
+        device = self.beta.device
 
-        X = add_intercept(X)
-        X = X.to(dtype=torch.float64)
-        return (torch.matmul(X, self.beta)).squeeze()
+        X = X.to(torch.float64).to(device)
+
+        ones = torch.ones((X.size(0), 1), dtype=torch.float64, device=device)
+        X_design = torch.cat([ones, X], dim=1)
+
+        return (X_design @ self.beta)
 
 
 class LinearCPMModel:
@@ -75,6 +88,8 @@ class LinearCPMModel:
         pos_edges:  [P] boolean mask
         neg_edges:  [P] boolean mask
         """
+        #print("fit:", X.shape, y.shape, covariates.shape)
+        #print("fit Xyc:", X, y, covariates)
 
         X = X.to(self.device)
         y = y.to(self.device)
@@ -95,9 +110,10 @@ class LinearCPMModel:
         connectome["negative"] = conn_neg
 
         for net in ["positive", "negative"]:
-            reg = TorchLinearRegression(covariates.size(1)).fit(
+            reg = TorchLinearRegression().fit(
                 covariates, connectome[net].squeeze(1)
             )
+            #print("reg:", reg.beta)
             self.models_residuals[net] = reg
 
             preds = reg.predict(covariates).unsqueeze(1)  # [n,1]
@@ -108,25 +124,17 @@ class LinearCPMModel:
 
         for net in ["positive", "negative", "both"]:
             # connectome-only model
-            self.models["connectome"][net] = TorchLinearRegression(
-                connectome[net].size(1)
-            ).fit(connectome[net], y)
+            self.models["connectome"][net] = TorchLinearRegression().fit(connectome[net], y)
 
             # covariates-only model
-            self.models["covariates"][net] = TorchLinearRegression(
-                covariates.size(1)
-            ).fit(covariates, y)
+            self.models["covariates"][net] = TorchLinearRegression().fit(covariates, y)
 
             # residuals-only model
-            self.models["residuals"][net] = TorchLinearRegression(
-                residuals[net].size(1)
-            ).fit(residuals[net], y)
+            self.models["residuals"][net] = TorchLinearRegression().fit(residuals[net], y)
 
             # full model
             full_input = torch.cat([connectome[net], covariates], dim=1)
-            self.models["full"][net] = TorchLinearRegression(
-                full_input.size(1)
-            ).fit(full_input, y)
+            self.models["full"][net] = TorchLinearRegression().fit(full_input, y)
 
         return self
 

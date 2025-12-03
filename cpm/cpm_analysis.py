@@ -488,7 +488,7 @@ class CPMRegression:
 
                 # Compute edge statistics with adaptive chunking to avoid memory overflow
 
-                torch.set_printoptions(profile="full")
+                #torch.set_printoptions(profile="full")
                 rm = []
                 for batch_perms in range(0, Xtr_all.shape[0]):  # loop thru all permutations in current slice
                     Xi = Xtr_all[batch_perms]  # slice out current permutation
@@ -522,36 +522,37 @@ class CPMRegression:
                         if self.inner_cv:
                             #print("innerfolds fittransform")
                             best_params, stability_edges = run_inner_folds_torch(Xii, yii, covii, inner_cv=self.inner_cv, edge_selection=self.edge_selection, results_directory=self.results_directory, perm_run=batch_perms)
-                            print("best_params, stability", best_params, stability_edges)
+                            #print("best_params, stability", best_params, stability_edges)
                             if batch_perms == 0:
                                 self.logger.info(f"Best hyperparameters: {best_params}")
                         else:
                             best_params = self.edge_selection.param_grid[0]
-                            print("best_params", best_params)
+                            #print("best_params", best_params)
 
                         if self.select_stable_edges:
                             edges = select_stable_edges(stability_edges, self.stability_threshold)
-                            print("edges", edges)
+                            #print("edges", edges)
                         else:
                             self.edge_selection.set_params(**best_params)
                             #print("second fittransform")
                             r_masked, p_masked, valid_edges = self.edge_selection.fit_transform(X=Xii, y=yii,
                                                                       covariates=covii)
                             edges = self.edge_selection.return_selected_edges(r_masked, p_masked)
-                            print("edges", edges)
+                            #print("edges", edges)
 
                         rm[batch_perms].store_edges(edges=edges, fold=outer_folds)
 
                         #print(f"edges fold {outer_folds}: {edges}")
 
                         model = LinearCPMModel().fit(Xii, yii, covii, pos_edges=edges["positive"], neg_edges=edges["negative"])
-                        print("y_pred inputs: ", Xii_test, covii_test, edges["positive"], edges["negative"])
+                        #print("fit input lcm:", Xii.shape, yii.shape)
+                        #print("y_pred inputs: ", Xii_test, covii_test, edges["positive"], edges["negative"])
                         y_pred = model.predict(Xii_test, covii_test, pos_edges=edges["positive"], neg_edges=edges["negative"])
                         #print("y_pred", y_pred)
                         network_strengths = model.get_network_strengths(Xii_test, covii_test, pos_edges=edges["positive"], neg_edges=edges["negative"])
-                        print("network_strengths", network_strengths)
+                        #print("network_strengths", network_strengths)
                         metrics = score_regression_models(y_true=yii_test, y_pred_dict=y_pred)
-                        print("metrics", metrics)
+                        #print("metrics", metrics)
                         #print("store_predictions inputs", y_pred, yii_test, best_params, outer_folds, test)
                         rm[batch_perms].store_predictions(y_pred=y_pred, y_true=yii_test, params=best_params,
                                                           fold=outer_folds,

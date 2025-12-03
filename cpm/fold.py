@@ -143,19 +143,3 @@ def run_inner_folds_torch(X, y, covariates, inner_cv, edge_selection: BaseEdgeSe
     stability_edges = results_manager.calculate_edge_stability(write=False, best_param_id=best_param_id)
 
     return best_params, stability_edges
-
-
-def run_inner_folds_vmap(Xall, yall, covall, edge_sel, inner_cv):
-    param_grid = edge_sel.param_grid
-    n_features = Xall.shape[3]
-    #print("run inner folds with features", n_features)
-    n_params = len(param_grid)
-    n_folds = inner_cv.get_n_splits()
-
-
-
-    return 0
-
-
-
-
