@@ -2,11 +2,12 @@ import numpy as np
 from sklearn.model_selection import ShuffleSplit, RepeatedKFold
 
 from cpm import CPMRegression
+from cpm.more_models import RandomForestCPMModel, DecisionTreeCPMModel
 from simulation.simulate_data_chyzhyk import simulate_confounded_data_chyzhyk
 from cpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 
-X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=1000, n_features=4950, link_type='direct_link')
+X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=1000, n_features=105, link_type='direct_link')
 covariates = np.stack([covariates, covariates], axis=1)
 univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
                                                     edge_selection=[PThreshold(threshold=[0.05, 0.01],
@@ -14,10 +15,11 @@ univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
                                                     t_test_filter=False)
 
 cpm = CPMRegression(results_directory='./tmp/example_simulated_data',
-                    cv=RepeatedKFold(n_splits=10, n_repeats=10, random_state=42),
+                    cpm_model=DecisionTreeCPMModel,
+                    cv=RepeatedKFold(n_splits=2, n_repeats=1, random_state=42),
                     edge_selection=univariate_edge_selection,
-                    inner_cv=ShuffleSplit(n_splits=10, test_size=0.2, random_state=42),
-                    n_permutations=1,
+                    inner_cv=ShuffleSplit(n_splits=2, test_size=0.2, random_state=42),
+                    n_permutations=2,
                     #atlas_labels='atlas_labels.csv',
                     atlas_labels=None,
                     select_stable_edges=False)
