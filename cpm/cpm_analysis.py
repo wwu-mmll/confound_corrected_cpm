@@ -10,7 +10,7 @@ from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
 
 from cpm.fold import run_inner_folds
 from cpm.logging import setup_logging
-from cpm.models import LinearCPMModel
+from cpm.models import LinearCPMModel, GAMCPMModel, DecisionTreeCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cpm.results_manager import ResultsManager, PermutationManager
 from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
