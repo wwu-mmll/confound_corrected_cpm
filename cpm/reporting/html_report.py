@@ -51,7 +51,7 @@ class HTMLReporter:
         main_results_page = self.generate_main_results_page()
         edges_page = self.generate_brain_plot_page()
         edges_table_page = self.generate_edge_page()
-        network_strength_page = self.generate_network_strengths_page()
+        #network_strength_page = self.generate_network_strengths_page()
         data_description_page = self.generate_data_description_page()
         hyperparameters_page = self.generate_hyperparameters_page()
         data_insight_page = self.generate_target_cov_features_insights_page()  # <-- add this
@@ -62,7 +62,7 @@ class HTMLReporter:
             data_description_page,
             main_results_page,
             hyperparameters_page,
-            network_strength_page,
+            #network_strength_page,
             edges_page,
             edges_table_page
         ]

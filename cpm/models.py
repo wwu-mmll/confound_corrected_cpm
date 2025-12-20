@@ -172,10 +172,13 @@ class GAMCPMModel(LinearCPMModel):
         connectome = {}
         residuals = {}
         for network in ['positive', 'negative']:
-            # Compute sum_positive and sum_negative
-            connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
-            self.models_residuals[network] = LinearRegression().fit(covariates, connectome[network])
+            if len(self.edges[network]) > 0:
+                connectome[network] = X[:, self.edges[network]]
+            else:
+                connectome[network] = np.zeros((X.shape[0], 1))  
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True)) #np.zeros((X.shape[0], 1))  #LinearRegression().fit(covariates, connectome[network])
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
         connectome['both'] = np.hstack((connectome['positive'], connectome['negative']))
@@ -212,8 +215,14 @@ class GAMCPMModel(LinearCPMModel):
         residuals = {}
         for network in ['positive', 'negative']:
             # Compute sum_positive and sum_negative
-            connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
+            #for network in ['positive', 'negative']:
+            if len(self.edges[network]) > 0:
+                connectome[network] = X[:, self.edges[network]]
+            else:
+                connectome[network] = np.zeros((X.shape[0], 1))  
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True)) #np.zeros((X.shape[0], 1))  #LinearRegression().fit(covariates, connectome[network])
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
         connectome['both'] = np.hstack((connectome['positive'], connectome['negative']))
@@ -247,9 +256,11 @@ class DecisionTreeCPMModel(LinearCPMModel):
         connectome = {}
         residuals = {}
         for network in ['positive', 'negative']:
-            # Compute sum_positive and sum_negative
-            connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
-            self.models_residuals[network] = LinearRegression().fit(covariates, connectome[network])
+            if len(self.edges[network]) > 0:
+                connectome[network] = X[:, self.edges[network]]
+            else:
+                connectome[network] = np.zeros((X.shape[0], 1))  
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True)) #np.zeros((X.shape[0], 1))  #LinearRegression().fit(covariates, connectome[network])
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
@@ -286,8 +297,11 @@ class DecisionTreeCPMModel(LinearCPMModel):
         connectome = {}
         residuals = {}
         for network in ['positive', 'negative']:
-            # Compute sum_positive and sum_negative
-            connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
+            if len(self.edges[network]) > 0:
+                connectome[network] = X[:, self.edges[network]]
+            else:
+                connectome[network] = np.zeros((X.shape[0], 1))  
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True)) #np.zeros((X.shape[0], 1))  #LinearRegression().fit(covariates, connectome[network])
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))

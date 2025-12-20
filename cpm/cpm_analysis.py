@@ -229,7 +229,7 @@ class CPMRegression:
             results_manager.store_edges(edges=edges, fold=outer_fold)
 
             # Build model and make predictions
-            model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
+            model = GAMCPMModel(edges=edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
             network_strengths = model.get_network_strengths(X_test, cov_test)
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)

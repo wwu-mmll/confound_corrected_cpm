@@ -175,7 +175,9 @@ class ResultsManager:
             for network in networks:
                 df = pd.DataFrame()
                 df['y_true'] = y_true
-                df['network_strength'] = np.squeeze(network_strengths[model][network])
+                #df['network_strength'] = np.squeeze(network_strengths[model][network])
+                for i in range(network_strengths[model][network].shape[1]):
+                    df[f'network_strength_{i}'] = network_strengths[model][network][:, i]
                 df['model'] = [model] * network_strengths[model][network].shape[0]
                 df['fold'] = [fold] * network_strengths[model][network].shape[0]
                 df['network'] = [network] * network_strengths[model][network].shape[0]
