@@ -1,0 +1,48 @@
+name: Publish to PyPI / TestPyPI
+
+on:
+  push:
+    tags:
+      - "v*"         # triggers on v0.1.0, v0.1.0-test, etc.
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write   # required for OIDC / Trusted Publisher
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-root
+
+      - name: Build package
+        run: |
+          poetry build
+
+      # Decide target (PyPI vs TestPyPI) based on tag name
+      - name: Publish to TestPyPI (tags ending in -test)
+        if: endsWith(github.ref_name, '-test')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish to PyPI (normal version tags)
+        if: "!endsWith(github.ref_name, '-test')"
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # no repository-url needed; default is https://upload.pypi.org/legacy/
