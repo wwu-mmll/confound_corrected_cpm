@@ -191,10 +191,10 @@ def simulate_data_given_R2(
     df["true_X"] = true_X
     df["y"] = y
 
-    return df
+    return {'X': X_df.to_numpy(), 'Z': conf_df.to_numpy(), 'y': y.reshape(-1, 1), 'true_X': true_X.reshape(-1, 1)}
 
 
-def compute_r2s(df: pd.DataFrame) -> dict:
+def compute_r2s(sim: dict) -> dict:
     """
     Convenience function to empirically estimate the R² components from
     the simulated data:
@@ -204,14 +204,11 @@ def compute_r2s(df: pd.DataFrame) -> dict:
         - r2_full:       R²(y ~ true_X + all confounds)
         - r2_unique_X:   r2_full - r2_conf_only
     """
-    y = df["y"].values.reshape(-1, 1)
-
-    # confounds: all columns starting with "conf"
-    conf_cols = [c for c in df.columns if c.startswith("conf")]
-    X_conf = df[conf_cols].values
+    y = sim["y"]
+    X_naive = sim["true_X"]
+    X_conf = sim["Z"]
 
     # Naive: y ~ true_X
-    X_naive = df[["true_X"]].values
     mdl_naive = LinearRegression().fit(X_naive, y)
     r2_naive = r2_score(y, mdl_naive.predict(X_naive))
 
@@ -234,7 +231,7 @@ def compute_r2s(df: pd.DataFrame) -> dict:
     }
 
 
-def generate_three_scenarios(
+def generate_four_scenarios(
     n_features: int = 100,
     n_features_informative: int = 10,
     n_confounds: int = 2,
@@ -242,35 +239,14 @@ def generate_three_scenarios(
     rho_informative: float = 0.5,
     random_state: int | None = 123,
 ) -> dict[str, pd.DataFrame]:
-    """
-    Wrapper to generate three canonical scenarios using `simulate_data_given_R2`:
 
-    1. no_confounding:
-        R2_X_y        = 0.25
-        R2_X_y_given_Z= 0.25
-        R2_Z_y        = 0.00
-
-    2. weak_confounding (partial):
-        R2_X_y        = 0.25
-        R2_X_y_given_Z= 0.125
-        R2_Z_y        = 0.125
-
-    3. full_confounding:
-        R2_X_y        = 0.25
-        R2_X_y_given_Z= 0.0
-        R2_Z_y        = 0.25
-
-    Returns
-    -------
-    dict: scenario_name -> DataFrame
-    """
     rng = np.random.default_rng(random_state)
-    seeds = rng.integers(0, 2**32 - 1, size=3)
+    seeds = rng.integers(0, 2**32 - 1, size=4)
 
     scenarios = {}
 
     # 1. No confounding
-    scenarios["no_confounding"] = simulate_data_given_R2(
+    scenarios["No Confounding Effect"] = simulate_data_given_R2(
         R2_X_y=0.25,
         R2_X_y_given_Z=0.25,
         R2_Z_y=0.0,
@@ -283,10 +259,10 @@ def generate_three_scenarios(
     )
 
     # 2. Weak/partial confounding
-    scenarios["weak_confounding"] = simulate_data_given_R2(
+    scenarios["Moderate Confounding Effect"] = simulate_data_given_R2(
         R2_X_y=0.25,
-        R2_X_y_given_Z=0.125,
-        R2_Z_y=0.125,
+        R2_X_y_given_Z=0.15,
+        R2_Z_y=0.10,
         n_features=n_features,
         n_features_informative=n_features_informative,
         n_confounds=n_confounds,
@@ -296,10 +272,10 @@ def generate_three_scenarios(
     )
 
     # 3. Full confounding
-    scenarios["full_confounding"] = simulate_data_given_R2(
+    scenarios["Strong Confounding Effect"] = simulate_data_given_R2(
         R2_X_y=0.25,
-        R2_X_y_given_Z=0.0,
-        R2_Z_y=0.25,
+        R2_X_y_given_Z=0.05,
+        R2_Z_y=0.20,
         n_features=n_features,
         n_features_informative=n_features_informative,
         n_confounds=n_confounds,
@@ -309,7 +285,7 @@ def generate_three_scenarios(
     )
 
     # 4. No confounding but Z explains part of y
-    scenarios["no_confounding_but_Z_explains_y"] = simulate_data_given_R2(
+    scenarios["No Confounding Effect But Useful Confounds"] = simulate_data_given_R2(
         R2_X_y=0.25,
         R2_X_y_given_Z=0.25,
         R2_Z_y=0.25,
@@ -318,7 +294,7 @@ def generate_three_scenarios(
         n_confounds=n_confounds,
         n_samples=n_samples,
         rho_informative=rho_informative,
-        random_state=int(seeds[0]),
+        random_state=int(seeds[3]),
     )
     return scenarios
 
@@ -327,7 +303,7 @@ def generate_three_scenarios(
 # Example usage
 # -------------------------------------------------------------------
 if __name__ == "__main__":
-    scenarios = generate_three_scenarios(
+    scenarios = generate_four_scenarios(
         n_features=100,
         n_features_informative=10,
         n_confounds=3,
