@@ -30,7 +30,7 @@ jobs:
       - name: Run Tests with Coverage
         run: |
           export PYTHONPATH=$(pwd)
-          poetry run pytest ./tests --cov=./cpm --cov-report=xml --cov-report=term
+          poetry run pytest ./tests --cov=./cccpm --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Coveralls
         uses: coverallsapp/github-action@v2
