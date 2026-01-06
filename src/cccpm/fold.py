@@ -1,4 +1,3 @@
-from cccpm.models import LinearCPMModel
 from cccpm.utils import train_test_split
 from cccpm.scoring import score_regression_models
 from cccpm.results_manager import ResultsManager

@@ -36,7 +36,8 @@ pip install -e .
 Verify the installation:
 
 ```python
-import cccpm
+
+from src import cccpm
 
 print(cccpm.__version__)
 ```

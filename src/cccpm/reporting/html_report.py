@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 
 from cccpm.reporting.plots.plots import boxplot_model_performance
 from cccpm.reporting.plots.plots import (scatter_plot, scatter_plot_covariates_model, scatter_plot_network_strengths,
-                                         histograms_network_strengths)
-from cccpm.reporting.plots.cpm_chord_plot import plot_netplotbrain, extract_edges
+                                             histograms_network_strengths)
+from cccpm.reporting.plots.cpm_chord_plot import plot_netplotbrain
 from cccpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
 
 
@@ -71,7 +71,7 @@ class HTMLReporter:
 
         main_tabs = ar.Select(blocks=report_blocks)
         script_dir = Path(__file__).parent
-        image_path = script_dir / '../../documentation/docs/assets/img/CCCPM.png'
+        image_path = script_dir / 'assets/CCCPM.png'
         image_path = image_path.resolve()  # Optional: resolve to absolute path
 
         main_page = ar.Group(ar.Media(file=image_path, name="Logo"),

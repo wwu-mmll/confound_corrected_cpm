@@ -1,67 +1,46 @@
-import unittest
-
+import pytest
 import numpy as np
 import pandas as pd
-
-from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
-from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
-from cccpm.cpm_analysis import CPMRegression
 from cccpm.utils import check_data
-from sklearn.model_selection import KFold, ShuffleSplit
 
+# The 'cpm_instance' and 'simulated_data' fixtures come from conftest.py
 
-class TestCPMRegression(unittest.TestCase):
-    def setUp(self):
-        super(TestCPMRegression, self).setUp()
-        univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
-                                                            edge_selection=[PThreshold(threshold=[0.01, 0.05],
-                                                                                       correction=[None])])
-        # setup an instance of CPMRegression just to initialize the logger instance
-        self.cpm = CPMRegression(results_directory='./tmp',
-                                 cv=KFold(n_splits=10, shuffle=True, random_state=42),
-                                 inner_cv=ShuffleSplit(n_splits=1, random_state=42),
-                                 edge_selection=univariate_edge_selection,
-                                 n_permutations=2,
-                                 impute_missing_values=True)
-        self.X, self.y, self.covariates = simulate_confounded_data_chyzhyk(n_samples=100, n_features=45)
+def test_run(cpm_instance, simulated_data):
+    X, y, covariates = simulated_data
+    # We use the fixture instance which is already configured with a tmp_path
+    cpm_instance.run(X, y, covariates)
 
-    def test_run(self):
-        self.cpm.run(self.X, self.y, self.covariates)
+def test_input_is_dataframe(cpm_instance, simulated_data):
+    X, y, covariates = simulated_data
+    cpm_instance.run(
+        pd.DataFrame(X),
+        pd.DataFrame(y),
+        pd.DataFrame(covariates)
+    )
 
-    def test_input_is_dataframe(self):
-        self.cpm.run(pd.DataFrame(self.X), pd.DataFrame(self.y), pd.DataFrame(self.covariates))
+# Missing Values Tests
+def test_nan_in_X(simulated_data):
+    X, y, covariates = simulated_data
+    # Work on a copy to avoid affecting other tests reusing the fixture
+    X_nan = X.copy()
+    X_nan[0, 0] = np.nan
 
-class TestMissingValues(unittest.TestCase):
-    def setUp(self):
-        super(TestMissingValues, self).setUp()
-        self.X, self.y, self.covariates = simulate_confounded_data_chyzhyk(n_samples=100, n_features=45)
+    with pytest.raises(ValueError):
+        check_data(X_nan, y, covariates, impute_missings=False)
 
-    def test_nan_in_X(self):
-        self.X[0, 0] = np.nan
+    # Should not raise
+    check_data(X_nan, y, covariates, impute_missings=True)
 
-        with self.assertRaises(ValueError):
-            _, _, _ = check_data(self.X, self.y, self.covariates, impute_missings=False)
+def test_nan_in_y(simulated_data):
+    X, y, covariates = simulated_data
+    y_nan = y.copy()
+    y_nan[0] = np.nan
 
-        _, _, _ = check_data(self.X, self.y, self.covariates, impute_missings=True)
+    # raise error if y contains nan and impute_missings is False
+    with pytest.raises(ValueError):
+        check_data(X, y_nan, covariates, impute_missings=False)
 
-    def test_nan_in_y(self):
-        self.y[0] = np.nan
-
-        # raise error if y contains nan and impute_missings is False
-        with self.assertRaises(ValueError):
-            _, _, _ = check_data(self.X, self.y, self.covariates, impute_missings=False)
-
-        # but also raise an error if y contains nan and impute_missings is True
-        # values in y should never be missing
-        with self.assertRaises(ValueError):
-            _, _, _ = check_data(self.X, self.y, self.covariates, impute_missings=True)
-
-    #def test_nan_in_covariates(self):
-    #    self.covariates[0, :] = np.nan
-
-#        with self.assertRaises(ValueError):
- #           _, _, _ = check_data(self.X, self.y, self.covariates, impute_missings=False)
-
-
-if __name__ == '__main__':
-    unittest.main()
+    # but also raise an error if y contains nan and impute_missings is True
+    # values in y should never be missing
+    with pytest.raises(ValueError):
+        check_data(X, y_nan, covariates, impute_missings=True)

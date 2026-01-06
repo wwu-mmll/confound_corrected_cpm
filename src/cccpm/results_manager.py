@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-from statsmodels.stats.multitest import multipletests
 
 from typing import Union
 

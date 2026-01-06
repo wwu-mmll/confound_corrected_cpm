@@ -54,7 +54,7 @@ Choose from the following methods for computing edge statistics:
 Example:
 
 ```python
-from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from src.cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 
 edge_statistic = 'pearson'
 univariate_edge_selection = UnivariateEdgeSelection(
@@ -67,7 +67,7 @@ univariate_edge_selection = UnivariateEdgeSelection(
 Create an instance of the CPMRegression class with the required inputs:
 
 ```python
-from cccpm.cpm_analysis import CPMRegression
+from src.cccpm.cpm_analysis import CPMRegression
 
 cpm = CPMRegression(
     results_directory="results/",

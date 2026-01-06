@@ -44,8 +44,8 @@ pip install .
 Here's a quick overview of how to run a CPM analysis:
 
 ```python
-from cccpm.cpm_analysis import CPMRegression
-from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from src.cccpm.cpm_analysis import CPMRegression
+from src.cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from sklearn.model_selection import KFold
 
 # Configure edge selection

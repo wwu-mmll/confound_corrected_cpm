@@ -1,5 +1,3 @@
-# pyproject.toml
-
 [tool.poetry]
 name = "cccpm"
 version = "0.1.1"
@@ -8,29 +6,30 @@ authors = [
     "Nils Winter <nils.r.winter@uni-muenster.de>",
     "MMLL <nils.r.winter@uni-muenster.de>"
 ]
-packages = [{ include = "cccpm" }]
 license = "MIT"
 readme = "README.md"
 
+# --- CRITICAL CHANGE FOR SRC LAYOUT ---
+# This tells Poetry: "The package 'cccpm' lives inside the 'src' directory."
+packages = [
+    { include = "cccpm", from = "src" }
+]
+
 [tool.poetry.dependencies]
-python = "<4.0,>=3.10"
+python = ">=3.10,<4.0"
 numpy = "*"
 pandas = "*"
 scikit-learn = ">=1.6"
-pingouin = "*"
 nilearn = "*"
-typer = "*"
-pytest = "*"
-pytest-cov = "*"
-bleach = "*"
-tinycss2 = "*"
-plotly = "*"
 arakawa = "*"
 netplotbrain = "*"
-networkx = "*"
-scikit-image = "*"
 tqdm = "*"
 pygam = "*"
+
+[tool.poetry.group.dev.dependencies]
+pingouin = "*"
+pytest = "*"
+pytest-cov = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
