@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from simulation.simulate_simple import simulate_regression_data_scenarios
+from simulation.simulate_simple import simulate_confounded_data_chyzhyk
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.cpm_analysis import CPMRegression
 from cccpm.utils import check_data
@@ -23,7 +23,7 @@ class TestCPMRegression(unittest.TestCase):
                                  edge_selection=univariate_edge_selection,
                                  n_permutations=2,
                                  impute_missing_values=True)
-        self.X, self.y, self.covariates = simulate_regression_data_scenarios(n_samples=100, n_features=45)
+        self.X, self.y, self.covariates = simulate_confounded_data_chyzhyk(n_samples=100, n_features=45)
 
     def test_run(self):
         self.cpm.run(self.X, self.y, self.covariates)
@@ -34,7 +34,7 @@ class TestCPMRegression(unittest.TestCase):
 class TestMissingValues(unittest.TestCase):
     def setUp(self):
         super(TestMissingValues, self).setUp()
-        self.X, self.y, self.covariates = simulate_regression_data_scenarios(n_samples=100, n_features=45)
+        self.X, self.y, self.covariates = simulate_confounded_data_chyzhyk(n_samples=100, n_features=45)
 
     def test_nan_in_X(self):
         self.X[0, 0] = np.nan

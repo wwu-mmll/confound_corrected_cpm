@@ -7,12 +7,12 @@ from cccpm.utils import (
     matrix_to_vector_3d,
     get_variable_names
 )
-from simulation.simulate_simple import simulate_regression_data_scenarios
+from simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 class TestUtils(unittest.TestCase):
     def setUp(self):
         # Base 2D inputs for check_data tests
-        self.X2d, self.y1d, self.cov2d = simulate_regression_data_scenarios(
+        self.X2d, self.y1d, self.cov2d = simulate_confounded_data_chyzhyk(
             n_samples=50, n_features=5
         )
         # Covariate variants

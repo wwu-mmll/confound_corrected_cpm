@@ -6,7 +6,7 @@ import pingouin as pg
 
 from scipy.stats import pearsonr, spearmanr
 
-from simulation.simulate_simple import simulate_regression_data
+from simulation.simulate_simple import simulate_confounded_data_chyzhyk
 from cccpm.edge_selection import (pearson_correlation_with_pvalues, spearman_correlation_with_pvalues,
                                   semi_partial_correlation_pearson)
 
@@ -14,7 +14,7 @@ from cccpm.edge_selection import (pearson_correlation_with_pvalues, spearman_cor
 class TestEdgeStatistics(unittest.TestCase):
     def setUp(self):
         super(TestEdgeStatistics, self).setUp()
-        self.X, self.y, self.covariates = simulate_regression_data(n_samples=100, n_features=45)
+        self.X, self.y, self.covariates = simulate_confounded_data_chyzhyk(n_samples=100, n_features=45)
 
     def test_cpm_pearson(self):
         """Test CPM implementation of Pearson correlation with p-values"""

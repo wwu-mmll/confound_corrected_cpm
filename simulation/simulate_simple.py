@@ -34,4 +34,4 @@ def simulate_confounded_data_chyzhyk(link_type='direct_link',
         y = np.copy(y_rand)
         z = 0.5 * y_rand + z_rand
         X = x_rand + y_rand.reshape(-1, 1) + z.reshape(-1, 1)
-    return X, y, z
+    return X, y, z.reshape(-1, 1)

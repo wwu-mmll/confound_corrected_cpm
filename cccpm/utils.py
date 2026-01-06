@@ -281,7 +281,10 @@ def generate_data_insights(X, y, covariates, results_directory):
     # Convert covariates to DataFrame
     if covariates is not None:
         if isinstance(covariates, np.ndarray):
-            covariates = pd.DataFrame(covariates, columns=[f"covariate {i + 1}" for i in range(covariates.shape[1])])
+            if len(covariates.shape) == 1:
+                covariates = pd.DataFrame(covariates, columns=["covariate 1"])
+            else:
+                covariates = pd.DataFrame(covariates, columns=[f"covariate {i + 1}" for i in range(covariates.shape[1])])
         elif isinstance(covariates, pd.Series):
             covariates = covariates.to_frame()
             if covariates.columns[0] is None:
@@ -373,8 +376,11 @@ def get_variable_names(X, y, covariates):
             else list(covariates.columns)
         )
     else:
-        covar_names = [
-            f"covariate_{i}" for i in range(covariates.shape[1])
-        ]
+        if len(covariates.shape) == 1:
+            covar_names = ["covariate_1"]
+        else:
+            covar_names = [
+                f"covariate_{i}" for i in range(covariates.shape[1])
+            ]
 
     return X_names, y_name, covar_names

@@ -1,12 +1,11 @@
 from sklearn.model_selection import RepeatedKFold
 
 from cccpm import CPMRegression
-from simulation.simulate_simple import simulate_regression_data_scenarios
+from simulation.simulate_simple import simulate_confounded_data_chyzhyk
 from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 
 link_types = ['no_link',
-              'no_no_link',
               'direct_link',
               'weak_link'
             ]
@@ -15,7 +14,7 @@ results_folder = '/spm-data/vault-data3/mmll/projects/confound_corrected_cpm/res
 
 for link in link_types:
     for edge_statistic in edge_statistics:
-        X, y, covariates = simulate_regression_data_scenarios(n_features=1225, n_informative_features=50, link_type=link)
+        X, y, covariates = simulate_confounded_data_chyzhyk(n_features=1225, link_type=link)
 
         univariate_edge_selection = UnivariateEdgeSelection(edge_statistic=[edge_statistic],
                                                             edge_selection=[PThreshold(threshold=[0.05],
@@ -23,10 +22,7 @@ for link in link_types:
         cpm = CPMRegression(results_directory=f'{results_folder}/simulated_data_{link}_{edge_statistic}',
                             cv=RepeatedKFold(n_splits=10, n_repeats=5, random_state=42),
                             edge_selection=univariate_edge_selection,
-                            #cv_edge_selection=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
-                            add_edge_filter=True,
                             n_permutations=2)
         cpm.run(X=X, y=y, covariates=covariates)
 
-        #cccpm._calculate_permutation_results('./tmp/example_simulated_data2')
 
