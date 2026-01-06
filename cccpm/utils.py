@@ -187,7 +187,7 @@ def check_data(X, y, covariates, impute_missings: bool = False):
         try:
             X_checked, y_checked = check_X_y(
                 X_arr, y_arr,
-                force_all_finite='allow-nan',
+                ensure_all_finite='allow-nan',
                 allow_nd=True,
                 y_numeric=True
             )
@@ -200,7 +200,7 @@ def check_data(X, y, covariates, impute_missings: bool = False):
         try:
             X_checked, y_checked = check_X_y(
                 X_arr, y_arr,
-                force_all_finite=True,
+                ensure_all_finite=True,
                 allow_nd=True,
                 y_numeric=True
             )
