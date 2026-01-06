@@ -10,14 +10,14 @@ import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold, RepeatedKFold, StratifiedKFold
 from sklearn.linear_model import LinearRegression
 
-from cpm.fold import run_inner_folds
-from cpm.logging import setup_logging
-from cpm.more_models import BaseCPMModel, LinearCPMModel
-from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
-from cpm.results_manager import ResultsManager, PermutationManager
-from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
-from cpm.scoring import score_regression_models
-from cpm.reporting import HTMLReporter
+from cccpm.fold import run_inner_folds
+from cccpm.logging import setup_logging
+from cccpm.more_models import BaseCPMModel, LinearCPMModel
+from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm.results_manager import ResultsManager, PermutationManager
+from cccpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
+from cccpm.scoring import score_regression_models
+from cccpm.reporting import HTMLReporter
 
 
 class CPMRegression:

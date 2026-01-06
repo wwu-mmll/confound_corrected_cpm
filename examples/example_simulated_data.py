@@ -1,10 +1,10 @@
 import numpy as np
 from sklearn.model_selection import ShuffleSplit, RepeatedKFold
 
-from cpm import CPMRegression
-from cpm.more_models import RandomForestCPMModel, DecisionTreeCPMModel
+from cccpm import CPMRegression
+from cccpm.more_models import RandomForestCPMModel, DecisionTreeCPMModel
 from simulation.simulate_simple import simulate_confounded_data_chyzhyk
-from cpm.edge_selection import PThreshold, UnivariateEdgeSelection
+from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 
 X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=1000, n_features=105, link_type='direct_link')

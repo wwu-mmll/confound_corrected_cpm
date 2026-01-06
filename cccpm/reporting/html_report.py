@@ -7,11 +7,11 @@ import numpy as np
 import arakawa as ar
 import matplotlib.pyplot as plt
 
-from cpm.reporting.plots.plots import boxplot_model_performance
-from cpm.reporting.plots.plots import (scatter_plot, scatter_plot_covariates_model, scatter_plot_network_strengths,
-                                       histograms_network_strengths)
-from cpm.reporting.plots.cpm_chord_plot import plot_netplotbrain, extract_edges
-from cpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
+from cccpm.reporting.plots.plots import boxplot_model_performance
+from cccpm.reporting.plots.plots import (scatter_plot, scatter_plot_covariates_model, scatter_plot_network_strengths,
+                                         histograms_network_strengths)
+from cccpm.reporting.plots.cpm_chord_plot import plot_netplotbrain, extract_edges
+from cccpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
 
 
 class HTMLReporter:

@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from cpm.utils import (
+from cccpm.utils import (
     check_data,
     matrix_to_vector_3d,
     get_variable_names

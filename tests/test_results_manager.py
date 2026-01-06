@@ -5,8 +5,8 @@ import shutil
 import numpy as np
 import pandas as pd
 
-from cpm.results_manager import ResultsManager, PermutationManager
-from cpm.utils import vector_to_upper_triangular_matrix
+from cccpm.results_manager import ResultsManager, PermutationManager
+from cccpm.utils import vector_to_upper_triangular_matrix
 
 
 class TestResultsManager(unittest.TestCase):
