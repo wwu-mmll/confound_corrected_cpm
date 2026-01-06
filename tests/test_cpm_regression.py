@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from simulation.simulate_simple import simulate_confounded_data_chyzhyk
+from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.cpm_analysis import CPMRegression
 from cccpm.utils import check_data

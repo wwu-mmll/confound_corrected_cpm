@@ -165,4 +165,4 @@ examples/simulated_data
 tests/tmp
 
 poetry.lock
-simulation/simulation_results
+cccpm/simulation/simulation_results

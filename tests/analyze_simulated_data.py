@@ -1,7 +1,7 @@
 from sklearn.model_selection import RepeatedKFold
 
 from cccpm import CPMRegression
-from simulation.simulate_simple import simulate_confounded_data_chyzhyk
+from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 

@@ -7,7 +7,7 @@ from cccpm.utils import (
     matrix_to_vector_3d,
     get_variable_names
 )
-from simulation.simulate_simple import simulate_confounded_data_chyzhyk
+from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 class TestUtils(unittest.TestCase):
     def setUp(self):
