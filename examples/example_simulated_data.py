@@ -3,7 +3,7 @@ from sklearn.model_selection import ShuffleSplit, RepeatedKFold
 
 from cpm import CPMRegression
 from cpm.more_models import RandomForestCPMModel, DecisionTreeCPMModel
-from simulation.simulate_data_chyzhyk import simulate_confounded_data_chyzhyk
+from simulation.simulate_simple import simulate_confounded_data_chyzhyk
 from cpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 
@@ -25,4 +25,3 @@ cpm = CPMRegression(results_directory='./tmp/example_simulated_data',
                     select_stable_edges=False)
 
 cpm.run(X=X, y=y, covariates=covariates)
-#cpm.generate_html_report()
