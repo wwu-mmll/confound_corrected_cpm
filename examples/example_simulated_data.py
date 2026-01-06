@@ -10,11 +10,6 @@ X, y, covariates = simulate_regression_data(n_samples=2000, n_features=2485, n_i
                                             feature_effect_size=100,
                                             noise_level=0.1)
 
-# print("Debug 1")
-# print(X.shape, y.shape, covariates.shape)
-# print("X", X)
-# print("y", y)
-# print("covariates", covariates)
 
 univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
                                                     edge_selection=[PThreshold(threshold=0.05,

@@ -1,7 +1,6 @@
 import os
 import logging
 import shutil
-import gc
 
 from typing import Union
 
@@ -19,7 +18,7 @@ from cpm.edge_selection import UnivariateEdgeSelection, PThreshold, EdgeStatisti
 from cpm.results_manager import ResultsManager, PermutationManager
 from cpm.utils import check_data, impute_missing_values, select_stable_edges, generate_data_insights
 from cpm.scoring import score_regression_models
-from cpm.fold import run_inner_folds_vmap, run_inner_folds_torch
+from cpm.fold import run_inner_folds_torch
 from cpm.reporting import HTMLReporter
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -176,81 +175,21 @@ class CPMRegression:
 
         self.logger.info("Permuting data..")
         for i in range(1, p):
-            #  idx = torch.randperm(y.shape[0])
             np.random.seed(i)
             idx_np = np.random.permutation(y.shape[0])
             idx = torch.from_numpy(idx_np).to(y.device)
             y_tot[i] = y[idx]
             X_tot[i] = X[idx]
-            #print(y[idx])
-            #print(X[idx])
-
-        #print("X", X_tot)
-        #print("y", y_tot)
 
         self.logger.info("Permuted data..")
         torch.cuda.empty_cache()
-        #gc.collect()
 
         self.logger.info("Estimating..")
         import time
         start = time.time()
-        self._batch_run(X=X_tot, y=y_tot, covariates=cov_tot)
+        self._run(X=X_tot, y=y_tot, covariates=cov_tot)
         end = time.time()
         self.logger.info(f"Estimation took {end - start:.2f} seconds")
-
-        # results_managers = []
-        # for b in range(len(results["metrics_detailed"])):
-        #     rm = ResultsManager(output_dir=self.results_directory, perm_run=b,
-        #                         n_folds=self.cv.get_n_splits(), n_features=X.shape[-1])
-        #     results_managers.append(rm)
-        #
-        # for b, results_manager in enumerate(results_managers):
-        #     for fold in range(self.cv.get_n_splits()):
-        #         edge_mask = results["edge_masks"][b][fold].cpu().numpy()
-        #
-        #         edges = {
-        #             'positive': np.where(edge_mask > 0)[0],
-        #             'negative': np.array([], dtype=int)
-        #         }
-        #
-        #         fold_key = f'fold_{fold}'
-        #
-        #         results_manager.store_edges(edges=edges, fold=fold)
-        #         results_manager.store_metrics(metrics=results["metrics_detailed"][b][f'fold_{fold}'], params={},
-        #                                       fold=fold, param_id=0)
-        #
-        #         y_pred = results["predictions"][b][fold_key]
-        #         test_idx = results["test_indices"][b][fold_key]
-        #         y_true = y_tot[b][test_idx].cpu().numpy()
-        #         results_manager.store_predictions(
-        #             y_pred=y_pred,
-        #             y_true=y_true,
-        #             params={},
-        #             fold=fold,
-        #             param_id=0,
-        #             test_indices=test_idx
-        #         )
-        #
-        #         network_strengths = results["network_strengths"][b][fold_key]
-        #         y_true = y_tot[b].cpu().numpy()
-        #
-        #         results_manager.store_network_strengths(
-        #             network_strengths=network_strengths,
-        #             y_true=y_true,
-        #             fold=fold
-        #         )
-        #
-        #     results_manager.calculate_final_cv_results()
-        #     results_manager.calculate_edge_stability()
-        #
-        #     results_manager.save_predictions()
-        #     results_manager.save_network_strengths()
-        #
-        #     self.logger.info(results_manager.agg_results.round(4).to_string())
-
-        # reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
-        # reporter.generate_html_report()
 
         if self.n_permutations > 0:
             PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
@@ -280,59 +219,7 @@ class CPMRegression:
         max_batches = max(int((free_mem * safety_factor) // bytes_per_batch), 1)
         return max_batches
 
-    # X_tot: [p, n, f]
-    # Contains feature data (X) for all permutations.
-    # p = number of permutations + 1 (includes original data)
-    # n = number of samples
-    # f = number of features
-
-    # y_tot: [p, n]
-    # Target variable (y) for all permutations.
-    # First row is the original data, remaining rows are permuted versions.
-
-    # cov_tot: [p, n, c]
-    # Covariate data for all permutations.
-    # c = number of covariates
-
-    # X_batch, y_batch, cov_batch: [B, n, f], [B, n], [B, n, c]
-    # A batch of B permutations selected from X_tot, y_tot, cov_tot for processing.
-
-    # Xtr_all: [B, n_folds, n_train, f]
-    # Training feature data for each permutation and fold.
-    # n_folds = number of cross-validation folds
-    # n_train = number of training samples per fold
-
-    # ytr_all: [B, n_folds, n_train]
-    # Training target values corresponding to Xtr_all.
-
-    # covtr_all: [B, n_folds, n_train, c]
-    # Training covariates corresponding to Xtr_all.
-
-    # Xte_all: [B, n_folds, n_test, f]
-    # Test feature data for each permutation and fold.
-
-    # yte_all: [B, n_folds, n_test]
-    # Test target values corresponding to Xte_all.
-
-    # covte_all: [B, n_folds, n_test, c]
-    # Test covariates corresponding to Xte_all.
-
-    # edge_masks_fold: [n_folds, f]
-    # Binary mask indicating selected edges (features) per fold.
-    # True where p-value < threshold (e.g., 0.01)
-
-    # predictions_fold: Dict[str, np.ndarray]
-    # Predicted values for each fold, e.g., {'fold_0': y_pred_array}
-
-    # metrics_fold: Dict[str, Dict]
-    # Evaluation metrics for each fold, e.g., R², MAE, etc.
-
-    # strengths_fold: Dict[str, np.ndarray]
-    # Network strengths computed from selected edges per fold.
-
-    # test_indices_fold: Dict[str, np.ndarray]
-    # Indices of test samples per fold, used to align predictions with ground truth.
-    def _batch_run(self,
+    def _run(self,
                    X: torch.Tensor,
                    y: torch.Tensor,
                    covariates: torch.Tensor):
@@ -342,10 +229,6 @@ class CPMRegression:
         y: [B, n]
         covariates: [B, n, c]
         """
-        import time
-        import gc
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         B, n, p = X.shape
         _, _, c = covariates.shape
         n_folds = self.cv.get_n_splits()
@@ -366,16 +249,6 @@ class CPMRegression:
                 free_bytes = psutil.virtual_memory().available
             return free_bytes
 
-        def compute_safe_chunk_size(n_train, p, c, dtype_bytes=4, safety_factor=0.7):
-            """Compute maximum number of folds to process at once"""
-            free_bytes = get_free_gpu_memory()
-            vram_per_fold = estimate_vram_per_fold(n_train, p, c, dtype_bytes)
-
-            self.logger.info(f"    Estimated VRAM per fold: {vram_per_fold / 1e6:.2f} MB")
-            self.logger.info(f"    Free GPU memory: {free_bytes / 1e6:.2f} MB")
-            chunk_size = max(1, int(free_bytes * safety_factor / vram_per_fold))
-            return chunk_size
-
         def compute_safe_perm_batch_size(n_folds, n_train, p, c, dtype_bytes=4, safety_factor=0.7):
             free_bytes = get_free_gpu_memory()
             vram_per_perm = n_folds * estimate_vram_per_fold(n_train, p, c, dtype_bytes)  # VRAM per permutation
@@ -384,57 +257,7 @@ class CPMRegression:
             batch_size = max(1, int(free_bytes * safety_factor / vram_per_perm))
             return batch_size
 
-        def vmap_edge_stat_in_chunks(Xtr_all, ytr_all, covtr_all, chunk_size=4):
-            B, n_folds, _, _ = Xtr_all.shape  # perms, folds, samples, features
-            r_edges_list = []
-            p_edges_list = []
-
-            tik = time.time()
-            for start in range(0, n_folds, chunk_size):
-                end = min(start + chunk_size, n_folds)
-                X_chunk = Xtr_all[:, start:end].to(device)
-                y_chunk = ytr_all[:, start:end].to(device)
-                cov_chunk = covtr_all[:, start:end].to(device)
-
-                self.logger.info(f"    Calculating folds {start}-{end} on device {device}")
-
-                torch.cuda.empty_cache()
-                r_chunk_masked, p_chunk_masked, valid_edges = (torch.vmap(
-                    torch.vmap(self.edge_selection.fit_transform))
-                                                               (X_chunk, y_chunk, cov_chunk))
-                # bring valid_edges to CPU once
-                #valid_edges = valid_edges[0, 0].cpu()  # because vmap repeats it
-
-                B = r_chunk_masked.size(0)
-                C = r_chunk_masked.size(1)
-                n_edges = valid_edges.numel()
-
-                # allocate full-sized arrays
-                r_full = torch.full((B, C, n_edges), float("nan"))
-                p_full = torch.full((B, C, n_edges), float("nan"))
-
-                # fill the masked edges position
-                r_full[..., valid_edges] = r_chunk_masked.to(r_full.dtype).cpu()
-                p_full[..., valid_edges] = p_chunk_masked.to(p_full.dtype).cpu()
-
-                # append full-sized tensor
-                r_edges_list.append(r_full)
-                p_edges_list.append(p_full)
-
-                del X_chunk, y_chunk, cov_chunk, r_full, p_full
-                torch.cuda.empty_cache()
-
-            tok = time.time()
-            self.logger.info(f"    Took {tok - tik:.2f} seconds")
-
-            r_edges = torch.cat(r_edges_list, dim=1)
-            p_edges = torch.cat(p_edges_list, dim=1)
-            return r_edges, p_edges
-
-        start_total = time.time()
-
         for batch_idx, (X_batch, y_batch, cov_batch) in enumerate(loader):  # do for every permutation subset:
-            #print(X_batch, y_batch)
             self.logger.info(f"Processing batch {batch_idx + 1}/{len(loader)}")
             batch_B = X_batch.shape[0]  # no. of permutations in the current subset
 
@@ -451,12 +274,8 @@ class CPMRegression:
                 yb_batch = y_batch[start:end]
                 covb_batch = cov_batch[start:end]
 
-                #print(Xb_batch, yb_batch)
-
                 folds = list(self.cv.split(torch.arange(n)))
                 n_folds = len(folds)
-
-                #print("folds: ", folds[0])
 
                 # Prepare training and test splits for each fold and permutation
                 Xtr_all = torch.stack([
@@ -484,11 +303,6 @@ class CPMRegression:
                     for covb in covb_batch
                 ], dim=0)
 
-                #print("0th fold: Xtrall: ", Xtr_all[0][0], Xtr_all[0][0].shape)
-
-                # Compute edge statistics with adaptive chunking to avoid memory overflow
-
-                #torch.set_printoptions(profile="full")
                 rm = []
                 for batch_perms in range(0, Xtr_all.shape[0]):  # loop thru all permutations in current slice
                     Xi = Xtr_all[batch_perms]  # slice out current permutation
@@ -502,9 +316,6 @@ class CPMRegression:
                     rm.append(ResultsManager(output_dir=self.results_directory, perm_run=batch_perms,
                                              n_folds=self.cv.get_n_splits(), n_features=X.shape[2]))
 
-                    #print("Xi, yi", Xi, yi)
-                    #print(Xi.shape, yi.shape)
-                    #print("outer_folds, (train, test): ", enumerate(self.cv.split(Xi, yi)))
                     for outer_folds in range(n_folds):
                         train, test = folds[outer_folds]
                         Xii = Xi[outer_folds]
@@ -514,46 +325,32 @@ class CPMRegression:
                         Xii_test = Xi_test[outer_folds]
                         yii_test = yi_test[outer_folds]
                         covii_test = covi_test[outer_folds]
-                        #print("modified shapes:", Xii.shape, yii.shape, covii.shape)
+
                         if self.impute_missing_values:
                             Xii, Xii_test, covii, covii_test = impute_missing_values(Xii, Xii_test, covii, covii_test)
                             self.logger.info(f"Imputed missing values")
 
                         if self.inner_cv:
-                            #print("innerfolds fittransform")
                             best_params, stability_edges = run_inner_folds_torch(Xii, yii, covii, inner_cv=self.inner_cv, edge_selection=self.edge_selection, results_directory=self.results_directory, perm_run=batch_perms)
-                            #print("best_params, stability", best_params, stability_edges)
                             if batch_perms == 0:
                                 self.logger.info(f"Best hyperparameters: {best_params}")
                         else:
                             best_params = self.edge_selection.param_grid[0]
-                            #print("best_params", best_params)
 
                         if self.select_stable_edges:
                             edges = select_stable_edges(stability_edges, self.stability_threshold)
-                            #print("edges", edges)
                         else:
                             self.edge_selection.set_params(**best_params)
-                            #print("second fittransform")
                             r_masked, p_masked, valid_edges = self.edge_selection.fit_transform(X=Xii, y=yii,
                                                                       covariates=covii)
                             edges = self.edge_selection.return_selected_edges(r_masked, p_masked)
-                            #print("edges", edges)
 
                         rm[batch_perms].store_edges(edges=edges, fold=outer_folds)
 
-                        #print(f"edges fold {outer_folds}: {edges}")
-
                         model = LinearCPMModel().fit(Xii, yii, covii, pos_edges=edges["positive"], neg_edges=edges["negative"])
-                        #print("fit input lcm:", Xii.shape, yii.shape)
-                        #print("y_pred inputs: ", Xii_test, covii_test, edges["positive"], edges["negative"])
                         y_pred = model.predict(Xii_test, covii_test, pos_edges=edges["positive"], neg_edges=edges["negative"])
-                        #print("y_pred", y_pred)
                         network_strengths = model.get_network_strengths(Xii_test, covii_test, pos_edges=edges["positive"], neg_edges=edges["negative"])
-                        #print("network_strengths", network_strengths)
                         metrics = score_regression_models(y_true=yii_test, y_pred_dict=y_pred)
-                        #print("metrics", metrics)
-                        #print("store_predictions inputs", y_pred, yii_test, best_params, outer_folds, test)
                         rm[batch_perms].store_predictions(y_pred=y_pred, y_true=yii_test, params=best_params,
                                                           fold=outer_folds,
                                                           param_id=0, test_indices=test)
@@ -568,70 +365,3 @@ class CPMRegression:
                         self.logger.info(rm[batch_perms].agg_results.round(4).to_string())
                         rm[batch_perms].save_predictions()
                         rm[batch_perms].save_network_strengths()
-
-
-        #         for perm_idx in range(end - start):
-        #             metrics_fold = {}
-        #             predictions_fold = {}
-        #             strengths_fold = {}
-        #             edge_masks_fold = torch.zeros(n_folds, p, dtype=torch.bool)
-        #             test_indices_fold = {}
-        #
-        #             for fold_idx in range(n_folds):
-        #                 _, test_idx = folds[fold_idx]
-        #                 test_indices_fold[f'fold_{fold_idx}'] = test_idx.cpu().numpy() if (
-        #                     isinstance(test_idx, torch.Tensor)) else np.array(test_idx)
-        #                 Xtr = Xtr_all[perm_idx, fold_idx].to(device)
-        #                 ytr = ytr_all[perm_idx, fold_idx].to(device)
-        #                 covtr = covtr_all[perm_idx, fold_idx].to(device)
-        #
-        #                 Xte = Xte_all[perm_idx, fold_idx].to(device)
-        #                 yte = yte_all[perm_idx, fold_idx].to(device)
-        #                 covte = covte_all[perm_idx, fold_idx].to(device)
-        #
-        #                 edge_mask = (p_edges[perm_idx, fold_idx] < 0.01).to(dtype=torch.bool)
-        #                 edge_masks_fold[fold_idx] = edge_mask
-        #                 # Fit and evaluate CPM model
-        #                 model = LinearCPMModel(device=device).fit(Xtr, ytr, covtr, edge_mask=edge_mask)
-        #                 y_pred_dict = model.predict(Xte, covte, edge_mask=edge_mask)
-        #
-        #                 scores = score_regression_models(
-        #                     y_true=yte,
-        #                     y_pred_dict=y_pred_dict,
-        #                     primary_metric_only=False
-        #                 )
-        #                 strengths = model.get_network_strengths(Xte, covte, edge_mask=edge_mask)
-        #                 # Store fold results
-        #                 metrics_fold[f'fold_{fold_idx}'] = scores
-        #                 predictions_fold[f'fold_{fold_idx}'] = y_pred_dict
-        #                 strengths_fold[f'fold_{fold_idx}'] = strengths
-        #
-        #                 del Xtr, ytr, covtr, Xte, yte, covte, model
-        #                 torch.cuda.empty_cache()
-        #                 #gc.collect()
-        #
-        #             # Store permutation-level results
-        #             edge_masks_all.append(edge_masks_fold.detach().cpu())
-        #             metrics_all.append(metrics_fold)
-        #             all_predictions_dict.append(predictions_fold)
-        #             all_network_strengths.append(strengths_fold)
-        #             all_test_indices.append(test_indices_fold)
-        #
-        #         del Xtr_all, ytr_all, covtr_all, Xte_all, yte_all, covte_all
-        #         torch.cuda.empty_cache()
-        #         #gc.collect()
-        #
-        #     del X_batch, y_batch, cov_batch
-        #     torch.cuda.empty_cache()
-        #     #gc.collect()
-        #
-        # end_total = time.time()
-        # self.logger.info(f"Total _batch_run time: {(end_total - start_total):.2f} seconds")
-        #
-        # return {
-        #     "edge_masks": edge_masks_all,
-        #     "metrics_detailed": metrics_all,
-        #     "predictions": all_predictions_dict,
-        #     "network_strengths": all_network_strengths,
-        #     "test_indices": all_test_indices
-        # }

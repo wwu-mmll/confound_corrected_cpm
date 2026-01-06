@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -88,8 +87,6 @@ class LinearCPMModel:
         pos_edges:  [P] boolean mask
         neg_edges:  [P] boolean mask
         """
-        #print("fit:", X.shape, y.shape, covariates.shape)
-        #print("fit Xyc:", X, y, covariates)
 
         X = X.to(self.device)
         y = y.to(self.device)
@@ -104,8 +101,6 @@ class LinearCPMModel:
         conn_pos = (X * pos_mask).sum(dim=1, keepdim=True)  # [n,1]
         conn_neg = (X * neg_mask).sum(dim=1, keepdim=True)  # [n,1]
 
-        #print("connpos connneg", conn_pos, conn_neg)
-
         connectome["positive"] = conn_pos
         connectome["negative"] = conn_neg
 
@@ -113,7 +108,6 @@ class LinearCPMModel:
             reg = TorchLinearRegression().fit(
                 covariates, connectome[net].squeeze(1)
             )
-            #print("reg:", reg.beta)
             self.models_residuals[net] = reg
 
             preds = reg.predict(covariates).unsqueeze(1)  # [n,1]

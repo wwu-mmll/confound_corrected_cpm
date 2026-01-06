@@ -80,8 +80,6 @@ def run_inner_folds_torch(X, y, covariates, inner_cv, edge_selection: BaseEdgeSe
         Dictionary with 'positive' and 'negative' keys mapping to edge stability scores.
     """
 
-    #print("run_inner_torch: X,y,c", X.shape, y.shape, covariates.shape)
-
     param_grid = edge_selection.param_grid
     n_features = X.shape[1]
     n_params = len(param_grid)
@@ -109,12 +107,8 @@ def run_inner_folds_torch(X, y, covariates, inner_cv, edge_selection: BaseEdgeSe
             r_masked, p_masked, valid_edges = edge_selection.fit_transform(X_train, y_train, cov_train)
             selected_edges = edge_selection.return_selected_edges(r=r_masked, p=p_masked)
 
-            #print(f"Fold {fold_id}", selected_edges)
             # Fit CPM model on selected edges
             model = LinearCPMModel()
-            #print("model.fit inputs: ", X_train, y_train, cov_train, selected_edges["positive"], selected_edges["negative"])
-            #print("model.fit inputs shapes: ", X_train.shape, y_train.shape, cov_train.shape, selected_edges["positive"].shape,
-                  #selected_edges["negative"].shape)
             model.fit(
                 X_train, y_train, cov_train,
                 pos_edges=selected_edges["positive"],

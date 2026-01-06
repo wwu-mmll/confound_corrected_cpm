@@ -56,7 +56,6 @@ def student_t_cdf(t, df, n=1000):
 
 
 def one_sample_t_test(matrix, population_mean):
-    #print("one_sample_t_test shape", matrix.shape)
     matrix = torch.tensor(matrix, dtype=torch.float32, device=cuda)
     population_mean = torch.tensor(population_mean, dtype=torch.float32, device=cuda)
 
@@ -73,7 +72,6 @@ def one_sample_t_test(matrix, population_mean):
 
 
 def compute_t_and_p_values(correlations, df):
-    #print("compute_t_and_p_values shape", correlations.shape)
     correlations = correlations.to(cuda)
     df = torch.tensor(df, dtype=correlations.dtype, device=cuda)
 
@@ -88,7 +86,6 @@ def compute_t_and_p_values(correlations, df):
 
 
 def torch_rankdata(x: torch.Tensor, axis=None):
-    #print("torch_rankdata shape", x.shape)
     def rank1d(a):
         argsort = torch.argsort(a)
         ranks = torch.zeros_like(a, dtype=torch.float)
@@ -120,9 +117,7 @@ def compute_correlation_and_pvalues(x, Y, rank=False):
         correlations: shape (F,)
         p_values: shape (F,)
     """
-    #print("compute_correlation_and_pvalues shape: x, Y", x.shape, Y.shape)
     n = x.shape[0]  # number of samples
-    #print("n:", n)
 
     if rank:
         x = torch_rankdata(x, axis=0)
@@ -132,24 +127,15 @@ def compute_correlation_and_pvalues(x, Y, rank=False):
     x_centered = x - x.mean()        # center features
     Y_centered = Y - Y.mean()             # center target
 
-    #print("x_centered", x_centered)
-    #print("Y_centered", Y_centered)
-
     # Compute correlation
     corr_numerator = torch.sum(x_centered * Y_centered.unsqueeze(1), dim=0)
-    #print("corr_numerator", corr_numerator)
-    # (F,)
     corr_denominator = (torch.sqrt(torch.sum(Y_centered ** 2, dim=0))
                         * torch.sqrt(torch.sum(x_centered ** 2)))
-
-    #print("corr_denominator", corr_denominator, corr_denominator.shape)
-
 
     correlations = corr_numerator / corr_denominator
 
     _, p_values = compute_t_and_p_values(correlations, n - 2)
 
-    #print("p_values correlations", p_values, correlations)
     return correlations, p_values
 
 
@@ -184,7 +170,6 @@ def compute_correlation_and_pvalues(x, Y, rank=False):
 
 
 def get_residuals(X, Z):
-    #print("get_residuals shape: X, Z", X.shape, Z.shape)
     Z = torch.hstack([Z, torch.ones((Z.shape[0], 1))])
     B = torch.linalg.lstsq(Z, X, rcond=None)[0]
     X_hat = Z.dot(B)
@@ -193,7 +178,6 @@ def get_residuals(X, Z):
 
 
 def semi_partial_correlation(x, Y, Z, rank=False):
-    #print("semi_partial_correlation shape: x, Y, Z", x.shape, Y.shape, Z.shape)
     if rank:
         x = torch_rankdata(x)
         Y = torch_rankdata(Y, axis=0)
@@ -348,20 +332,14 @@ class EdgeStatistic(BaseEstimator):
         if covariates is not None and isinstance(covariates, np.ndarray):
             covariates = torch.from_numpy(covariates).float()
 
-        #print("ft X,y,cov: ", X, y)
-
-        #r_edges, p_edges = torch.zeros(X.shape[1]), torch.ones(X.shape[1])
-
         if self.t_test_filter:
             _, p_values = one_sample_t_test(X, 0)
             valid_edges = p_values < 0.05
-            #print("valid_edges", valid_edges)
         else:
             valid_edges = torch.ones(X.shape[1], dtype=torch.bool, device=X.device)
 
         if self.edge_statistic == 'pearson':
             r_masked, p_masked = pearson_correlation_with_pvalues(X[:, valid_edges], y)
-            #print("r_masked, p_masked", r_masked, p_masked)
         elif self.edge_statistic == 'spearman':
             r_masked, p_masked = spearman_correlation_with_pvalues(X[:, valid_edges], y)
         elif self.edge_statistic == 'pearson_partial':
@@ -371,50 +349,7 @@ class EdgeStatistic(BaseEstimator):
         else:
             raise NotImplementedError("Unsupported edge selection method")
 
-        #r_edges[valid_edges] = r_masked
-        #p_edges[valid_edges] = p_masked
         return r_masked, p_masked, valid_edges
-
-        # if self.edge_statistic == 'pearson':
-        #     r_masked, p_masked = pearson_correlation_with_pvalues(y, X, valid_edges=valid_edges)  # [B, p]
-        # elif self.edge_statistic == 'spearman':
-        #     r_masked, p_masked = spearman_correlation_with_pvalues(y, X, valid_edges=valid_edges)
-        # elif self.edge_statistic == 'pearson_partial':
-        #     r_masked, p_masked = semi_partial_correlation_pearson(y, X, covariates)
-        # elif self.edge_statistic == 'spearman_partial':
-        #     r_masked, p_masked = semi_partial_correlation_spearman(y, X, covariates)
-        # else:
-        #     raise NotImplementedError("Unsupported edge selection method")
-        #
-        # # Store masked correlations directly
-        # r_edges = r_masked
-        # p_edges = p_masked
-        #
-        # return r_edges, p_edges  # shape: [B, p]
-
-    # @staticmethod
-    # def edge_statistic_fn(Xb, yb, covb, edge_statistic: str = 'spearman', t_test_filter: bool = False):
-    #     n, p = Xb.shape
-    #     _, c = covb.shape
-    #
-    #     if t_test_filter:
-    #         _, p_values = one_sample_t_test(Xb.unsqueeze(0), 0)  # Output: [1, p]
-    #         valid_edges = p_values[0] < 0.05  # [p]
-    #     else:
-    #         valid_edges = torch.ones(p, dtype=torch.bool, device=cuda)
-    #
-    #     if edge_statistic == 'pearson':
-    #         r, pval = pearson_correlation_with_pvalues(yb.unsqueeze(0), Xb.unsqueeze(0))
-    #     elif edge_statistic == 'spearman':
-    #         r, pval = spearman_correlation_with_pvalues(yb.unsqueeze(0), Xb.unsqueeze(0))
-    #     elif edge_statistic == 'pearson_partial':
-    #         r, pval = semi_partial_correlation_pearson(yb.unsqueeze(0), Xb.unsqueeze(0), covb.unsqueeze(0))
-    #     elif edge_statistic == 'spearman_partial':
-    #         r, pval = semi_partial_correlation_spearman(yb.unsqueeze(0), Xb.unsqueeze(0), covb.unsqueeze(0))
-    #     else:
-    #         raise NotImplementedError("Unsupported edge selection method")
-    #
-    #     return r.squeeze(0), pval.squeeze(0)  # [p], [p]
 
 
 class UnivariateEdgeSelection(BaseEstimator):
