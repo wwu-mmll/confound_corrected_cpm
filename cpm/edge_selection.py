@@ -232,13 +232,17 @@ class UnivariateEdgeSelection(BaseEstimator):
     def __init__(self,
                  edge_statistic: str = 'spearman',
                  t_test_filter: bool = False,
-                 edge_selection: list = None,
+                 edge_selection: Union[list, None, PThreshold] = None,
                  ):
         self.r_edges = None
         self.p_edges = None
         self.t_test_filter = t_test_filter
         self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic, t_test_filter=t_test_filter)
         self.edge_selection = edge_selection
+        if isinstance(edge_selection, (list, tuple)):
+            self.edge_selection = edge_selection
+        else:
+            self.edge_selection = [edge_selection]
         self.param_grid = self._generate_config_grid()
 
     def _generate_config_grid(self):
