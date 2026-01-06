@@ -3,10 +3,10 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from cpm.simulation.simulate_data import simulate_regression_data_scenarios
-from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
-from cpm.cpm_analysis import CPMRegression
-from cpm.utils import check_data
+from simulation.simulate_simple import simulate_regression_data_scenarios
+from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm.cpm_analysis import CPMRegression
+from cccpm.utils import check_data
 from sklearn.model_selection import KFold, ShuffleSplit
 
 

@@ -6,9 +6,9 @@ import pingouin as pg
 
 from scipy.stats import pearsonr, spearmanr
 
-from cpm.simulation.simulate_data import simulate_regression_data
-from cpm.edge_selection import (pearson_correlation_with_pvalues, spearman_correlation_with_pvalues,
-                                semi_partial_correlation_pearson)
+from simulation.simulate_simple import simulate_regression_data
+from cccpm.edge_selection import (pearson_correlation_with_pvalues, spearman_correlation_with_pvalues,
+                                  semi_partial_correlation_pearson)
 
 
 class TestEdgeStatistics(unittest.TestCase):

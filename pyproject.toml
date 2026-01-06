@@ -1,14 +1,14 @@
 # pyproject.toml
 
 [tool.poetry]
-name = "confound_corrected_cpm"
+name = "cccpm"
 version = "0.1.0"
-description = "Confound-corrected Connectome-based Predictive Modeling Python Package"
+description = "Confound-Corrected Connectome-based Predictive Modeling Python Package"
 authors = [
     "Nils Winter <nils.r.winter@uni-muenster.de>",
     "MMLL <nils.r.winter@uni-muenster.de>"
 ]
-packages = [{ include = "cpm" }]
+packages = [{ include = "cccpm" }]
 license = "MIT"
 readme = "README.md"
 
@@ -29,6 +29,7 @@ arakawa = "*"
 netplotbrain = "*"
 networkx = "*"
 scikit-image = "*"
+tqdm = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

@@ -101,7 +101,7 @@ def extract_edges(matrix, keep_only_non_zero_edges: bool = False):
 def plot_netplotbrain(results_folder, selected_metric, atlas_labels):
     edges = np.load(os.path.join(results_folder, f"{selected_metric}.npy"))
     if (selected_metric == "sig_stability_positive_edges") or (selected_metric == "sig_stability_negative_edges"):
-        threshold = 0.05
+        threshold = 0.01
         corr_transformed = np.where(np.abs(edges) > threshold, 0, edges)
         corr_transformed = np.where(np.abs(edges) <= threshold, 1, corr_transformed)
         edges = corr_transformed

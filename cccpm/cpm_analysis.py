@@ -2,21 +2,22 @@ import os
 import logging
 import shutil
 
-from typing import Union
+from typing import Union, Type
+from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
+from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold, RepeatedKFold, StratifiedKFold
 from sklearn.linear_model import LinearRegression
 
-from cpm.fold import run_inner_folds
-from cpm.logging import setup_logging
-from cpm.models import LinearCPMModel
-from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
-from cpm.results_manager import ResultsManager, PermutationManager
-from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
-from cpm.scoring import score_regression_models
-from cpm.reporting import HTMLReporter
+from cccpm.fold import run_inner_folds
+from cccpm.logging import setup_logging
+from cccpm.more_models import BaseCPMModel, LinearCPMModel
+from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm.results_manager import ResultsManager, PermutationManager
+from cccpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
+from cccpm.scoring import score_regression_models
+from cccpm.reporting import HTMLReporter
 
 
 class CPMRegression:
@@ -25,8 +26,9 @@ class CPMRegression:
     """
     def __init__(self,
                  results_directory: str,
-                 cv: Union[BaseCrossValidator, BaseShuffleSplit] = KFold(n_splits=10, shuffle=True, random_state=42),
-                 inner_cv: Union[BaseCrossValidator, BaseShuffleSplit] = None,
+                 cpm_model: Type[BaseCPMModel] = LinearCPMModel,
+                 cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = KFold(n_splits=10, shuffle=True, random_state=42),
+                 inner_cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
                      edge_statistic='pearson',
                      edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
@@ -58,6 +60,7 @@ class CPMRegression:
             CSV file containing atlas and regions labels.
         """
         self.results_directory = results_directory
+        self.cpm_model = cpm_model
         self.cv = cv
         self.inner_cv = inner_cv
         self.edge_selection = edge_selection
@@ -87,6 +90,9 @@ class CPMRegression:
         # check and copy atlas labels file
         self.atlas_labels = self._validate_and_copy_atlas_file(atlas_labels)
 
+        # results are saved to the results manager instance
+        self.results_manager = None
+
     def _log_analysis_details(self):
         """
         Log important information about the analysis in a structured format.
@@ -94,6 +100,7 @@ class CPMRegression:
         self.logger.info("Starting CPM Regression Analysis")
         self.logger.info("="*50)
         self.logger.info(f"Results Directory:       {self.results_directory}")
+        self.logger.info(f"CPM Model:               {self.cpm_model.name}")
         self.logger.info(f"Outer CV strategy:       {self.cv}")
         self.logger.info(f"Inner CV strategy:       {self.inner_cv}")
         self.logger.info(f"Edge selection method:   {self.edge_selection}")
@@ -166,8 +173,8 @@ class CPMRegression:
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        for perm_id in range(1, self.n_permutations + 1):
-            self.logger.debug(f"Permutation run {perm_id}")
+        for perm_id in tqdm(range(1, self.n_permutations + 1), desc="Permutation runs", unit="run",
+                            total=self.n_permutations):
             y = np.random.permutation(y)
             self._single_run(X=X, y=y, covariates=covariates, perm_run=perm_id)
 
@@ -200,10 +207,17 @@ class CPMRegression:
         results_manager = ResultsManager(output_dir=self.results_directory, perm_run=perm_run,
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1])
 
-        for outer_fold, (train, test) in enumerate(self.cv.split(X, y)):
-            if not perm_run:
-                self.logger.debug(f"Running fold {outer_fold + 1}/{self.cv.get_n_splits()}")
-
+        iterator = (
+            tqdm(
+                enumerate(self.cv.split(X, y)),
+                total=self.cv.get_n_splits(),
+                desc="Running outer folds",
+                unit="fold"
+            )
+            if not perm_run else
+            enumerate(self.cv.split(X, y))
+        )
+        for outer_fold, (train, test) in iterator:
             # split according to single outer fold
             X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 
@@ -219,13 +233,12 @@ class CPMRegression:
 
             # if the user specified an inner cross-validation, estimate models witin inner loop
             if self.inner_cv:
-                best_params, stability_edges = run_inner_folds(X=X_train, y=y_train, covariates=cov_train,
+                best_params, stability_edges = run_inner_folds(cpm_model=self.cpm_model,
+                                                               X=X_train, y=y_train, covariates=cov_train,
                                                                inner_cv=self.inner_cv,
                                                                edge_selection=self.edge_selection,
                                                                results_directory=os.path.join(results_manager.results_directory, 'folds', str(outer_fold)),
                                                                perm_run=perm_run)
-                if not perm_run:
-                    self.logger.info(f"Best hyperparameters: {best_params}")
             else:
                 best_params = self.edge_selection.param_grid[0]
 
@@ -239,7 +252,7 @@ class CPMRegression:
             results_manager.store_edges(edges=edges, fold=outer_fold)
 
             # Build model and make predictions
-            model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
+            model = self.cpm_model(edges=edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
             network_strengths = model.get_network_strengths(X_test, cov_test)
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
@@ -256,3 +269,4 @@ class CPMRegression:
             self.logger.info(results_manager.agg_results.round(4).to_string())
             results_manager.save_predictions()
             results_manager.save_network_strengths()
+            self.results_manager = results_manager

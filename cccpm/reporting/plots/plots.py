@@ -331,7 +331,7 @@ def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
             ax.tick_params(axis='both', labelsize=6)
             sns.despine(ax=ax)
 
-    plt.tight_layout()
+    #plt.tight_layout()
     fig.savefig(output_path, dpi=600)
     plt.close(fig)
     return output_path

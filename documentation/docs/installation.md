@@ -36,8 +36,9 @@ pip install -e .
 Verify the installation:
 
 ```python
-import cpm
-print(cpm.__version__)
+import cccpm
+
+print(cccpm.__version__)
 ```
 
 You should see the package version printed without errors.

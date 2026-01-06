@@ -45,6 +45,7 @@ class LinearCPMModel:
     edges : dict
         Dictionary containing indices of edges for 'positive' and 'negative' networks.
     """
+    name = "LinearCPMModel"
     def __init__(self, edges):
         """
         Initialize the LinearCPMModel.

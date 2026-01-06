@@ -8,9 +8,9 @@ import numpy as np
 
 from glob import glob
 
-from cpm.models import NetworkDict, ModelDict
-from cpm.utils import vector_to_upper_triangular_matrix
-from cpm.scoring import regression_metrics
+from cccpm.models import NetworkDict, ModelDict
+from cccpm.utils import vector_to_upper_triangular_matrix
+from cccpm.scoring import regression_metrics
 
 
 class ResultsManager:
@@ -204,9 +204,8 @@ class ResultsManager:
         Save predictions to CSV.
         """
         df = self.cv_predictions.copy()
-        if 'sample_index' in df.columns:
-            df.sort_values(by='sample_index', inplace=True)
-            df.drop(columns='sample_index', inplace=True)
+        df.sort_values(by='sample_index', inplace=True)
+        #df.drop(columns='sample_index', inplace=True)
         df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
         # self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
 
@@ -350,7 +349,7 @@ class PermutationManager:
         true_stability_positive = np.load(os.path.join(results_directory, 'stability_positive_edges.npy'))
         true_stability_negative = np.load(os.path.join(results_directory, 'stability_negative_edges.npy'))
 
-        use_fdr = False
+        use_fdr = True
         if use_fdr:
             calculate_p_values_edges = PermutationManager.calculate_p_values_edges_fdr
         else:
@@ -450,10 +449,11 @@ class PermutationManager:
         # Compute empirical p-values for each edge
         true_values = true_stability[triu_indices]
         p_vals = (np.sum(perm_values >= true_values[None, :], axis=0) + 1) / (n_permutations + 1)
+        #p_vals = (np.sum(perm_values >= 1, axis=0) + 1) / 1000
 
         # Apply Benjamini-Yekutieli correction
-        _, p_vals_corrected, _, _ = multipletests(p_vals, alpha=0.05, method='fdr_by')
-
+        #_, p_vals_corrected, _, _ = multipletests(p_vals, alpha=0.05, method='fdr_by')
+        p_vals_corrected = p_vals
         # Fill into symmetric matrix
         sig_stability = np.ones_like(true_stability)
         for idx, (i, j) in enumerate(zip(*triu_indices)):
