@@ -3,13 +3,15 @@ import os
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 import arakawa as ar
+import matplotlib.pyplot as plt
 
-from cpm.reporting.plots.plots import boxplot_model_performance
-from cpm.reporting.plots.plots import (scatter_plot, scatter_plot_covariates_model, scatter_plot_network_strengths,
-                                       histograms_network_strengths)
-from cpm.reporting.plots.cpm_chord_plot import plot_netplotbrain, extract_edges
-from cpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
+from cccpm.reporting.plots.plots import boxplot_model_performance
+from cccpm.reporting.plots.plots import (scatter_plot, scatter_plot_covariates_model, scatter_plot_network_strengths,
+                                         histograms_network_strengths)
+from cccpm.reporting.plots.cpm_chord_plot import plot_netplotbrain, extract_edges
+from cccpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
 
 
 class HTMLReporter:
@@ -78,6 +80,7 @@ class HTMLReporter:
         report = ar.Report(blocks=[main_page])
         report.save(os.path.join(self.results_directory, 'report.html'),
                     open=False, formatting=ar.Formatting(width=ar.Width.FULL, accent_color="orange"))
+        plt.close('all')
         return
 
     def generate_hyperparameters_page(self):
@@ -316,6 +319,10 @@ class HTMLReporter:
 
         df.sort_values(by=['Stability Significance', 'Stability'], inplace=True, ascending=[True, False])
         df.set_index(['Region A', 'Region B'], inplace=True)
+        if df.empty:
+            first_col = df.columns[0]
+            row = {col: ("No significantly stable edges." if col == first_col else np.nan) for col in df.columns}
+            df = pd.DataFrame([row])
         return df
 
     def generate_target_cov_features_insights_page(self):

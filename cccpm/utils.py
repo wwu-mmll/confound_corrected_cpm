@@ -14,7 +14,7 @@ import warnings
 
 import logging
 
-from cpm.reporting.plots.plots import pairplot_flexible
+from cccpm.reporting.plots.plots import pairplot_flexible
 
 
 logger = logging.getLogger(__name__)

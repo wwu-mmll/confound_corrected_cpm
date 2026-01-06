@@ -1,8 +1,8 @@
-from sklearn.model_selection import KFold, ShuffleSplit, RepeatedKFold
+from sklearn.model_selection import RepeatedKFold
 
-from cpm import CPMRegression
-from cpm.simulate_data import simulate_regression_data_scenarios
-from cpm.edge_selection import PThreshold, UnivariateEdgeSelection
+from cccpm import CPMRegression
+from simulation.simulate_simple import simulate_regression_data_scenarios
+from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 
 link_types = ['no_link',
@@ -28,5 +28,5 @@ for link in link_types:
                             n_permutations=2)
         cpm.run(X=X, y=y, covariates=covariates)
 
-        #cpm._calculate_permutation_results('./tmp/example_simulated_data2')
+        #cccpm._calculate_permutation_results('./tmp/example_simulated_data2')
 

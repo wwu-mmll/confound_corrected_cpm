@@ -73,6 +73,7 @@ def get_residuals(X, Z):
 
 
 def semi_partial_correlation(x, Y, Z, rank=False):
+    # ToDo: THIS IS A PARTIAL CORRELATION, NOT SEMI-PARTIAL
     if rank:
         x = rankdata(x)
         Y = rankdata(Y, axis=0)
@@ -207,11 +208,17 @@ class EdgeStatistic(BaseEstimator):
                       y: Union[pd.Series, pd.DataFrame, np.ndarray],
                       covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
         r_edges, p_edges = np.zeros(X.shape[1]), np.ones(X.shape[1])
-        if self.t_test_filter:
-            _, p_values = one_sample_t_test(X, 0)
-            valid_edges = p_values < 0.05
-        else:
-            valid_edges = np.bool(np.ones(X.shape[1]))
+        #if self.t_test_filter:
+        #    _, p_values = one_sample_t_test(X, 0)
+        #    valid_edges = p_values < 0.05
+        #else:
+        #    valid_edges = np.bool(np.ones(X.shape[1]))
+
+        from sklearn.feature_selection import VarianceThreshold
+        selector = VarianceThreshold(threshold=0.01)
+        selector.fit(X)
+        valid_edges = selector.get_support()
+
 
         if self.edge_statistic == 'pearson':
             r_edges_masked, p_edges_masked = pearson_correlation_with_pvalues(y, X[:, valid_edges])
@@ -232,13 +239,17 @@ class UnivariateEdgeSelection(BaseEstimator):
     def __init__(self,
                  edge_statistic: str = 'spearman',
                  t_test_filter: bool = False,
-                 edge_selection: list = None,
+                 edge_selection: Union[list, None, PThreshold] = None,
                  ):
         self.r_edges = None
         self.p_edges = None
         self.t_test_filter = t_test_filter
         self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic, t_test_filter=t_test_filter)
         self.edge_selection = edge_selection
+        if isinstance(edge_selection, (list, tuple)):
+            self.edge_selection = edge_selection
+        else:
+            self.edge_selection = [edge_selection]
         self.param_grid = self._generate_config_grid()
 
     def _generate_config_grid(self):
