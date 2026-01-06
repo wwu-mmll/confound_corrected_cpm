@@ -1,3 +1,3 @@
 # CPM Regression
 
-::: cpm.cpm_analysis
+::: cccpm.cpm_analysis

@@ -1,3 +1,3 @@
 # Predictive Models
 
-::: cpm.models
+::: cccpm.models
