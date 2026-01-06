@@ -30,6 +30,7 @@ netplotbrain = "*"
 networkx = "*"
 scikit-image = "*"
 tqdm = "*"
+pygam = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
