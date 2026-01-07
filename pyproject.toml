@@ -22,9 +22,16 @@ pandas = "*"
 scikit-learn = ">=1.6"
 nilearn = "*"
 arakawa = "*"
-netplotbrain = "*"
 tqdm = "*"
 pygam = "*"
+
+# the following packages are requirements for netplotbrain
+netplotbrain = "*"
+networkx = "*"
+bleach = "*"
+tinycss2 = "*"
+plotly = "*"
+scikit-image = "*"
 
 [tool.poetry.group.dev.dependencies]
 pingouin = "*"
