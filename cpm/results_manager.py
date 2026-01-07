@@ -6,6 +6,7 @@ from typing import Union
 import numpy as np
 
 from glob import glob
+import torch
 
 from cpm.models import NetworkDict, ModelDict
 from cpm.utils import vector_to_upper_triangular_matrix
@@ -70,12 +71,25 @@ class ResultsManager:
                     'negative': np.zeros((n_folds, n_features, n_params))}
 
     def store_edges(self, edges: dict, fold: int, param_id: int = None):
-        if param_id is None:
-            self.cv_edges['positive'][fold, edges['positive']] = 1
-            self.cv_edges['negative'][fold, edges['negative']] = 1
+        # Convert to tensor on CPU if not already
+        pos_edges = edges['positive']
+        if not isinstance(pos_edges, torch.Tensor):
+            pos_edges = torch.tensor(pos_edges, dtype=torch.long)
         else:
-            self.cv_edges['positive'][fold, edges['positive'], param_id] = 1
-            self.cv_edges['negative'][fold, edges['negative'], param_id] = 1
+            pos_edges = pos_edges.cpu().long()  # <-- move to CPU
+
+        neg_edges = edges['negative']
+        if not isinstance(neg_edges, torch.Tensor):
+            neg_edges = torch.tensor(neg_edges, dtype=torch.long)
+        else:
+            neg_edges = neg_edges.cpu().long()  # <-- move to CPU
+
+        if param_id is None:
+            self.cv_edges['positive'][fold, pos_edges] = 1
+            self.cv_edges['negative'][fold, neg_edges] = 1
+        else:
+            self.cv_edges['positive'][fold, pos_edges, param_id] = 1
+            self.cv_edges['negative'][fold, neg_edges, param_id] = 1
 
     def calculate_edge_stability(self, write: bool = True, best_param_id: int = None):
         """
@@ -139,51 +153,64 @@ class ResultsManager:
         return
 
     def store_predictions(self, y_pred, y_true, params, fold, param_id, test_indices):
-        """
-        Update predictions DataFrame with new predictions and parameters.
 
-        :param y_pred: Predicted values.
-        :param y_true: True values.
-        :param params: Best hyperparameters from inner cross-validation.
-        :param fold: Current fold number.
-        :return: Updated predictions DataFrame.
-        """
-        #preds = (pd.DataFrame.from_dict(y_pred).stack().explode().reset_index().rename(
-        #    {'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1).set_index(['network', 'model']))
+        # Step 1 — flatten dict into rows
         preds = (
             pd.DataFrame.from_dict(y_pred)
             .stack()
-            .explode()
             .reset_index()
             .rename({'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1)
-            .set_index(['network', 'model'])
         )
+
+        # Step 2 — explode BEFORE setting index
+        preds = preds.explode('y_pred')
+
+        # Now we can safely set index
+        preds = preds.set_index(['network', 'model'])
+
+        # Step 3 — compute expected rows
         n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
+        n_samples = len(y_true)
+
+        # Sanity check (optional but recommended)
+        assert preds.shape[0] == n_network_model * n_samples, (
+            f"Expected {n_network_model * n_samples} rows but got {preds.shape[0]}"
+        )
+
+        # Step 4 — assign columns
         preds['y_true'] = np.tile(y_true, n_network_model)
-        preds['params'] = [params] * y_true.shape[0] * n_network_model
-        preds['fold'] = [fold] * y_true.shape[0] * n_network_model
-        preds['param_id'] = [param_id] * y_true.shape[0] * n_network_model
-        preds['sample_index'] = np.tile(test_indices, n_network_model)  # include indices
+        preds['params'] = [params] * preds.shape[0]
+        preds['fold'] = fold
+        preds['param_id'] = param_id
+        preds['sample_index'] = np.tile(test_indices, n_network_model)
+
+        # Store
         self.cv_predictions = pd.concat([self.cv_predictions, preds], axis=0)
-        return
 
     def store_network_strengths(self, network_strengths, y_true, fold):
-        dfs = list()
+        dfs = []
         models = ['connectome', 'residuals']
         networks = ['positive', 'negative']
+
         for model in models:
             for network in networks:
-                df = pd.DataFrame()
-                df['y_true'] = y_true
-                df['network_strength'] = np.squeeze(network_strengths[model][network])
-                df['model'] = [model] * network_strengths[model][network].shape[0]
-                df['fold'] = [fold] * network_strengths[model][network].shape[0]
-                df['network'] = [network] * network_strengths[model][network].shape[0]
+                strength_values = np.squeeze(network_strengths[model][network].cpu().numpy())
+                n_samples = strength_values.shape[0]
+
+                y_true_trimmed = np.asarray(y_true).flatten()[:n_samples]
+
+                df = pd.DataFrame({
+                    'y_true': y_true_trimmed,
+                    'network_strength': strength_values,
+                    'model': [model] * n_samples,
+                    'fold': [fold] * n_samples,
+                    'network': [network] * n_samples
+                })
+
                 dfs.append(df)
 
-        df = pd.concat(dfs, axis=0)
-        self.cv_network_strengths = pd.concat([self.cv_network_strengths, df], axis=0)
-        return
+        df_all = pd.concat(dfs, axis=0)
+        self.cv_network_strengths = pd.concat([self.cv_network_strengths, df_all], axis=0)
 
     @staticmethod
     def load_cv_results(folder):
@@ -198,7 +225,7 @@ class ResultsManager:
         results.columns = results.columns.droplevel(1)
         return results
 
-    def save_predictions(self):  # update save function to sort by index prior to saving
+    def save_predictions(self):
         """
         Save predictions to CSV.
         """
