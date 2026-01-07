@@ -12,14 +12,14 @@ import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
 
 #from cccpm import edge_selection
-from cpm.logging import setup_logging
-from cpm.models import LinearCPMModel
-from cpm.edge_selection import UnivariateEdgeSelection, PThreshold, EdgeStatistic, BaseEdgeSelector
-from cpm.results_manager import ResultsManager, PermutationManager
-from cpm.utils import check_data, impute_missing_values, select_stable_edges, generate_data_insights
-from cpm.scoring import score_regression_models
-from cpm.fold import run_inner_folds_torch
-from cpm.reporting import HTMLReporter
+from cccpm.logging import setup_logging
+from cccpm.models import LinearCPMModel
+from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold, EdgeStatistic, BaseEdgeSelector
+from cccpm.results_manager import ResultsManager, PermutationManager
+from cccpm.utils import check_data, impute_missing_values, select_stable_edges, generate_data_insights
+from cccpm.scoring import score_regression_models
+from cccpm.fold import run_inner_folds_torch
+from cccpm.reporting import HTMLReporter
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

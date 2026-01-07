@@ -8,9 +8,9 @@ import numpy as np
 from glob import glob
 import torch
 
-from cpm.models import NetworkDict, ModelDict
-from cpm.utils import vector_to_upper_triangular_matrix
-from cpm.scoring import regression_metrics
+from cccpm.models import NetworkDict, ModelDict
+from cccpm.utils import vector_to_upper_triangular_matrix
+from cccpm.scoring import regression_metrics
 
 
 class ResultsManager:

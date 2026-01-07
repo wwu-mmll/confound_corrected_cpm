@@ -1,10 +1,10 @@
 import functorch
 
-from cpm.models import LinearCPMModel
-from cpm.utils import train_test_split
-from cpm.scoring import score_regression_models
-from cpm.results_manager import ResultsManager
-from cpm.edge_selection import BaseEdgeSelector, EdgeStatistic
+from cccpm.models import LinearCPMModel
+from cccpm.utils import train_test_split
+from cccpm.scoring import score_regression_models
+from cccpm.results_manager import ResultsManager
+from cccpm.edge_selection import BaseEdgeSelector, EdgeStatistic
 
 import torch
 
