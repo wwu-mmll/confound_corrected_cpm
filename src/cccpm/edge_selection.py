@@ -1,8 +1,12 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import ttest_1samp, t, rankdata
 from typing import Union
 
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
 import statsmodels.stats.multitest as multitest
+from warnings import filterwarnings
 
 import numpy as np
 import torch
@@ -134,39 +138,10 @@ def compute_correlation_and_pvalues(x, Y, rank=False):
 
     correlations = corr_numerator / corr_denominator
 
+    # Calculate t-statistics and p-values
     _, p_values = compute_t_and_p_values(correlations, n - 2)
 
     return correlations, p_values
-
-
-    # B, n, p = Y.shape
-    # x = x.to(cuda)
-    # Y = Y.to(cuda)
-    #
-    # if rank:
-    #     x = x.argsort(dim=1).argsort(dim=1).float().to(cuda)
-    #     Y = Y.argsort(dim=1).argsort(dim=1).float().to(cuda)
-    #
-    # # Mean-centering
-    # x_centered = x - x.mean(dim=1, keepdim=True)  # [B, n]
-    # Y_centered = Y - Y.mean(dim=1, keepdim=True)  # [B, n, p]
-    #
-    # # Numerator
-    # corr_numerator = torch.einsum('bnp,bn->bp', Y_centered, x_centered)  # [B, p]
-    # #corr_numerator = (Y_centered * x_centered.unsqueeze(2)).sum(dim=1)  # same but slower
-    #
-    # # Denominator
-    # x_sq = x_centered.pow(2).sum(dim=1).unsqueeze(1)  # [B, 1]
-    # Y_sq = Y_centered.pow(2).sum(dim=1)  # [B, p]
-    # corr_denominator = torch.sqrt(x_sq * Y_sq + 1e-8)  # [B, p]
-    #
-    # correlations = corr_numerator / corr_denominator  # [B, p]
-    #
-    # # p-value calculation (delegated)
-    # dof = n - 2
-    # _, p_values = compute_t_and_p_values(correlations, dof)
-    #
-    #return correlations, p_values
 
 
 def get_residuals(X, Z):
@@ -178,6 +153,7 @@ def get_residuals(X, Z):
 
 
 def semi_partial_correlation(x, Y, Z, rank=False):
+    # ToDo: THIS IS A PARTIAL CORRELATION, NOT SEMI-PARTIAL
     if rank:
         x = torch_rankdata(x)
         Y = torch_rankdata(Y, axis=0)
@@ -338,14 +314,21 @@ class EdgeStatistic(BaseEstimator):
         else:
             valid_edges = torch.ones(X.shape[1], dtype=torch.bool, device=X.device)
 
+        # ToDo: alternatively, use variance threshold
+        #from sklearn.feature_selection import VarianceThreshold
+        #selector = VarianceThreshold(threshold=0.01)
+        #selector.fit(X)
+        #valid_edges = selector.get_support()
+
+        # ToDo: check order of X, y, z in these functions (something's messed up possibly)
         if self.edge_statistic == 'pearson':
-            r_masked, p_masked = pearson_correlation_with_pvalues(X[:, valid_edges], y)
+            r_masked, p_masked = pearson_correlation_with_pvalues(y, X[:, valid_edges])
         elif self.edge_statistic == 'spearman':
-            r_masked, p_masked = spearman_correlation_with_pvalues(X[:, valid_edges], y)
+            r_masked, p_masked = spearman_correlation_with_pvalues(y, X[:, valid_edges])
         elif self.edge_statistic == 'pearson_partial':
-            r_masked, p_masked = semi_partial_correlation_pearson(X[:, valid_edges], y, covariates)
+            r_masked, p_masked = semi_partial_correlation_pearson(y, X[:, valid_edges], covariates)
         elif self.edge_statistic == 'spearman_partial':
-            r_masked, p_masked = semi_partial_correlation_spearman(X[:, valid_edges], y, covariates)
+            r_masked, p_masked = semi_partial_correlation_spearman(y, X[:, valid_edges], covariates)
         else:
             raise NotImplementedError("Unsupported edge selection method")
 
@@ -356,7 +339,7 @@ class UnivariateEdgeSelection(BaseEstimator):
     def __init__(self,
                  edge_statistic: str = 'spearman',
                  t_test_filter: bool = False,
-                 edge_selection: list = None,
+                 edge_selection: Union[list, None, PThreshold] = None,
                  ):
         self.r_edges = None
         self.p_edges = None
@@ -364,6 +347,10 @@ class UnivariateEdgeSelection(BaseEstimator):
         self.t_test_filter = t_test_filter
         self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic, t_test_filter=t_test_filter)
         self.edge_selection = edge_selection
+        if isinstance(edge_selection, (list, tuple)):
+            self.edge_selection = edge_selection
+        else:
+            self.edge_selection = [edge_selection]
         self.param_grid = self._generate_config_grid()
 
     def _generate_config_grid(self):

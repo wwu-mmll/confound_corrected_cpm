@@ -66,7 +66,38 @@ class TorchLinearRegression:
 
 
 class LinearCPMModel:
+    """
+    Linear Connectome-based Predictive Modeling (CPM) implementation.
+
+    This class implements a linear CPM model, allowing for fitting and prediction
+    based on connectome data, covariates, and residuals.
+
+    Attributes
+    ----------
+    models : ModelDict
+        A dictionary containing the fitted models for different networks and data types
+        (connectome, covariates, residuals, and full model).
+    models_residuals : dict
+        A dictionary storing linear regression models used to calculate residuals
+        for connectome data, controlling for covariates.
+    edges : dict
+        A dictionary defining the edges (features) used for each network (e.g., 'positive', 'negative').
+
+    Parameters
+    ----------
+    edges : dict
+        Dictionary containing indices of edges for 'positive' and 'negative' networks.
+    """
+    name = "LinearCPMModel"
     def __init__(self, device='cuda'):
+        """
+        Initialize the LinearCPMModel.
+
+        Parameters
+        ----------
+        edges : dict
+            Dictionary containing indices of edges for 'positive' and 'negative' networks.
+        """
         self.models = ModelDict()
         self.models_residuals = {}
         self.device = torch.device(device)
@@ -80,21 +111,45 @@ class LinearCPMModel:
 
     def fit(self, X, y, covariates, pos_edges: torch.Tensor, neg_edges: torch.Tensor):
         """
+        Fit the CPM model.
+
+        This method fits multiple linear regression models for the connectome, covariates,
+        residuals, and full model using the provided data.
+
         vmap-safe CPM fit.
         X:          [n, P]
         y:          [n]
         covariates: [n, C]
         pos_edges:  [P] boolean mask
         neg_edges:  [P] boolean mask
-        """
 
+        Parameters
+        ----------
+        X : numpy.ndarray
+            A 2D array of shape (n_samples, n_features) representing the connectome data.
+        y : numpy.ndarray
+            A 1D array of shape (n_samples,) representing the target variable.
+        covariates : numpy.ndarray
+            A 2D array of shape (n_samples, n_covariates) representing the covariates.
+
+        Returns
+        -------
+        LinearCPMModel
+            The fitted CPM model instance.
+        :param X:
+        :param y:
+        :param covariates:
+        :param pos_edges:
+        :param neg_edges:
+        :return:
+
+
+        """
         X = X.to(self.device)
         y = y.to(self.device)
         covariates = covariates.to(self.device)
-
         pos_mask = pos_edges.to(self.device).float()
         neg_mask = neg_edges.to(self.device).float()
-
         connectome = {}
         residuals = {}
 
@@ -135,13 +190,30 @@ class LinearCPMModel:
     def predict(self, X: torch.Tensor, covariates: torch.Tensor,
                 pos_edges: torch.Tensor, neg_edges: torch.Tensor):
         """
+        Predict using the fitted CPM model.
+
+        This method generates predictions for the target variable using the
+        connectome, covariates, residuals, and full models.
+
         vmap-compatible CPM prediction.
         X:          [n, P]
         covariates: [n, C]
         pos_edges:  [P] boolean mask of positive edges
         neg_edges:  [P] boolean mask of negative edges
-        """
 
+        Parameters
+        ----------
+        X : numpy.ndarray
+            A 2D array of shape (n_samples, n_features) representing the connectome data.
+        covariates : numpy.ndarray
+            A 2D array of shape (n_samples, n_covariates) representing the covariates.
+
+        Returns
+        -------
+        ModelDict
+            A dictionary containing predictions for each network and model type
+            (connectome, covariates, residuals, and full model).
+        """
         X = X.to(self.device)
         covariates = covariates.to(self.device)
 
@@ -203,22 +275,15 @@ class LinearCPMModel:
             connectome['positive'] = sum over pos_edges
             connectome['negative'] = sum over neg_edges
             residuals[...] = connectome[...] - model.predict(covariates)
-
-        Parameters
-        ----------
         X : [n, p] tensor
         covariates : [n, c] tensor
         pos_edges : LongTensor of indices
         neg_edges : LongTensor of indices
-
-        Returns
-        -------
         {
           "connectome": { "positive": ..., "negative": ... },
           "residuals": { "positive": ..., "negative": ... }
         }
         """
-
         X = X.to(self.device)
         covariates = covariates.to(self.device)
         pos_edges = pos_edges.to(self.device)
@@ -227,11 +292,9 @@ class LinearCPMModel:
         # --- network strengths ---
         conn_pos = X[:, pos_edges].sum(dim=1, keepdim=True)  # [n,1]
         conn_neg = X[:, neg_edges].sum(dim=1, keepdim=True)  # [n,1]
-
         # --- covariate regression residuals ---
         preds_pos = self.models_residuals["positive"].predict(covariates).unsqueeze(1)
         preds_neg = self.models_residuals["negative"].predict(covariates).unsqueeze(1)
-
         resid_pos = conn_pos - preds_pos
         resid_neg = conn_neg - preds_neg
 
@@ -245,4 +308,3 @@ class LinearCPMModel:
                 "negative": resid_neg,
             },
         }
-

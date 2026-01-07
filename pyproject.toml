@@ -1,35 +1,58 @@
-# pyproject.toml
-
 [tool.poetry]
-name = "confound_corrected_cpm"
-version = "0.1.0"
-description = "Confound-corrected Connectome-based Predictive Modeling Python Package"
+name = "cccpm"
+version = "0.1.1"
+description = "Confound-Corrected Connectome-based Predictive Modeling Python Package"
 authors = [
     "Nils Winter <nils.r.winter@uni-muenster.de>",
     "MMLL <nils.r.winter@uni-muenster.de>"
 ]
-packages = [{ include = "cpm" }]
 license = "MIT"
 readme = "README.md"
 
+packages = [
+    { include = "cccpm", from = "src" }
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["cccpm"]
+omit = [
+    "tests/*",
+    "examples/*",
+]
+
+[tool.coverage.paths]
+source = [
+    "src/cccpm",
+    "**/site-packages/cccpm"
+]
+
 [tool.poetry.dependencies]
-python = "<4.0,>=3.10"
+python = ">=3.10,<4.0"
 numpy = "*"
 pandas = "*"
-scikit-learn = "*"
-pingouin = "*"
+scikit-learn = ">=1.6"
 nilearn = "*"
-typer = "*"
-pytest = "*"
-pytest-cov = "*"
+arakawa = "*"
+tqdm = "*"
+pygam = "*"
+torch="*"
+
+# the following packages are requirements for netplotbrain
+netplotbrain = "*"
+networkx = "*"
 bleach = "*"
 tinycss2 = "*"
 plotly = "*"
-arakawa = "*"
-netplotbrain = "*"
-networkx = "*"
-torch="*"
 scikit-image = "*"
+
+[tool.poetry.group.dev.dependencies]
+pingouin = "*"
+pytest = "*"
+pytest-cov = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

@@ -8,8 +8,7 @@ from cccpm.edge_selection import BaseEdgeSelector, EdgeStatistic
 
 import torch
 
-
-def run_inner_folds(X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector, results_directory,
+def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector, results_directory,
                     perm_run):
     """
     Run inner cross-validation over all folds and hyperparameter configurations.
@@ -36,8 +35,8 @@ def run_inner_folds(X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector
         for param_id, config in enumerate(param_grid):
             edge_selection.set_params(**config)
             selected_edges = edge_selection.fit_transform(X_train, y_train, cov_train).return_selected_edges()
-            y_pred = LinearCPMModel(edges=selected_edges).fit(X_train, y_train, cov_train).predict(X_test, cov_test)
-            metrics = score_regression_models(y_true=y_test, y_pred_dict=y_pred)
+            y_pred = cpm_model(edges=selected_edges).fit(X_train, y_train, cov_train).predict(X_test, cov_test)
+            metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
             results_manager.store_edges(selected_edges, fold_id, param_id)
             results_manager.store_metrics(metrics=metrics, params=config, fold=fold_id, param_id=param_id)

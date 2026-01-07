@@ -51,15 +51,14 @@ def vector_to_upper_triangular_matrix(vector, include_diagonal=True):
     else:
         raise TypeError("Unsupported type")
 
-    for size in range(1, 1000):
-        expected = size * (size + 1) // 2 if include_diagonal else size * (size - 1) // 2
-        if expected == num_elements:
-            break
-    else:
-        raise ValueError(f"Invalid vector length for triangular matrix. Got {num_elements}, expected {expected}.")
+    # Calculate the size of the matrix from the vector length
+    size = int((np.sqrt(8 * vector.size + 1) - 1) / 2) + 1
+    if size * (size - 1) // 2 != vector.size:
+        raise ValueError("Vector size does not match the number of elements for a valid square matrix.")
 
     matrix = torch.zeros((size, size), device=device)
     offset = 0 if include_diagonal else 1
+    # Get the indices of the strictly upper triangular part
     row_idx, col_idx = torch.triu_indices(size, size, offset=offset, device=device)
     matrix[row_idx, col_idx] = vector.flatten() if vector.ndim > 1 else vector
     matrix[col_idx, row_idx] = matrix[row_idx, col_idx]
@@ -68,7 +67,17 @@ def vector_to_upper_triangular_matrix(vector, include_diagonal=True):
 
 def matrix_to_vector_3d(matrix_3d):
     """
-    matrix_3d: shape (n_samples, n, n)
+    Convert a 3D connectivity matrix to a 2D array of upper-triangular vectors.
+
+    Parameters
+    ----------
+    matrix_3d: np.ndarray
+        Input 3D array of shape (n_samples, n, n), where each 2D matrix is square.
+
+    Returns
+    -------
+    upper: np.ndarray
+        2D array of shape (n_samples, n*(n - 1)/2) containing strictly upper-triangular elements of each matrix.
     """
     n_samples, n, _ = matrix_3d.shape
     row_idx, col_idx = torch.triu_indices(n, n, offset=1, device=matrix_3d.device)
@@ -77,8 +86,14 @@ def matrix_to_vector_3d(matrix_3d):
 
 def vector_to_matrix_3d(vector_2d, shape):
     """
-    vector_2d: (n_samples, vector_length)
-    shape: (n_samples, n, n)
+    Convert a vector containing strictly upper triangular parts back to a 3D matrix.
+
+    Parameters:
+    vector_2d (np.ndarray): A 2D array where each row is a vector of the strictly upper triangular part of a 2D matrix.
+    shape (tuple): The shape of the original 3D matrix, (n_samples, n, n).
+
+    Returns:
+    np.ndarray: The reconstructed 3D matrix of shape (n_samples, n, n).
     """
     n_samples, n, _ = shape
     matrix_3d = torch.zeros((n_samples, n, n), device=vector_2d.device)

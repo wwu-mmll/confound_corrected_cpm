@@ -232,7 +232,7 @@ def boxplot_model_performance(
     df = df[df["model"].isin(models)]
 
     # Adjust figure size based on model count
-    height = 0.75 if models == ["increment"] else 2
+    height = 0.75 if len(models) == 1 else 2
     fig, ax = plt.subplots(figsize=(7, height))
 
     print(df.head())
@@ -273,9 +273,11 @@ def boxplot_model_performance(
     suffix = f"_{filename_suffix}" if filename_suffix else ""
     png_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.png")
     pdf_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.pdf")
+    svg_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.svg")
     fig.tight_layout(pad=0.2)
     fig.savefig(png_path, dpi=600, bbox_inches="tight")
     fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(svg_path, bbox_inches="tight")
 
     return png_path
 
@@ -337,7 +339,7 @@ def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
             ax.tick_params(axis='both', labelsize=6)
             sns.despine(ax=ax)
 
-    plt.tight_layout()
+    #plt.tight_layout()
     fig.savefig(output_path, dpi=600)
     plt.close(fig)
     return output_path
