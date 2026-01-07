@@ -28,5 +28,5 @@ for link in link_types:
                             n_permutations=2)
         cpm.run(X=X, y=y, covariates=covariates)
 
-        #cpm._calculate_permutation_results('./tmp/example_simulated_data2')
+        #cccpm._calculate_permutation_results('./tmp/example_simulated_data2')
 

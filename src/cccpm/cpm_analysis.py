@@ -11,7 +11,7 @@ import psutil
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
 
-#from cpm import edge_selection
+#from cccpm import edge_selection
 from cpm.logging import setup_logging
 from cpm.models import LinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold, EdgeStatistic, BaseEdgeSelector

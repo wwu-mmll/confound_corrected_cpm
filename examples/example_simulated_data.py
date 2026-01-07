@@ -26,4 +26,4 @@ cpm = CPMRegression(results_directory='./tmp/example_simulated_data',
                     select_stable_edges=False)
 
 cpm.run(X=X, y=y, covariates=covariates)
-#cpm.generate_html_report()
+#cccpm.generate_html_report()
