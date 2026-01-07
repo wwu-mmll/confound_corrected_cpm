@@ -32,7 +32,7 @@ markdown_extensions:
       use_pygments: true
   - pymdownx.inlinehilite
   - pymdownx.snippets:
-      base_path: "../"
+      base_path: ["."]
   - pymdownx.superfences
   - codehilite
   - admonition
@@ -45,7 +45,6 @@ nav:
 - Getting Started: 'getting_started.md'
 - Examples:
     - Simulated Data: 'examples/simulated_data.md'
-    - HCP: 'examples/human_connectome_project.md'
 - API:
     - CPM Regression: api/cpm_regression.md
     - Edge Selection: api/edge_selection.md
@@ -65,4 +64,4 @@ plugins:
             docstring_style: numpy
             show_source: False
           paths:
-            [.]
+            [src]
