@@ -5,7 +5,14 @@ import pandas as pd
 from cccpm.utils import (
     check_data,
     matrix_to_vector_3d,
-    get_variable_names
+    get_variable_names,
+    matrix_to_upper_triangular_vector,
+    vector_to_upper_triangular_matrix,
+    matrix_to_vector_3d,
+    vector_to_matrix_3d,
+    get_colors_from_colormap,
+    impute_missing_values,
+    select_stable_edges
 )
 
 # We create a local fixture for the specific small dataset used in these tests
@@ -37,6 +44,38 @@ def test_matrix_to_vector_3d():
     vec = matrix_to_vector_3d(mat)
     expected_dim = n * (n - 1) // 2
     assert vec.shape == (n_samples, expected_dim)
+
+
+def test_matrix_to_upper_triangular_vector_basic():
+    mat = np.array([
+        [0, 1, 2],
+        [1, 0, 3],
+        [2, 3, 0]
+    ])
+    vec = matrix_to_upper_triangular_vector(mat)
+    assert np.allclose(vec, np.array([1, 2, 3]))
+
+
+def test_matrix_to_upper_triangular_vector_invalid_shape():
+    with pytest.raises(ValueError):
+        matrix_to_upper_triangular_vector(np.zeros((3, 4)))
+
+
+def test_vector_to_upper_triangular_matrix_roundtrip():
+    mat = np.array([
+        [0, 1, 2],
+        [1, 0, 3],
+        [2, 3, 0]
+    ])
+    vec = matrix_to_upper_triangular_vector(mat)
+    mat_rec = vector_to_upper_triangular_matrix(vec)
+    assert np.allclose(mat, mat_rec)
+
+
+def test_vector_to_upper_triangular_matrix_invalid_length():
+    vec = np.arange(5)  # 5 fits no triangle number
+    with pytest.raises(ValueError):
+        vector_to_upper_triangular_matrix(vec)
 
 
 def test_accepts_3d_X(small_data_setup):
@@ -166,3 +205,43 @@ def test_get_variable_names_with_array_y_and_df_covariates():
     assert X_names == ['feature_0']
     assert y_name == 'target'
     assert cov_names == ['cov_only']
+
+
+def test_impute_missing_values_basic():
+    X_train = np.array([[1.0, np.nan], [3.0, 4.0]])
+    X_test = np.array([[np.nan, 2.0]])
+    cov_train = np.array([[np.nan], [2.0]])
+    cov_test = np.array([[1.0]])
+
+    Xt, Xv, Ct, Cv = impute_missing_values(
+        X_train, X_test, cov_train, cov_test
+    )
+
+    assert not np.isnan(Xt).any()
+    assert not np.isnan(Xv).any()
+    assert not np.isnan(Ct).any()
+    assert not np.isnan(Cv).any()
+
+
+def test_select_stable_edges_basic():
+    stability = {
+        'positive': np.array([0.1, 0.8, 0.6]),
+        'negative': np.array([0.9, 0.2, 0.7])
+    }
+
+    selected = select_stable_edges(stability, stability_threshold=0.65)
+
+    assert np.array_equal(selected['positive'], np.array([1]))
+    assert np.array_equal(selected['negative'], np.array([0, 2]))
+
+
+def test_select_stable_edges_empty():
+    stability = {
+        'positive': np.array([0.1, 0.2]),
+        'negative': np.array([0.3, 0.4])
+    }
+
+    selected = select_stable_edges(stability, stability_threshold=0.9)
+
+    assert selected['positive'].size == 0
+    assert selected['negative'].size == 0
