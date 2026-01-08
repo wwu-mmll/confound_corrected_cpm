@@ -3,6 +3,8 @@ import logging
 import shutil
 
 from typing import Union, Type
+
+import torch
 from tqdm import tqdm
 
 import numpy as np
@@ -169,14 +171,19 @@ class CPMRegression:
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
 
         # Estimate models on actual data
-        self._single_run(X=X, y=y, covariates=covariates, perm_run=0)
+        #self._single_run(X=X, y=y, covariates=covariates, perm_run=0)
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        for perm_id in tqdm(range(1, self.n_permutations + 1), desc="Permutation runs", unit="run",
-                            total=self.n_permutations):
-            y = np.random.permutation(y)
-            self._single_run(X=X, y=y, covariates=covariates, perm_run=perm_id)
+        self.gpu = True
+        if self.gpu:
+            y = np.random.permutation(np.tile(y, (self.n_permutations, 1))).transpose()
+            self._single_run(X=X, y=y, covariates=covariates)
+        else:
+            for perm_id in tqdm(range(1, self.n_permutations + 1), desc="Permutation runs", unit="run",
+                                total=self.n_permutations):
+                y = np.random.permutation(y)
+                self._single_run(X=X, y=y, covariates=covariates, perm_run=perm_id)
 
         if self.n_permutations > 0:
             PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
@@ -191,9 +198,9 @@ class CPMRegression:
         reporter.generate_html_report()
 
     def _single_run(self,
-                    X: Union[pd.DataFrame, np.ndarray],
-                    y: Union[pd.Series, pd.DataFrame, np.ndarray],
-                    covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
+                    X: torch.Tensor,
+                    y: torch.Tensor,
+                    covariates: torch.Tensor,
                     perm_run: int = 0):
         """
         Perform an estimation run (either real or permuted data). Includes outer cross-validation loop. For permutation
@@ -209,13 +216,13 @@ class CPMRegression:
 
         iterator = (
             tqdm(
-                enumerate(self.cv.split(X, y)),
+                enumerate(self.cv.split(X, y[:, 0])),
                 total=self.cv.get_n_splits(),
                 desc="Running outer folds",
                 unit="fold"
             )
             if not perm_run else
-            enumerate(self.cv.split(X, y))
+            enumerate(self.cv.split(X, y[:, 0]))
         )
         for outer_fold, (train, test) in iterator:
             # split according to single outer fold

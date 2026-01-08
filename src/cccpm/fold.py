@@ -24,7 +24,7 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
     results_manager = ResultsManager(output_dir=results_directory, perm_run=perm_run,
                                      n_folds=n_folds, n_features=n_features, n_params=n_params)
 
-    for fold_id, (train, test) in enumerate(inner_cv.split(X, y)):
+    for fold_id, (train, test) in enumerate(inner_cv.split(X, y[:, 0])):
         # split according to single fold
         X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 

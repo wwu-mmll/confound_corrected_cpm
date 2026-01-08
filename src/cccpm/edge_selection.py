@@ -3,10 +3,15 @@ import numpy as np
 from scipy.stats import ttest_1samp, t, rankdata
 from typing import Union
 
+import torch
+
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
 import statsmodels.stats.multitest as multitest
 from warnings import filterwarnings
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 
 def one_sample_t_test(matrix, population_mean):
@@ -119,6 +124,135 @@ def semi_partial_correlation_spearman(x, Y, Z):
     return semi_partial_correlation(x, Y, Z, rank=True)
 
 
+def torch_rankdata(data, dim=-1):
+    """
+    Computes ranks of the data along a given dimension.
+    Equivalent to scipy.stats.rankdata (method='ordinal') but fully vectorized on GPU.
+    """
+    # argsort twice gives the rank indices (0, 1, 2...)
+    # We add 1.0 to match standard 1-based ranking
+    return data.argsort(dim=dim).argsort(dim=dim).float() + 1.0
+
+
+def get_residuals(data, confounds):
+    """
+    Regresses out 'confounds' from 'data' using OLS and returns the residuals.
+
+    Args:
+        data: (..., N_samples) or (N_samples, ...)
+              The target data (can be X or Y).
+        confounds: (N_samples, N_confounds)
+
+    Returns:
+        residuals: Same shape as data
+    """
+    # 1. Add Intercept column to confounds (standard OLS practice)
+    # Shape: (N_samples, N_confounds + 1)
+    if not hasattr(confounds, 'shape'):  # Safety check
+        return data
+
+    n_samples = confounds.shape[0]
+    ones = torch.ones(n_samples, 1, device=confounds.device, dtype=confounds.dtype)
+    Z = torch.cat((ones, confounds), dim=1)
+
+    # 2. Compute the Projector (Hat Matrix component)
+    # Beta = (Z^T Z)^-1 Z^T y
+    # We precompute pinv(Z) for speed: (Z^T Z)^-1 Z^T
+    # Z_pinv shape: (N_confounds+1, N_samples)
+    Z_pinv = torch.linalg.pinv(Z)
+
+    # 3. Apply to Data (Vectorized)
+    # We need to handle data shapes carefully.
+    # Data is usually [N_samples, Features] OR [N_perms, N_samples]
+
+    # CASE A: Data is [N_samples, Features] (Like X)
+    if data.shape[0] == n_samples:
+        # Beta: (Confounds, Features) = (Confounds, Samples) @ (Samples, Features)
+        beta = torch.matmul(Z_pinv, data)
+        # Preds: (Samples, Features) = (Samples, Confounds) @ (Confounds, Features)
+        preds = torch.matmul(Z, beta)
+        return data - preds
+
+    # CASE B: Data is [Batch, N_samples] (Like Y_perms)
+    elif data.shape[-1] == n_samples:
+        # We assume data is [Batch, N_samples]. We need to transpose for matmul
+        data_T = data.transpose(-1, -2)  # [N_samples, Batch]
+
+        beta = torch.matmul(Z_pinv, data_T)  # [Confounds, Batch]
+        preds = torch.matmul(Z, beta)  # [Samples, Batch]
+
+        return (data_T - preds).transpose(-1, -2)  # Return to [Batch, Samples]
+
+    else:
+        raise ValueError(f"Data shape {data.shape} incompatible with confounds {confounds.shape}")
+
+
+def correlations_and_pvalues(X, Y_perms,
+                             correlation_type='pearson',
+                             confounds=None):
+    """
+    Computes correlations (Pearson/Spearman/Partial) and p-values on GPU.
+
+    Args:
+        X: (N_samples, N_features)
+        Y_perms: (N_perms, N_samples)
+        correlation_type: 'pearson' or 'spearman'
+        confounds: Optional (N_samples, N_confounds) tensor.
+                   If provided, partial correlation is computed.
+    """
+    X, Y_perms = torch.from_numpy(X), torch.from_numpy(Y_perms)
+    n_samples = X.size(0)
+
+    # --- A. HANDLE PARTIAL CORRELATION (RESIDUALIZE) ---
+    if confounds is not None:
+        confounds = torch.from_numpy(confounds)
+        # 1. Clean X (Fixed)
+        X = get_residuals(X, confounds)
+        # 2. Clean Y (Batch)
+        Y_perms = get_residuals(Y_perms, confounds)
+
+        # Note: When doing partial correlation, Degrees of Freedom decrease
+        # df = N - 2 - k (where k is number of confounds)
+        k_confounds = confounds.size(1)
+    else:
+        k_confounds = 0
+
+    # --- B. HANDLE SPEARMAN (RANKING) ---
+    if correlation_type == 'spearman':
+        # Rank X (column-wise)
+        X = torch_rankdata(X, dim=0)
+        # Rank Y (row-wise for each perm)
+        Y_perms = torch_rankdata(Y_perms, dim=0)
+
+    # --- C. STANDARD PEARSON LOGIC (Now applied to Ranks or Residuals) ---
+
+    # 1. Standardize Inputs (Z-score)
+    X_mean = X.mean(dim=0, keepdim=True)
+    X_std = X.std(dim=0, keepdim=True)
+    X_norm = (X - X_mean) / (X_std + 1e-8)
+
+    Y_mean = Y_perms.mean(dim=0, keepdim=True)
+    Y_std = Y_perms.std(dim=0, keepdim=True)
+    Y_norm = (Y_perms - Y_mean) / (Y_std + 1e-8)
+
+    # 2. Correlation (MatMul)
+    r_matrix = torch.matmul(Y_norm.t(), X_norm) / (n_samples - 1)
+
+    # 3. P-Values
+    r_matrix = torch.clamp(r_matrix, -0.999999, 0.999999)
+
+    # Update DF based on confounds
+    df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=X.dtype)
+
+    t_stats = r_matrix * torch.sqrt(df / (1 - r_matrix ** 2))
+    z = t_stats / torch.sqrt(df / (df + 1))
+    val = -torch.abs(z) / 1.41421356
+    p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
+
+    return r_matrix.t(), p_matrix.t()
+
+
+
 class BaseEdgeSelector(BaseEstimator):
     def select(self, r, p):
         pass
@@ -183,9 +317,9 @@ class PThreshold(BaseEdgeSelector):
     def select(self, r, p):
         if self._correction is not None:
             _, p, _, _ = multitest.multipletests(p, alpha=0.05, method=self._correction)
-        pos_edges = np.where((p < self.threshold) & (r > 0))[0]
-        neg_edges = np.where((p < self.threshold) & (r < 0))[0]
-        return {'positive': pos_edges, 'negative': neg_edges}
+        pos_mask = (p < self.threshold) & (r > 0)
+        neg_mask = (p < self.threshold) & (r < 0)
+        return {'positive': pos_mask, 'negative': neg_mask}
 
 
 class SelectPercentile(BaseEdgeSelector):
@@ -204,10 +338,10 @@ class EdgeStatistic(BaseEstimator):
         self.t_test_filter = t_test_filter
 
     def fit_transform(self,
-                      X: Union[pd.DataFrame, np.ndarray],
-                      y: Union[pd.Series, pd.DataFrame, np.ndarray],
-                      covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
-        r_edges, p_edges = np.zeros(X.shape[1]), np.ones(X.shape[1])
+                      X,
+                      y,
+                      covariates):
+        r_edges, p_edges = np.zeros((X.shape[1], y.shape[1])), np.ones((X.shape[1], y.shape[1]))
         #if self.t_test_filter:
         #    _, p_values = one_sample_t_test(X, 0)
         #    valid_edges = p_values < 0.05
@@ -221,13 +355,19 @@ class EdgeStatistic(BaseEstimator):
 
 
         if self.edge_statistic == 'pearson':
-            r_edges_masked, p_edges_masked = pearson_correlation_with_pvalues(y, X[:, valid_edges])
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+                                                                      correlation_type='pearson')
         elif self.edge_statistic == 'spearman':
-            r_edges_masked, p_edges_masked = spearman_correlation_with_pvalues(y, X[:, valid_edges])
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+                                                                      correlation_type='spearman')
         elif self.edge_statistic == 'pearson_partial':
-            r_edges_masked, p_edges_masked = semi_partial_correlation_pearson(y, X[:, valid_edges], covariates)
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+                                                                      confounds=covariates,
+                                                                      correlation_type='pearson')
         elif self.edge_statistic == 'spearman_partial':
-            r_edges_masked, p_edges_masked = semi_partial_correlation_spearman(y, X[:, valid_edges], covariates)
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+                                                                      confounds=covariates,
+                                                                      correlation_type='spearman')
         else:
             raise NotImplemented("Unsupported edge selection method")
         r_edges[valid_edges] = r_edges_masked
