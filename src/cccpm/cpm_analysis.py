@@ -212,7 +212,7 @@ class CPMRegression:
         :param covariates: Covariates to control for.
         :param perm_run: Permutation run identifier.
         """
-        results_manager = ResultsManager(output_dir=self.results_directory, perm_run=perm_run,
+        results_manager = ResultsManager(output_dir=self.results_directory, n_perms=self.n_permutations,
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1])
 
         iterator = (

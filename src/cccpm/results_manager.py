@@ -21,41 +21,24 @@ class ResultsManager:
     output_dir : str
         Directory where results will be saved.
     """
-    def __init__(self, output_dir: Union[str, None], perm_run: int, n_folds: int, n_features: int, n_params: int = None,
+    def __init__(self, output_dir: Union[str, None], n_perms: int, n_folds: int, n_features: int, n_params: int = None,
                  is_inner_cv: bool = False):
-        self.perm_run = perm_run
+        self.n_perms = n_perms
         self.is_inner_cv = is_inner_cv
-        self.results_directory = self.update_results_directory(output_dir=output_dir)
+        self.results_directory = output_dir
         self.n_folds = n_folds
         self.n_features = n_features
-        self.n_params = n_params
+        self.n_params = n_params if n_params is not None else 1
 
         self.cv_results = pd.DataFrame()
         self.cv_predictions = pd.DataFrame()
         self.cv_edges = self.initialize_edges(n_folds=self.n_folds, n_features=self.n_features,
-                                              n_params=self.n_params)
+                                              n_params=self.n_params, n_perms=self.n_perms)
         self.cv_network_strengths = pd.DataFrame()
         self.agg_results = None
 
-    def update_results_directory(self, output_dir: Union[str, None]):
-        """
-        Determine the directory to save results.
-
-        :param output_dir:
-        :return: Results directory path.
-        """
-        if not self.is_inner_cv and self.perm_run > 0:
-            perm_directory = os.path.join(output_dir, 'permutation', f'{self.perm_run}')
-            if not os.path.exists(perm_directory):
-                os.makedirs(perm_directory)
-            return perm_directory
-
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
-        return output_dir
-
     @staticmethod
-    def initialize_edges(n_folds, n_features, n_params=None):
+    def initialize_edges(n_folds, n_features, n_params, n_perms):
         """
         Initialize a dictionary to store edges for cross-validation.
 
@@ -63,19 +46,12 @@ class ResultsManager:
         :param n_features: Number of features in the data.
         :return: Dictionary to store edges.
         """
-        if n_params is None:
-            return {'positive': np.zeros((n_folds, n_features)), 'negative': np.zeros((n_folds, n_features))}
-        else:
-            return {'positive': np.zeros((n_folds, n_features, n_params)),
-                    'negative': np.zeros((n_folds, n_features, n_params))}
+        return {'positive': np.zeros((n_folds, n_features, n_params, n_perms)),
+                'negative': np.zeros((n_folds, n_features, n_params, n_perms))}
 
-    def store_edges(self, edges: dict, fold: int, param_id: int = None):
-        if param_id is None:
-            self.cv_edges['positive'][fold, edges['positive']] = 1
-            self.cv_edges['negative'][fold, edges['negative']] = 1
-        else:
-            self.cv_edges['positive'][fold, edges['positive'], param_id] = 1
-            self.cv_edges['negative'][fold, edges['negative'], param_id] = 1
+    def store_edges(self, edges: dict, fold: int, param_id: int = 1):
+        self.cv_edges['positive'][fold, :, param_id] = edges['positive']
+        self.cv_edges['negative'][fold, :, param_id] = edges['negative']
 
     def calculate_edge_stability(self, write: bool = True, best_param_id: int = None):
         """
