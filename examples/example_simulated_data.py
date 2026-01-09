@@ -16,7 +16,7 @@ cpm = CPMRegression(results_directory='./tmp/example_simulated_data',
                     cv=RepeatedKFold(n_splits=2, n_repeats=1, random_state=42),
                     edge_selection=univariate_edge_selection,
                     inner_cv=ShuffleSplit(n_splits=2, test_size=0.2, random_state=42),
-                    n_permutations=2,
+                    n_permutations=1000,
                     #atlas_labels='atlas_labels.csv',
                     select_stable_edges=False)
 

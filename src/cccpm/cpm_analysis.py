@@ -14,7 +14,8 @@ from sklearn.linear_model import LinearRegression
 
 from cccpm.fold import run_inner_folds
 from cccpm.logging import setup_logging
-from cccpm.more_models import BaseCPMModel, LinearCPMModel
+#from cccpm.more_models import BaseCPMModel, LinearCPMModel
+from cccpm.pytorch_model import LinearCPMModel
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
@@ -28,7 +29,7 @@ class CPMRegression:
     """
     def __init__(self,
                  results_directory: str,
-                 cpm_model: Type[BaseCPMModel] = LinearCPMModel,
+                 cpm_model: Type[LinearCPMModel] = LinearCPMModel,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = KFold(n_splits=10, shuffle=True, random_state=42),
                  inner_cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
@@ -198,9 +199,9 @@ class CPMRegression:
         reporter.generate_html_report()
 
     def _single_run(self,
-                    X: torch.Tensor,
-                    y: torch.Tensor,
-                    covariates: torch.Tensor,
+                    X,
+                    y,
+                    covariates,
                     perm_run: int = 0):
         """
         Perform an estimation run (either real or permuted data). Includes outer cross-validation loop. For permutation
