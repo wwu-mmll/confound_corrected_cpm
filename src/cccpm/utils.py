@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import torch
 
 from sklearn.utils import check_X_y
 from sklearn.impute import SimpleImputer
@@ -121,6 +122,53 @@ def vector_to_matrix_3d(vector_2d, shape):
     np.put_along_axis(flat_matrix, upper_tri_indices[None, :], vector_2d, axis=1)
 
     return matrix_3d
+
+
+def vector_to_matrix_tensor_version(tensor, dim):
+    """
+    Expands a specific dimension containing vectorised upper-triangular edges
+    into a symmetric square matrix at that same location.
+
+    Args:
+        tensor: Arbitrary shape, e.g. [Networks, Folds, Features, Perms]
+        dim: The index of the dimension to expand (e.g., 2 for Features)
+
+    Returns:
+        Tensor with 'dim' replaced by two dimensions (Nodes, Nodes).
+        Example: [Net, Fold, Feat, Perm] -> [Net, Fold, Nodes, Nodes, Perm]
+    """
+    # 1. Normalize dim to positive index (handles -1, etc.)
+    ndim = tensor.ndim
+    dim = dim % ndim
+
+    # 2. Calculate Number of Nodes
+    # Formula: F = N(N-1)/2  =>  N = (1 + sqrt(1 + 8F)) / 2
+    n_features = tensor.shape[dim]
+    n_nodes = int((1 + (1 + 8 * n_features) ** 0.5) / 2)
+
+    # 3. Move the target dimension to the end for easier broadcasting
+    # shape: [..., Features]
+    temp_tensor = tensor.movedim(dim, -1)
+
+    # 4. Create the Output Placeholder
+    # shape: [..., Nodes, Nodes]
+    out_shape = temp_tensor.shape[:-1] + (n_nodes, n_nodes)
+    out = torch.zeros(out_shape, device=tensor.device, dtype=tensor.dtype)
+
+    # 5. Get Upper Triangle Indices
+    rows, cols = torch.triu_indices(n_nodes, n_nodes, offset=1, device=tensor.device)
+
+    # 6. Assign Values (Vectorized)
+    # The '...' ellipses handle any number of preceding dimensions automatically
+    out[..., rows, cols] = temp_tensor
+
+    # 7. Make Symmetric
+    out[..., cols, rows] = temp_tensor
+
+    # 8. Move the Matrix dimensions back to the original location
+    # We moved 'dim' to the end. Now we have two dims at the end (-2, -1).
+    # We want to put them back at 'dim' and 'dim+1'.
+    return out.movedim((-2, -1), (dim, dim + 1))
 
 def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     """

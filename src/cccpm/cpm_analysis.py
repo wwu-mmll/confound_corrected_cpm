@@ -21,6 +21,10 @@ from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
 from cccpm.scoring import score_regression_models
 from cccpm.reporting import HTMLReporter
+from cccpm.constants import Networks
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 
 class CPMRegression:
@@ -176,22 +180,15 @@ class CPMRegression:
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        self.gpu = True
-        if self.gpu:
-            y = np.random.permutation(np.tile(y, (self.n_permutations, 1))).transpose()
-            self._single_run(X=X, y=y, covariates=covariates)
-        else:
-            for perm_id in tqdm(range(1, self.n_permutations + 1), desc="Permutation runs", unit="run",
-                                total=self.n_permutations):
-                y = np.random.permutation(y)
-                self._single_run(X=X, y=y, covariates=covariates, perm_run=perm_id)
+        y = np.random.permutation(np.tile(y, (self.n_permutations, 1))).transpose()
+        self._single_run(X=X, y=y, covariates=covariates)
 
-        if self.n_permutations > 0:
-            PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
+        #if self.n_permutations > 0:
+            #PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
         self.logger.info("Estimation completed.")
         self.logger.info("Generating results file.")
-        reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
-        reporter.generate_html_report()
+        #reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
+        #reporter.generate_html_report()
 
     def generate_html_report(self):
         self.logger.info("Generating HTML report.")
@@ -242,11 +239,13 @@ class CPMRegression:
             # if the user specified an inner cross-validation, estimate models witin inner loop
             if self.inner_cv:
                 best_params, stability_edges = run_inner_folds(cpm_model=self.cpm_model,
-                                                               X=X_train, y=y_train, covariates=cov_train,
+                                                               X=X_train,
+                                                               y=y_train,
+                                                               covariates=cov_train,
                                                                inner_cv=self.inner_cv,
                                                                edge_selection=self.edge_selection,
-                                                               results_directory=os.path.join(results_manager.results_directory, 'folds', str(outer_fold)),
-                                                               perm_run=perm_run)
+                                                               results_directory=os.path.join(
+                                                                   results_manager.results_directory, 'folds', str(outer_fold)))
             else:
                 best_params = self.edge_selection.param_grid[0]
 
@@ -254,20 +253,24 @@ class CPMRegression:
             if self.select_stable_edges:
                 edges = select_stable_edges(stability_edges, self.stability_threshold)
             else:
-                self.edge_selection.set_params(**best_params)
-                edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train).return_selected_edges()
+                edges = torch.zeros(len(Networks) - 1, X_train.shape[1], len(best_params))
+                for best_params_run_id, best_params_run in enumerate(best_params):
+                    self.edge_selection.set_params(**best_params_run)
+                    current_edges = self.edge_selection.fit_transform(X=X_train, y=y_train[:, best_params_run_id].reshape(-1, 1), covariates=cov_train).return_selected_edges()
+                    edges[:2, :, best_params_run_id] = current_edges.squeeze()
 
-            results_manager.store_edges(edges=edges, fold=outer_fold)
+            results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
 
             # Build model and make predictions
             model = self.cpm_model(edges=edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
             network_strengths = model.get_network_strengths(X_test, cov_test)
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
-            results_manager.store_predictions(y_pred=y_pred, y_true=y_test, params=best_params, fold=outer_fold,
-                                              param_id=0, test_indices=test)
-            results_manager.store_metrics(metrics=metrics, params=best_params, fold=outer_fold, param_id=0)
-            results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test, fold=outer_fold)
+            #results_manager.store_predictions(y_pred=y_pred, y_true=y_test, params=best_params, fold=outer_fold,
+            #                                  param_id=0, test_indices=test)
+            results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
+
+            #results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test, fold=outer_fold)
 
         # once all outer folds are done, calculate final results and edge stability
         results_manager.calculate_final_cv_results()
@@ -275,6 +278,6 @@ class CPMRegression:
 
         if not perm_run:
             self.logger.info(results_manager.agg_results.round(4).to_string())
-            results_manager.save_predictions()
-            results_manager.save_network_strengths()
+            #results_manager.save_predictions()
+            #results_manager.save_network_strengths()
             self.results_manager = results_manager

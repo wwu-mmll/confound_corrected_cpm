@@ -1,4 +1,7 @@
+import numpy as np
 import torch
+
+from cccpm.constants import Networks
 
 
 class LinearCPMModel:
@@ -25,8 +28,7 @@ class LinearCPMModel:
         """
         self.device = torch.device(device)
 
-        self.pos_mask = torch.as_tensor(edges['positive'], device=self.device).float()
-        self.neg_mask = torch.as_tensor(edges['negative'], device=self.device).float()
+        self.edges = torch.as_tensor(edges, device=self.device)
 
         self.coefs = {}  # Stores coefficients (Beta) for prediction
         self.resid_models = {}  # Stores models used to residualize strengths
@@ -48,8 +50,8 @@ class LinearCPMModel:
 
         # 2. Calculate Network Strengths (Matrix Multiplication)
         # (Perms, Feats) @ (Feats, Samples) -> (Perms, Samples) -> Transpose
-        pos_str = torch.matmul(X, self.pos_mask)
-        neg_str = torch.matmul(X, self.neg_mask)
+        pos_str = torch.matmul(X, self.edges[Networks.positive].float())
+        neg_str = torch.matmul(X, self.edges[Networks.negative].float())
 
         # 3. Fit Residualizers (Strength ~ Covariates)
         # Remove covariate variance from strengths.
@@ -105,11 +107,11 @@ class LinearCPMModel:
         X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
         cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
 
-        n_perms = self.pos_mask.shape[1]
+        n_perms = self.edges[Networks.positive].size(1)
 
         # 1. Recalculate Strengths
-        pos_str = torch.matmul(X, self.pos_mask)
-        neg_str = torch.matmul(X, self.neg_mask)
+        pos_str = torch.matmul(X, self.edges[Networks.positive].float())
+        neg_str = torch.matmul(X, self.edges[Networks.negative].float())
 
         # 2. Residualize using fitted models
         pos_resid = pos_str - self._pred_shared(cov, self.resid_models['pos'])
@@ -187,3 +189,46 @@ class LinearCPMModel:
         ones = torch.ones(P, N, 1, device=self.device, dtype=X.dtype)
         X_design = torch.cat([ones, X], dim=2)
         return torch.bmm(X_design, beta)
+
+    def get_network_strengths(self, X: np.ndarray, covariates: np.ndarray):
+        """
+        Calculates network strengths for ALL permutations simultaneously.
+        """
+        # 1. Convert Inputs to Tensors
+        X_tensor = torch.as_tensor(X, device=self.device, dtype=torch.float32)
+        # FIX: Convert covariates to Tensor here
+        cov_tensor = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
+
+        # 2. Vectorized Strength Calculation
+        all_strengths = torch.einsum('nf,rfp->nrp', X_tensor, self.edges.float())
+
+        # 3. Separate Positive and Negative Strengths [N, P]
+        pos_str = all_strengths[:, 0, :]
+        neg_str = all_strengths[:, 1, :]
+
+        # 4. Calculate Predictions from Covariates
+        # Note: We pass cov_tensor (Tensor) instead of covariates (NumPy)
+        pred_pos = self._pred_shared(cov_tensor, self.resid_models['pos'])
+        pred_neg = self._pred_shared(cov_tensor, self.resid_models['neg'])
+
+        # --- IMPORTANT LOGIC CORRECTION ---
+        # Your original code attempted to view these as (-1, 1).
+        # However, your residual models were trained on [N, P] targets in fit(),
+        # so they produce [N, P] predictions. Reshaping to (-1, 1) will break
+        # the subtraction if N_perms > 1.
+
+        # 5. Calculate Residuals
+        # Direct subtraction works because shapes match: [N, P] - [N, P]
+        pos_resid = pos_str - pred_pos
+        neg_resid = neg_str - pred_neg
+
+        return {
+            "connectome": {
+                Networks.positive.name: pos_str,
+                Networks.negative.name: neg_str
+            },
+            "residuals": {
+                Networks.positive.name: pos_resid,
+                Networks.negative.name: neg_resid
+            }
+        }

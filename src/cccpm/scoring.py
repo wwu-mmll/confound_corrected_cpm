@@ -1,18 +1,22 @@
 import torch
+from cccpm.constants import Networks, Models, Metrics
 
 
 class FastCPMMetrics:
-    # Define order to map indices back to strings later
-    MODELS = ['connectome', 'residuals', 'full', 'covariates']
-    NETWORKS = ['positive', 'negative', 'both']
 
     def __init__(self, device='cuda'):
         self.device = device
 
     def score(self, y_true, y_pred_dict):
         """
-        Calculates all metrics efficiently, then returns them in the original nested format.
-        Structure: scores[model][network][metric] -> Tensor[N_perms]
+        Calculates all metrics efficiently and returns a 4D Tensor.
+
+        Args:
+            y_true: [N_samples, N_perms]
+            y_pred_dict: Dictionary of predictions. Keys e.g., 'connectome_positive'.
+
+        Returns:
+            scores: Tensor of shape [N_models, N_networks, N_metrics, N_perms]
         """
         # 1. Setup Data
         y_true = torch.as_tensor(y_true, device=self.device, dtype=torch.float32)
@@ -20,70 +24,90 @@ class FastCPMMetrics:
         # Stack into 4D Tensor: [Samples, Perms, Models, Networks]
         preds_stack = self._stack_predictions(y_pred_dict, y_true.shape)
 
-        # Reshape Truth: [N, P, 1, 1] for broadcasting
+        # Reshape Truth: [N, P, 1, 1] for broadcasting against Models/Networks
         truth_expanded = y_true.unsqueeze(-1).unsqueeze(-1)
 
-        # 2. Vectorized Calculations (All metrics at once)
-        # Result shapes will be [Perms, Models, Networks]
-        metrics_tensors = {}
+        # 2. Vectorized Calculations
+        # Result of each calc is shape: [Perms, Models, Networks] (Reduced over Samples dim=0)
 
         # MSE
-        metrics_tensors['mean_squared_error'] = torch.mean((truth_expanded - preds_stack) ** 2, dim=0)
+        mse = torch.mean((truth_expanded - preds_stack) ** 2, dim=0)
 
         # MAE
-        metrics_tensors['mean_absolute_error'] = torch.mean(torch.abs(truth_expanded - preds_stack), dim=0)
+        mae = torch.mean(torch.abs(truth_expanded - preds_stack), dim=0)
 
         # Explained Variance
         y_diff = truth_expanded - preds_stack
         var_true = torch.var(truth_expanded, dim=0, unbiased=False)
         var_diff = torch.var(y_diff, dim=0, unbiased=False)
-        metrics_tensors['explained_variance_score'] = 1 - (var_diff / (var_true + 1e-8))
+        expl_var = 1 - (var_diff / (var_true + 1e-8))
 
         # Pearson
-        metrics_tensors['pearson_score'] = self._pearson_vectorized(truth_expanded, preds_stack)
+        pearson = self._pearson_vectorized(truth_expanded, preds_stack)
 
-        # Spearman (Rank -> Pearson)
-        rank_true = truth_expanded.argsort(dim=0).argsort(dim=0).float()
-        rank_pred = preds_stack.argsort(dim=0).argsort(dim=0).float()
-        metrics_tensors['spearman_score'] = self._pearson_vectorized(rank_true, rank_pred)
+        # 3. Stack Metrics into a single Tensor
+        # CRITICAL: The order here MUST match the integer values in constants.Metrics
+        # Metrics.explained_variance_score = 0
+        # Metrics.pearson_score = 1
+        # Metrics.mean_squared_error = 2
+        # Metrics.mean_absolute_error = 3
 
-        # 3. Unpack into Nested Dictionary Structure
-        # Target: scores[model][network][metric]
-        final_scores = {}
+        # We create a list of length len(Metrics) to ensure correct slotting
+        metrics_list = [None] * len(Metrics)
+        metrics_list[Metrics.explained_variance_score] = expl_var
+        metrics_list[Metrics.pearson_score] = pearson
+        metrics_list[Metrics.mean_squared_error] = mse
+        metrics_list[Metrics.mean_absolute_error] = mae
 
-        for m_idx, model in enumerate(self.MODELS):
-            final_scores[model] = {}
-            for n_idx, net in enumerate(self.NETWORKS):
-                final_scores[model][net] = {}
+        # Stack dim=0 -> Shape: [Metrics, Perms, Models, Networks]
+        stacked_metrics = torch.stack(metrics_list, dim=0)
 
-                for metric_name, tensor_data in metrics_tensors.items():
-                    # Extract specific slice: [Perms]
-                    final_scores[model][net][metric_name] = tensor_data[:, m_idx, n_idx]
+        # 4. Permute to desired output shape: [Models, Networks, Metrics, Perms]
+        # Current indices: 0:Metrics, 1:Perms, 2:Models, 3:Networks
+        # Target indices:  2:Models,  3:Networks, 0:Metrics, 1:Perms
+        final_tensor = stacked_metrics.permute(2, 3, 0, 1)
 
-        return final_scores
+        return final_tensor
 
     def _stack_predictions(self, preds, shape):
         """
         Converts input dict to [N, P, M, Net] tensor.
-        Handles 'covariates' by duplicating it across network dimension.
+        Duplicates 'covariates' predictions across network dimension.
         """
         N, P = shape
-        stack = torch.empty((N, P, len(self.MODELS), len(self.NETWORKS)), device=self.device)
+        # Pre-allocate tensor based on Enum lengths
+        stack = torch.empty((N, P, len(Models), len(Networks)), device=self.device)
 
-        for m_idx, model in enumerate(self.MODELS):
-            for n_idx, net in enumerate(self.NETWORKS):
-                if model == 'covariates':
-                    # Covariates model is usually network-agnostic, but your structure 
-                    # requires keys for pos/neg/both. We duplicate the prediction.
-                    tensor = preds['covariates']
+        # Iterate over the Enums directly
+        for model in Models:
+            for net in Networks:
+                m_idx = model.value
+                n_idx = net.value
+
+                # Construct the key as expected in the dictionary
+                # E.g., Models.connectome (0) -> "connectome"
+                # E.g., Networks.positive (0) -> "positive"
+
+                if model.name == 'covariates':
+                    # Special Case: Covariates model usually has one key, shared across networks
+                    key = 'covariates'
                 else:
-                    tensor = preds[f"{model}_{net}"]
+                    key = f"{model.name}_{net.name}"
 
-                # Ensure tensor is on correct device
-                if not isinstance(tensor, torch.Tensor):
-                    tensor = torch.as_tensor(tensor, device=self.device)
+                # Retrieve and assign
+                if key in preds:
+                    tensor = preds[key]
 
-                stack[:, :, m_idx, n_idx] = tensor
+                    # Ensure tensor is on correct device
+                    if not isinstance(tensor, torch.Tensor):
+                        tensor = torch.as_tensor(tensor, device=self.device)
+
+                    stack[:, :, m_idx, n_idx] = tensor
+                else:
+                    # Fallback if key is missing (optional safety)
+                    # print(f"Warning: Key {key} not found in predictions.")
+                    pass
+
         return stack
 
     def _pearson_vectorized(self, x, y):
@@ -97,22 +121,6 @@ class FastCPMMetrics:
         return cov / (std_x * std_y + 1e-8)
 
 
-# --- Wrapper to replace your original function ---
-
 def score_regression_models(y_true, y_pred, device='cuda', **kwargs):
-    """
-    Drop-in replacement for your original function.
-    Returns: dict[model][network][metric] -> Tensor of shape [N_perms]
-    """
     evaluator = FastCPMMetrics(device=device)
     return evaluator.score(y_true, y_pred)
-
-
-regression_metrics_functions = {
-    'mean_squared_error': None,
-    'mean_absolute_error': None,
-    'explained_variance_score': None,
-    'pearson_score': None,
-    'spearman_score': None}
-
-regression_metrics = list(regression_metrics_functions.keys())

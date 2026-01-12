@@ -200,7 +200,6 @@ def correlations_and_pvalues(X, Y_perms,
         confounds: Optional (N_samples, N_confounds) tensor.
                    If provided, partial correlation is computed.
     """
-    X, Y_perms = torch.from_numpy(X), torch.from_numpy(Y_perms)
     n_samples = X.size(0)
 
     # --- A. HANDLE PARTIAL CORRELATION (RESIDUALIZE) ---
@@ -315,12 +314,21 @@ class PThreshold(BaseEdgeSelector):
             raise ValueError("correction must be None, str, or list")
 
     def select(self, r, p):
+        # Correction logic (requires p to be flat/numpy usually, ensure compatibility)
         if self._correction is not None:
-            _, p, _, _ = multitest.multipletests(p, alpha=0.05, method=self._correction)
-        pos_mask = (p < self.threshold) & (r > 0)
-        neg_mask = (p < self.threshold) & (r < 0)
-        return {'positive': pos_mask, 'negative': neg_mask}
+            # Assuming p is passed as or converted to numpy for statsmodels
+            from statsmodels.stats import multitest
+            # You might need to flatten and reshape if p is multidimensional
+            shape = p.shape
+            _, p_flat, _, _ = multitest.multipletests(p.flatten(), alpha=0.05, method=self._correction)
+            p = p_flat.reshape(shape)  # Reshape back or keep as tensor depending on input type
 
+        # Calculate boolean masks
+        pos_mask = (p < self.threshold[0]) & (r > 0)
+        neg_mask = (p < self.threshold[0]) & (r < 0)
+
+        # Stack into a single tensor: [2, Features, Perms]
+        return torch.stack([torch.as_tensor(pos_mask), torch.as_tensor(neg_mask)], dim=0)
 
 class SelectPercentile(BaseEdgeSelector):
     def __init__(self, percentile: Union[float, list] = 0.05):
@@ -341,18 +349,25 @@ class EdgeStatistic(BaseEstimator):
                       X,
                       y,
                       covariates):
-        r_edges, p_edges = np.zeros((X.shape[1], y.shape[1])), np.ones((X.shape[1], y.shape[1]))
+        r_edges, p_edges = (torch.zeros((X.shape[1], y.shape[1]), device=device),
+                            torch.ones((X.shape[1], y.shape[1]), device=device))
         #if self.t_test_filter:
         #    _, p_values = one_sample_t_test(X, 0)
         #    valid_edges = p_values < 0.05
         #else:
         #    valid_edges = np.bool(np.ones(X.shape[1]))
 
-        from sklearn.feature_selection import VarianceThreshold
-        selector = VarianceThreshold(threshold=0.01)
-        selector.fit(X)
-        valid_edges = selector.get_support()
+        # 1. Convert to GPU Tensors immediately
+        X = torch.as_tensor(X, device=device, dtype=torch.float32)
+        y = torch.as_tensor(y, device=device, dtype=torch.float32)
+        if covariates is not None:
+            covariates = torch.as_tensor(covariates, device=device, dtype=torch.float32)
 
+        # 3. Variance Threshold (GPU Version)
+        # Replaces sklearn.feature_selection.VarianceThreshold
+        # Remove features with ~0 variance to avoid NaNs in correlation
+        variances = torch.var(X, dim=0)
+        valid_edges = variances > 1e-6
 
         if self.edge_statistic == 'pearson':
             r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
