@@ -35,17 +35,15 @@ For detailed instructions on installation, usage, and advanced configurations, v
 Install the package from GitHub:
 
 ```bash
-git clone https://github.com/mmll/confound_corrected_cpm.git
-cd cpm_python
-pip install .
+pip install cccpm
 ```
 
 ## Quick Example
 Here's a quick overview of how to run a CPM analysis:
 
 ```python
-from src.cccpm.cpm_analysis import CPMRegression
-from src.cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm.cpm_analysis import CPMRegression
+from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from sklearn.model_selection import KFold
 
 # Configure edge selection
