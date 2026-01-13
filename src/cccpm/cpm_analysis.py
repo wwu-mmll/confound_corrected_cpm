@@ -180,8 +180,8 @@ class CPMRegression:
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        y = np.random.permutation(np.tile(y, (self.n_permutations, 1))).transpose()
-        self._single_run(X=X, y=y, covariates=covariates)
+        y_perms = self._create_permuted_y(y)
+        self._single_run(X=X, y=y_perms, covariates=covariates)
 
         #if self.n_permutations > 0:
             #PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
@@ -194,6 +194,19 @@ class CPMRegression:
         self.logger.info("Generating HTML report.")
         reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
         reporter.generate_html_report()
+
+    def _create_permuted_y(self, y):
+        # 1. Create a matrix of the repeat vector
+        y_matrix = np.tile(y, (self.n_permutations, 1))
+
+        # 2. Create a random noise matrix of the same shape
+        noise = np.random.rand(*y_matrix.shape)
+
+        # 3. Get indices that would sort the noise (random indices)
+        indices = np.argsort(noise, axis=1)
+
+        # 4. Apply these indices to your matrix
+        return np.take_along_axis(y_matrix, indices, axis=1).transpose()
 
     def _single_run(self,
                     X,
