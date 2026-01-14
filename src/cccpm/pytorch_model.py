@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from cccpm.constants import Networks
+from cccpm.constants import Networks, Models
 
 
 class LinearCPMModel:
@@ -102,51 +102,53 @@ class LinearCPMModel:
     def predict(self, X, covariates):
         """
         Predicts y for all permutations.
-        Returns dict of tensors with shape [N_samples, N_perms].
+        Returns tensor with shape [N_samples, N_models, N_networks, N_runs].
         """
         X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
         cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
 
+        n_samples = X.size(0)
         n_perms = self.edges[Networks.positive].size(1)
 
-        # 1. Recalculate Strengths
-        pos_str = torch.matmul(X, self.edges[Networks.positive].float())
-        neg_str = torch.matmul(X, self.edges[Networks.negative].float())
+        # Initialize output tensor
+        predictions = torch.zeros(n_samples, len(Models), len(Networks), n_perms,
+                                  device=self.device, dtype=torch.float32)
 
-        # 2. Residualize using fitted models
+        # Calculate network strengths and residuals
+        pos_str = X @ self.edges[Networks.positive].float()
+        neg_str = X @ self.edges[Networks.negative].float()
         pos_resid = pos_str - self._pred_shared(cov, self.resid_models['pos'])
         neg_resid = neg_str - self._pred_shared(cov, self.resid_models['neg'])
 
-        feats = {
-            'positive': {'conn': pos_str, 'resid': pos_resid},
-            'negative': {'conn': neg_str, 'resid': neg_resid},
-            'both': {'conn': torch.stack([pos_str, neg_str], dim=2),
-                     'resid': torch.stack([pos_resid, neg_resid], dim=2)}
-        }
+        # Covariates model (same for all networks)
+        predictions[:, Models.covariates, :, :] = self._pred_shared(cov, self.coefs['covariates']).unsqueeze(1)
 
-        preds = {}
+        # Helper to convert strengths to batch format [N_perms, N_samples, N_features]
+        def to_batch(strength_tensor):
+            if strength_tensor.dim() == 2:  # [N_samples, N_perms] -> [N_perms, N_samples, 1]
+                return strength_tensor.t().unsqueeze(2)
+            else:  # [N_samples, N_perms, 2] -> [N_perms, N_samples, 2]
+                return strength_tensor.permute(1, 0, 2)
 
-        # 3. Predict Covariates (Shared)
-        preds['covariates'] = self._pred_shared(cov, self.coefs['covariates'])
+        # Process each network
+        networks = [
+            (Networks.positive, pos_str, pos_resid),
+            (Networks.negative, neg_str, neg_resid),
+            (Networks.both, torch.stack([pos_str, neg_str], dim=2), torch.stack([pos_resid, neg_resid], dim=2))
+        ]
 
-        # 4. Predict Batched Models
-        for net in ['positive', 'negative', 'both']:
-            def to_batch(t):
-                if t.dim() == 2: return t.t().unsqueeze(2)
-                return t.permute(1, 0, 2)
+        cov_expanded = cov.unsqueeze(0).expand(n_perms, -1, -1)
 
-            X_conn = to_batch(feats[net]['conn'])
-            X_resid = to_batch(feats[net]['resid'])
-
-            cov_expanded = cov.unsqueeze(0).expand(n_perms, -1, -1)
+        for net_idx, conn_strength, resid_strength in networks:
+            X_conn = to_batch(conn_strength)
+            X_resid = to_batch(resid_strength)
             X_full = torch.cat([X_conn, cov_expanded], dim=2)
 
-            # Predict & Transpose back to [N, P]
-            preds[f'connectome_{net}'] = self._pred_batched(X_conn, self.coefs[f'connectome_{net}']).squeeze(2).t()
-            preds[f'residuals_{net}'] = self._pred_batched(X_resid, self.coefs[f'residuals_{net}']).squeeze(2).t()
-            preds[f'full_{net}'] = self._pred_batched(X_full, self.coefs[f'full_{net}']).squeeze(2).t()
+            predictions[:, Models.connectome, net_idx, :] = self._pred_batched(X_conn, self.coefs[f'connectome_{net_idx.name}']).squeeze(2).t()
+            predictions[:, Models.residuals, net_idx, :] = self._pred_batched(X_resid, self.coefs[f'residuals_{net_idx.name}']).squeeze(2).t()
+            predictions[:, Models.full, net_idx, :] = self._pred_batched(X_full, self.coefs[f'full_{net_idx.name}']).squeeze(2).t()
 
-        return preds
+        return predictions
 
     # --- SOLVERS ---
 

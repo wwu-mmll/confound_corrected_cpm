@@ -23,7 +23,7 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
     n_folds = inner_cv.get_n_splits()
     n_perms = y.shape[1]
 
-    results_manager = ResultsManager(output_dir=results_directory, n_perms=n_perms,
+    results_manager = ResultsManager(output_dir=results_directory, n_runs=n_perms,
                                      n_folds=n_folds, n_features=n_features, n_params=n_params)
 
     for fold_id, (train, test) in enumerate(inner_cv.split(X, y[:, 0])):

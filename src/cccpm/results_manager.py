@@ -23,7 +23,7 @@ class ResultsManager:
     """
     def __init__(self,
                  output_dir: Union[str, None],
-                 n_perms: int,
+                 n_runs: int,
                  n_folds: int,
                  n_features: int,
                  n_params: int = None,
@@ -38,29 +38,29 @@ class ResultsManager:
             'params': n_params if n_params is not None else 1,
             'folds': n_folds,
             'metrics': len(Metrics),
-            'perms': n_perms
+            'runs': n_runs
         }
 
         # 2. Preallocate Metrics Tensor
-        # Shape: [Models, Networks, Params, Folds, Metrics, Perms]
+        # Shape: [Metrics, Models, Networks, Params, Folds, Runs]
         self.results = torch.zeros(
+            self.dims['metrics'],
             self.dims['models'],
             self.dims['networks'],
             self.dims['params'],
             self.dims['folds'],
-            self.dims['metrics'],
-            self.dims['perms']
+            self.dims['runs']
         )
 
         # 3. Handle Edges (Features)
-        # Shape: [Models, Networks, Params, Folds, Features, Perms]
+        # Shape: [Models, Networks, Params, Folds, Features, Runs]
         self.n_features = n_features
         self.cv_edges = torch.zeros(
             self.dims['networks'],
             self.dims['params'],
             self.dims['folds'],
             self.n_features,
-            self.dims['perms'],
+            self.dims['runs'],
             dtype=torch.bool
         )
 
@@ -93,14 +93,14 @@ class ResultsManager:
         Args:
             param_idx: Index of the current parameter configuration.
             fold_idx: Index of the current CV fold.
-            metrics_tensor: 4D Tensor [Models, Networks, Metrics, Perms]
+            metrics_tensor: 4D Tensor [Metrics, Models, Networks, Runs]
         """
         # We assign the entire 4D block into the 6D tensor at the specific param/fold slice.
         # This replaces the need for nested loops.
 
-        # Destination slice: [:, :, param_idx, fold_idx, :, :]
-        # Source shape:      [Models, Networks, Metrics, Perms]
-        self.results[:, :, param_idx, fold_idx, :, :] = metrics_tensor.cpu()
+        # Destination slice: [:, :, :, param_idx, fold_idx, :]
+        # Source shape:      [Metrics, Models, Networks, Runs]
+        self.results[:, :, :, param_idx, fold_idx, :] = metrics_tensor.cpu()
 
     def calculate_edge_stability(self, write: bool = True, best_param_id: int = None):
         """
@@ -111,21 +111,21 @@ class ResultsManager:
         """
         if best_param_id is None:
             best_param_id = 0
-            n_perms = 1
+            n_runs = 1
         else:
-            n_perms = best_param_id.size(0)
-        perm_indices = torch.arange(n_perms, device=self.cv_edges.device)
+            n_runs = best_param_id.size(0)
+        run_indices = torch.arange(n_runs, device=self.cv_edges.device)
 
         # 1. Advanced Indexing: Select the specific param for each perm simultaneously
-        # Input Shape:  [Networks, Params, Folds, Features, Perms]
+        # Input Shape:  [Networks, Params, Folds, Features, Runs]
         # We index Dim 1 (Params) and Dim 4 (Perms) with paired vectors.
-        # Result Shape: [Networks, Folds, Features, Perms]
-        selected_edges = self.cv_edges[:, best_param_id, :, :, perm_indices]
+        # Result Shape: [Networks, Folds, Features, Runs]
+        selected_edges = self.cv_edges[:, best_param_id, :, :, run_indices]
         selected_edges = selected_edges.permute(1, 2, 3, 0)
 
         # 3. Calculate Stability
         # Now we can safely average over Folds (which is now Dim 1)
-        # Shape: [Networks, Features, Perms]
+        # Shape: [Networks, Features, Runs]
         edge_stability = selected_edges.float().mean(dim=1)
 
         if write:
@@ -236,30 +236,31 @@ class ResultsManager:
 
     def calculate_final_cv_results(self):
         # Calculate increment: Full - Connectome
-        self.results[Models.increment] = self.results[Models.full] - self.results[Models.connectome]
+        self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.connectome]
 
         # Move to CPU for processing
-        # Shape: [n_models, n_networks, 1, n_metrics, n_perms]
+        # Shape: [Metrics, Models, Networks, Params, Folds, Runs]
         data = self.results.cpu()
 
-        n_models, n_nets, _, n_folds, n_metrics, n_perms = data.shape
+        n_metrics, n_models, n_nets, _, n_folds, n_runs = data.shape
 
         # Get Lists of Names for Indices
         model_names = [m.name for m in Models]
         net_names = [n.name for n in Networks]
         metrics = [m.name for m in Metrics]
         fold_indices = range(n_folds)
-        perm_indices = range(n_perms)
+        run_indices = range(n_runs)
 
-        raw_tensor = data.permute(0, 1, 3, 5, 2, 4)
+        # Permute to [Models, Networks, Params, Folds, Runs, Metrics]
+        raw_tensor = data.permute(1, 2, 3, 4, 5, 0)
 
         # 2. Reshape into 2D Matrix: [Rows, Metrics]
         raw_matrix = raw_tensor.reshape(-1, n_metrics).numpy()
 
         # 3. Create MultiIndex
         raw_index = pd.MultiIndex.from_product(
-            [model_names, net_names, fold_indices, perm_indices],
-            names=['model', 'network', 'fold', 'permutation']
+            [model_names, net_names, fold_indices, run_indices],
+            names=['model', 'network', 'fold', 'run']
         )
 
         # 4. Create DataFrame
@@ -268,21 +269,23 @@ class ResultsManager:
         # Save Raw Results
         df_raw.to_csv(os.path.join(self.results_directory, 'cv_results_full.csv'))
 
-        # 1. Calculate Stats over Folds (dim = 3)
-        # Shape: [Models, Networks, 1, Metrics, Perms]
-        means = torch.mean(data, dim=3)
-        stds = torch.std(data, dim=3)
+        # 1. Calculate Stats over Folds (dim = 4)
+        # Shape after mean/std: [Metrics, Models, Networks, Params, Runs]
+        means = torch.mean(data, dim=4)
+        stds = torch.std(data, dim=4)
 
-        means = means.permute(0, 1, 4, 2, 3)
-        stds = stds.permute(0, 1, 4, 2, 3)
+        # Permute to [Models, Networks, Params, Runs, Metrics]
+        means = means.permute(1, 2, 3, 4, 0)
+        stds = stds.permute(1, 2, 3, 4, 0)
+
         # 3. Reshape
         means_flat = means.reshape(-1, n_metrics).numpy()
         stds_flat = stds.reshape(-1, n_metrics).numpy()
 
-        # 4. Create Index (Model, Network, Permutation)
+        # 4. Create Index (Model, Network, run)
         agg_index = pd.MultiIndex.from_product(
-            [model_names, net_names, perm_indices],
-            names=['model', 'network', 'permutation']
+            [model_names, net_names, run_indices],
+            names=['model', 'network', 'run']
         )
 
         # 5. Create DataFrame with MultiIndex Columns
@@ -303,10 +306,10 @@ class ResultsManager:
         """
         # 1. Calculate Increments (Full - Connectome) inline
         # This operates on the entire tensor at once (all params, folds, metrics, perms)
-        self.results[Models.increment] = self.results[Models.full] - self.results[Models.connectome]
+        self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.connectome]
 
-        # 2. Calculate Means across Folds (Dimension 3)
-        inner_means = torch.mean(self.results, dim=3)
+        # 2. Calculate Means across Folds (Dimension 4)
+        inner_means = torch.mean(self.results, dim=4)
 
         # (Optional) Calculate Stds if you want to save/inspect them
         # inner_stds = torch.std(self.results, dim=3)

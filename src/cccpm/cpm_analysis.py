@@ -169,22 +169,24 @@ class CPMRegression:
         covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
 
         """
-        self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
+        self.logger.info(f"Starting CPM estimation.")
 
         # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
 
         # Estimate models on actual data
-        #self._single_run(X=X, y=y, covariates=covariates, perm_run=0)
+        self._single_run(X=X, y=y.reshape(-1, 1), covariates=covariates, perm_run=False)
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        y_perms = self._create_permuted_y(y)
-        self._single_run(X=X, y=y_perms, covariates=covariates)
+        if self.n_permutations > 0:
+            self.logger.info(f"Running {self.n_permutations} permutations.")
+            y_perms = self._create_permuted_y(y)
+            self._single_run(X=X, y=y_perms, covariates=covariates, perm_run=True)
+            PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
 
-        #if self.n_permutations > 0:
-            #PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
+        self.logger.info("=" * 50)
         self.logger.info("Estimation completed.")
         self.logger.info("Generating results file.")
         #reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
@@ -212,7 +214,7 @@ class CPMRegression:
                     X,
                     y,
                     covariates,
-                    perm_run: int = 0):
+                    perm_run: bool = False):
         """
         Perform an estimation run (either real or permuted data). Includes outer cross-validation loop. For permutation
         runs, the same strategy is used, but printing is less verbose and the results folder changes.
@@ -220,9 +222,9 @@ class CPMRegression:
         :param X: Features (predictors).
         :param y: Labels (target variable).
         :param covariates: Covariates to control for.
-        :param perm_run: Permutation run identifier.
+        :param perm_run: Does this include permutation runs or is this a true run.
         """
-        results_manager = ResultsManager(output_dir=self.results_directory, n_perms=self.n_permutations,
+        results_manager = ResultsManager(output_dir=self.results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1])
 
         iterator = (
@@ -232,8 +234,6 @@ class CPMRegression:
                 desc="Running outer folds",
                 unit="fold"
             )
-            if not perm_run else
-            enumerate(self.cv.split(X, y[:, 0]))
         )
         for outer_fold, (train, test) in iterator:
             # split according to single outer fold
