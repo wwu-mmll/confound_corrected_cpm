@@ -22,8 +22,8 @@ class LinearCPMModel:
     def __init__(self, edges, device='cuda'):
         """
         Args:
-            edges: Dict containing 'positive' and 'negative' boolean masks/indices.
-                   Shape of masks: [N_perms, N_features]
+            edges: Boolean masks tensor with shape [N_features, 2, N_runs].
+                   Dimension 1 corresponds to [Positive, Negative].
             device: 'cuda' or 'cpu'
         """
         self.device = torch.device(device)
@@ -49,9 +49,9 @@ class LinearCPMModel:
         n_samples, n_perms = y.shape
 
         # 2. Calculate Network Strengths (Matrix Multiplication)
-        # (Perms, Feats) @ (Feats, Samples) -> (Perms, Samples) -> Transpose
-        pos_str = torch.matmul(X, self.edges[Networks.positive].float())
-        neg_str = torch.matmul(X, self.edges[Networks.negative].float())
+        # X: [N_samples, N_features] @ edges: [N_features, N_runs] -> [N_samples, N_runs]
+        pos_str = torch.matmul(X, self.edges[:, Networks.positive, :].float())
+        neg_str = torch.matmul(X, self.edges[:, Networks.negative, :].float())
 
         # 3. Fit Residualizers (Strength ~ Covariates)
         # Remove covariate variance from strengths.
@@ -108,15 +108,16 @@ class LinearCPMModel:
         cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
 
         n_samples = X.size(0)
-        n_perms = self.edges[Networks.positive].size(1)
+        n_perms = self.edges.size(2)  # Shape: [Features, Networks, Runs]
 
         # Initialize output tensor
         predictions = torch.zeros(n_samples, len(Models), len(Networks), n_perms,
                                   device=self.device, dtype=torch.float32)
 
         # Calculate network strengths and residuals
-        pos_str = X @ self.edges[Networks.positive].float()
-        neg_str = X @ self.edges[Networks.negative].float()
+        # X: [N_samples, N_features] @ edges: [N_features, N_runs] -> [N_samples, N_runs]
+        pos_str = X @ self.edges[:, Networks.positive, :].float()
+        neg_str = X @ self.edges[:, Networks.negative, :].float()
         pos_resid = pos_str - self._pred_shared(cov, self.resid_models['pos'])
         neg_resid = neg_str - self._pred_shared(cov, self.resid_models['neg'])
 
@@ -202,11 +203,13 @@ class LinearCPMModel:
         cov_tensor = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
 
         # 2. Vectorized Strength Calculation
-        all_strengths = torch.einsum('nf,rfp->nrp', X_tensor, self.edges.float())
+        # X: [N_samples, N_features], edges: [N_features, 2, N_runs]
+        # Result: [N_samples, 2, N_runs]
+        all_strengths = torch.einsum('nf,frp->nrp', X_tensor, self.edges.float())
 
-        # 3. Separate Positive and Negative Strengths [N, P]
-        pos_str = all_strengths[:, 0, :]
-        neg_str = all_strengths[:, 1, :]
+        # 3. Separate Positive and Negative Strengths [N_samples, N_runs]
+        pos_str = all_strengths[:, Networks.positive, :]
+        neg_str = all_strengths[:, Networks.negative, :]
 
         # 4. Calculate Predictions from Covariates
         # Note: We pass cov_tensor (Tensor) instead of covariates (NumPy)

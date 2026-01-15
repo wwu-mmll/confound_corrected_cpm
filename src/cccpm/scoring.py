@@ -22,8 +22,8 @@ class FastCPMMetrics:
         y_true = torch.as_tensor(y_true, device=self.device, dtype=torch.float32)
         y_pred = torch.as_tensor(y_pred, device=self.device, dtype=torch.float32)
 
-        # Reshape Truth: [N_samples, N_runs, 1, 1] for broadcasting against Models/Networks
-        truth_expanded = y_true.unsqueeze(2).unsqueeze(2)
+        # Reshape Truth: [N_samples, 1, 1, N_Runs] for broadcasting against Models/Networks/Runs
+        truth_expanded = y_true.unsqueeze(1).unsqueeze(1)
 
         # 2. Vectorized Calculations
         # Result of each calc is shape: [N_models, N_networks, N_runs] (Reduced over Samples dim=0)

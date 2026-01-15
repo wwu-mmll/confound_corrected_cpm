@@ -13,10 +13,10 @@ univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
                                                     t_test_filter=False)
 
 cpm = CPMRegression(results_directory='./tmp/example_simulated_data',
-                    cv=RepeatedKFold(n_splits=10, n_repeats=10, random_state=42),
+                    cv=RepeatedKFold(n_splits=10, n_repeats=1, random_state=42),
                     edge_selection=univariate_edge_selection,
-                    inner_cv=ShuffleSplit(n_splits=10, test_size=0.2, random_state=42),
-                    n_permutations=1000,
+                    inner_cv=ShuffleSplit(n_splits=2, test_size=0.2, random_state=42),
+                    n_permutations=10,
                     #atlas_labels='atlas_labels.csv',
                     select_stable_edges=False)
 
