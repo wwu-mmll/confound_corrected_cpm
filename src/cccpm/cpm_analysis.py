@@ -266,11 +266,11 @@ class CPMRegression:
             if self.select_stable_edges:
                 edges = select_stable_edges(stability_edges, self.stability_threshold)
             else:
-                edges = torch.zeros(len(Networks) - 1, X_train.shape[1], len(best_params))
+                edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params))
                 for best_params_run_id, best_params_run in enumerate(best_params):
                     self.edge_selection.set_params(**best_params_run)
                     current_edges = self.edge_selection.fit_transform(X=X_train, y=y_train[:, best_params_run_id].reshape(-1, 1), covariates=cov_train).return_selected_edges()
-                    edges[:2, :, best_params_run_id] = current_edges.squeeze()
+                    edges[:, :, best_params_run_id] = current_edges.squeeze()
 
             results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
 

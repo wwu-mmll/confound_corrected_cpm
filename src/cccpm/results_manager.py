@@ -53,13 +53,14 @@ class ResultsManager:
         )
 
         # 3. Handle Edges (Features)
-        # Shape: [Models, Networks, Params, Folds, Features, Runs]
+        # Shape: [N_Features, 2, Params, Folds, Runs]
+        # Only store positive and negative edges (not "both")
         self.n_features = n_features
         self.cv_edges = torch.zeros(
-            self.dims['networks'],
+            self.n_features,
+            2,  # Only positive and negative networks
             self.dims['params'],
             self.dims['folds'],
-            self.n_features,
             self.dims['runs'],
             dtype=torch.bool
         )
@@ -75,15 +76,14 @@ class ResultsManager:
         Args:
             param_idx: Index of current parameter.
             fold_idx: Index of current fold.
-            edges_tensor: Boolean Tensor of shape [2, Features, Perms].
-                          Dimension 0 must correspond to [Positive, Negative].
+            edges_tensor: Boolean Tensor of shape [Features, 2, Runs].
+                          Dimension 1 must correspond to [Positive, Negative].
         """
-        # We assume edges_tensor comes in as [2, Features, Perms]
-        # We assign it to the first 2 slots of the Network dimension (Positive=0, Negative=1)
-        # The 'Both' slot (Index 2) remains empty/zero as it is derived from these two.
+        # We assume edges_tensor comes in as [Features, 2, Runs]
+        # This matches cv_edges shape directly
 
-        # Target Slice: [0:2, param, fold, :, :]
-        self.cv_edges[:2, param_idx, fold_idx, :, :] = torch.Tensor(edges_tensor)
+        # Target Slice: [:, :, param, fold, :]
+        self.cv_edges[:, :, param_idx, fold_idx, :] = torch.Tensor(edges_tensor)
 
 
     def store_metrics(self, param_idx: int, fold_idx: int, metrics_tensor: torch.Tensor):
@@ -116,23 +116,24 @@ class ResultsManager:
             n_runs = best_param_id.size(0)
         run_indices = torch.arange(n_runs, device=self.cv_edges.device)
 
-        # 1. Advanced Indexing: Select the specific param for each perm simultaneously
-        # Input Shape:  [Networks, Params, Folds, Features, Runs]
-        # We index Dim 1 (Params) and Dim 4 (Perms) with paired vectors.
-        # Result Shape: [Networks, Folds, Features, Runs]
-        selected_edges = self.cv_edges[:, best_param_id, :, :, run_indices]
-        selected_edges = selected_edges.permute(1, 2, 3, 0)
+        # 1. Advanced Indexing: Select the specific param for each run simultaneously
+        # Input Shape:  [N_Features, 2, Params, Folds, Runs]
+        # We index Dim 2 (Params) and Dim 4 (Runs) with paired vectors.
+        # Result Shape: [N_Features, 2, Folds, Runs]
+        selected_edges = self.cv_edges[:, :, best_param_id, :, run_indices]
 
-        # 3. Calculate Stability
-        # Now we can safely average over Folds (which is now Dim 1)
-        # Shape: [Networks, Features, Runs]
-        edge_stability = selected_edges.float().mean(dim=1)
+        # 2. Calculate Stability
+        # Average over Folds (Dim 2)
+        # Shape: [N_Features, 2, Runs]
+        edge_stability = selected_edges.float().mean(dim=2)
 
         if write:
+            # Keep shape [Features, 2, Folds, Runs] for edges
+            # Keep shape [Features, 2, Runs] for stability
             np.save(os.path.join(self.results_directory, f'edges.npy'),
-                    vector_to_matrix_tensor_version(selected_edges[:2], dim=2).float().cpu().numpy())
+                    vector_to_matrix_tensor_version(selected_edges, dim=0).float().cpu().numpy())
             np.save(os.path.join(self.results_directory, f'stability_edges.npy'),
-                    vector_to_matrix_tensor_version(edge_stability[:2], dim=1).cpu().numpy())
+                    vector_to_matrix_tensor_version(edge_stability, dim=0).cpu().numpy())
         return edge_stability
 
     def store_predictions(self, y_pred, y_true, params, fold, param_id, test_indices):

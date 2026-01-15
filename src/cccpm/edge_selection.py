@@ -327,8 +327,8 @@ class PThreshold(BaseEdgeSelector):
         pos_mask = (p < self.threshold[0]) & (r > 0)
         neg_mask = (p < self.threshold[0]) & (r < 0)
 
-        # Stack into a single tensor: [2, Features, Perms]
-        return torch.stack([torch.as_tensor(pos_mask), torch.as_tensor(neg_mask)], dim=0)
+        # Stack into a single tensor: [Features, 2, ...]
+        return torch.stack([torch.as_tensor(pos_mask), torch.as_tensor(neg_mask)], dim=-1)
 
 class SelectPercentile(BaseEdgeSelector):
     def __init__(self, percentile: Union[float, list] = 0.05):
