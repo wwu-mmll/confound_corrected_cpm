@@ -23,9 +23,6 @@ from cccpm.scoring import score_regression_models
 from cccpm.reporting import HTMLReporter
 from cccpm.constants import Networks
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
 
 class CPMRegression:
     """
@@ -45,7 +42,8 @@ class CPMRegression:
                  impute_missing_values: bool = True,
                  calculate_residuals: bool = False,
                  n_permutations: int = 0,
-                 atlas_labels: str = None):
+                 atlas_labels: str = None,
+                 device: str = 'cpu'):
         """
         Initialize the CPMRegression object.
 
@@ -67,6 +65,12 @@ class CPMRegression:
             CSV file containing atlas and regions labels.
         """
         self.results_directory = results_directory
+        np.random.seed(42)
+        os.makedirs(self.results_directory, exist_ok=True)
+        os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
+        setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
+        self.logger = logging.getLogger(__name__)
+
         self.cpm_model = cpm_model
         self.cv = cv
         self.inner_cv = inner_cv
@@ -77,11 +81,14 @@ class CPMRegression:
         self.calculate_residuals = calculate_residuals
         self.n_permutations = n_permutations
 
-        np.random.seed(42)
-        os.makedirs(self.results_directory, exist_ok=True)
-        os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
-        setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
-        self.logger = logging.getLogger(__name__)
+        if device.lower() == 'gpu' or device.lower() == 'cuda':
+            if torch.cuda.is_available():
+                self.device = torch.device('cuda')
+            else:
+                self.logger.warning("CUDA or GPU not available, using CPU instead.")
+                self.device = torch.device('cpu')
+        else:
+            self.device = torch.device('cpu')
 
         # Log important configuration details
         self._log_analysis_details()
@@ -117,6 +124,7 @@ class CPMRegression:
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
         self.logger.info(f"Calculate residuals:     {'Yes' if self.calculate_residuals else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
+        self.logger.info(f"Device:                  {self.device}")
         self.logger.info("="*50)
 
     def _validate_and_copy_atlas_file(self, csv_path):
@@ -225,7 +233,8 @@ class CPMRegression:
         :param perm_run: Does this include permutation runs or is this a true run.
         """
         results_manager = ResultsManager(output_dir=self.results_directory, n_runs=y.shape[1],
-                                         n_folds=self.cv.get_n_splits(), n_features=X.shape[1])
+                                         n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
+                                         device=self.device)
 
         iterator = (
             tqdm(
@@ -258,7 +267,8 @@ class CPMRegression:
                                                                inner_cv=self.inner_cv,
                                                                edge_selection=self.edge_selection,
                                                                results_directory=os.path.join(
-                                                                   results_manager.results_directory, 'folds', str(outer_fold)))
+                                                                   results_manager.results_directory, 'folds', str(outer_fold)),
+                                                               device=self.device)
             else:
                 best_params = self.edge_selection.param_grid[0]
 

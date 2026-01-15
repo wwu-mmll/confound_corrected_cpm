@@ -27,9 +27,11 @@ class ResultsManager:
                  n_folds: int,
                  n_features: int,
                  n_params: int = None,
-                 is_inner_cv: bool = False):
+                 is_inner_cv: bool = False,
+                 device: torch.device = torch.device('cpu')):
         self.results_directory = output_dir
         self.is_inner_cv = is_inner_cv
+        self.device = device
 
         # 1. Define Dimensions based on Enums
         self.dims = {
@@ -49,7 +51,8 @@ class ResultsManager:
             self.dims['networks'],
             self.dims['params'],
             self.dims['folds'],
-            self.dims['runs']
+            self.dims['runs'],
+            device=self.device
         )
 
         # 3. Handle Edges (Features)
@@ -62,7 +65,8 @@ class ResultsManager:
             self.dims['params'],
             self.dims['folds'],
             self.dims['runs'],
-            dtype=torch.bool
+            dtype=torch.bool,
+            device=self.device
         )
 
         # Placeholder for predictions if you need them later

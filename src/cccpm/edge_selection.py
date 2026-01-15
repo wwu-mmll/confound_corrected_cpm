@@ -258,7 +258,8 @@ class BaseEdgeSelector(BaseEstimator):
 
 
 class PThreshold(BaseEdgeSelector):
-    def __init__(self, threshold: Union[float, list] = 0.05, correction: Union[str, list] = None):
+    def __init__(self, threshold: Union[float, list] = 0.05, correction: Union[str, list] = None,
+                 device: torch.device = torch.device('cpu')):
         """
 
         :param threshold:
@@ -278,6 +279,7 @@ class PThreshold(BaseEdgeSelector):
         self._correction = None
         self.threshold = threshold
         self.correction = correction
+        self.device = device
 
     @property
     def threshold(self):
@@ -328,7 +330,8 @@ class PThreshold(BaseEdgeSelector):
         neg_mask = (p < self.threshold[0]) & (r < 0)
 
         # Stack into a single tensor: [Features, 2, ...]
-        return torch.stack([torch.as_tensor(pos_mask), torch.as_tensor(neg_mask)], dim=1)
+        return torch.stack([torch.as_tensor(pos_mask, device=self.device),
+                            torch.as_tensor(neg_mask, device=self.device)], dim=1)
 
 class SelectPercentile(BaseEdgeSelector):
     def __init__(self, percentile: Union[float, list] = 0.05):
@@ -341,16 +344,18 @@ class SelectKBest(BaseEdgeSelector):
 
 
 class EdgeStatistic(BaseEstimator):
-    def __init__(self, edge_statistic: str = 'spearman', t_test_filter: bool = False):
+    def __init__(self, edge_statistic: str = 'spearman', t_test_filter: bool = False,
+                 device: torch.device = torch.device('cpu')):
         self.edge_statistic = edge_statistic
         self.t_test_filter = t_test_filter
+        self.device = device
 
     def fit_transform(self,
                       X,
                       y,
                       covariates):
-        r_edges, p_edges = (torch.zeros((X.shape[1], y.shape[1]), device=device),
-                            torch.ones((X.shape[1], y.shape[1]), device=device))
+        r_edges, p_edges = (torch.zeros((X.shape[1], y.shape[1]), device=self.device),
+                            torch.ones((X.shape[1], y.shape[1]), device=self.device))
         #if self.t_test_filter:
         #    _, p_values = one_sample_t_test(X, 0)
         #    valid_edges = p_values < 0.05
@@ -358,10 +363,10 @@ class EdgeStatistic(BaseEstimator):
         #    valid_edges = np.bool(np.ones(X.shape[1]))
 
         # 1. Convert to GPU Tensors immediately
-        X = torch.as_tensor(X, device=device, dtype=torch.float32)
-        y = torch.as_tensor(y, device=device, dtype=torch.float32)
+        X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
+        y = torch.as_tensor(y, device=self.device, dtype=torch.float32)
         if covariates is not None:
-            covariates = torch.as_tensor(covariates, device=device, dtype=torch.float32)
+            covariates = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
 
         # 3. Variance Threshold (GPU Version)
         # Replaces sklearn.feature_selection.VarianceThreshold
@@ -395,11 +400,13 @@ class UnivariateEdgeSelection(BaseEstimator):
                  edge_statistic: str = 'spearman',
                  t_test_filter: bool = False,
                  edge_selection: Union[list, None, PThreshold] = None,
-                 ):
+                 device: torch.device = torch.device('cpu')):
         self.r_edges = None
         self.p_edges = None
         self.t_test_filter = t_test_filter
-        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic, t_test_filter=t_test_filter)
+        self.device = device
+        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic, t_test_filter=t_test_filter,
+                                            device=self.device)
         self.edge_selection = edge_selection
         if isinstance(edge_selection, (list, tuple)):
             self.edge_selection = edge_selection
