@@ -33,10 +33,10 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
         X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
 
         for param_id, config in enumerate(param_grid):
-            edge_selection.set_params(device=device, **config)
-            selected_edges = edge_selection.fit_transform(X_train, y_train, cov_train).return_selected_edges()
+            edge_selection.set_params(**config)
+            selected_edges = edge_selection.fit_transform(X_train, y_train, cov_train, device=device).return_selected_edges()
             y_pred = cpm_model(edges=selected_edges, device=device).fit(X_train, y_train, cov_train).predict(X_test, cov_test)
-            metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
+            metrics = score_regression_models(y_true=y_test, y_pred=y_pred, device=device)
 
             results_manager.store_edges(param_idx=param_id, fold_idx=fold_id, edges_tensor=selected_edges)
             results_manager.store_metrics(param_idx=param_id, fold_idx=fold_id, metrics_tensor=metrics)

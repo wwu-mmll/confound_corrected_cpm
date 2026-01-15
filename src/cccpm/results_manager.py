@@ -349,12 +349,9 @@ class ResultsManager:
     def find_best_params(self):
         # Slice Result Shape: [Params, Folds]
         scores_slice = self.results[
-            Models.connectome,
-            Networks.both,
-            :,
-            :,
             Metrics.pearson_score,
-            :
+            Models.connectome,
+            Networks.both
         ]
 
         # 2. Calculate Means across Folds (now Dimension 1) -> Shape: [Params, Perms]

@@ -5,6 +5,7 @@ import shutil
 from typing import Union, Type
 
 import torch
+from torch.xpu import device
 from tqdm import tqdm
 
 import numpy as np
