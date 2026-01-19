@@ -1,11 +1,11 @@
-from cpm.models import LinearCPMModel
+from cpm.models import LinearCPMModel, GAMCPMModel, DecisionTreeCPMModel, NonLinearCPMModel
 from cpm.utils import train_test_split
 from cpm.scoring import score_regression_models
 from cpm.results_manager import ResultsManager
 from cpm.edge_selection import BaseEdgeSelector
 
 
-def run_inner_folds(X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector, results_directory,
+def run_inner_folds(X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector, model_type, model_params, results_directory,
                     perm_run):
     """
     Run inner cross-validation over all folds and hyperparameter configurations.
@@ -32,11 +32,16 @@ def run_inner_folds(X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector
         for param_id, config in enumerate(param_grid):
             edge_selection.set_params(**config)
             selected_edges = edge_selection.fit_transform(X_train, y_train, cov_train).return_selected_edges()
-            y_pred = LinearCPMModel(edges=selected_edges).fit(X_train, y_train, cov_train).predict(X_test, cov_test)
-            metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
 
-            results_manager.store_edges(selected_edges, fold_id, param_id)
-            results_manager.store_metrics(metrics=metrics, params=config, fold=fold_id, param_id=param_id)
+            for model_param in model_params:
+                if model_type == 'LinearCPM':
+                    y_pred = LinearCPMModel(edges=selected_edges).fit(X_train, y_train, cov_train).predict(X_test, cov_test)
+                else:
+                    y_pred = NonLinearCPMModel(edges=selected_edges, model=model_type, params=model_param).fit(X_train, y_train, cov_train).predict(X_test, cov_test) 
+                metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
+
+                results_manager.store_edges(selected_edges, fold_id, param_id)
+                results_manager.store_metrics(metrics=metrics, params={'edge': config, 'model': model_param}, fold=fold_id, param_id=param_id)
 
     # once all outer folds are done, calculate final results and edge stability
     results_manager.aggregate_inner_folds()

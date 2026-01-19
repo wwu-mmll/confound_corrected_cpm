@@ -7,10 +7,14 @@ from typing import Union
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold
+from sklearn.linear_model import LinearRegression
+from pygam import LinearGAM, s
+from functools import reduce
+import operator
 
 from cpm.fold import run_inner_folds
 from cpm.logging import setup_logging
-from cpm.models import LinearCPMModel, GAMCPMModel, DecisionTreeCPMModel
+from cpm.models import LinearCPMModel, GAMCPMModel, DecisionTreeCPMModel, NonLinearCPMModel
 from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cpm.results_manager import ResultsManager, PermutationManager
 from cpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
@@ -33,6 +37,8 @@ class CPMRegression:
                  select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
+                 cpm_model: str = 'LinearCPM',
+                 calculate_residuals: str = None,
                  n_permutations: int = 0,
                  atlas_labels: str = None):
         """
@@ -62,6 +68,8 @@ class CPMRegression:
         self.select_stable_edges = select_stable_edges
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
+        self.cpm_model = cpm_model
+        self.calculate_residuals = calculate_residuals
         self.n_permutations = n_permutations
 
         np.random.seed(42)
@@ -98,6 +106,8 @@ class CPMRegression:
         if self.select_stable_edges:
             self.logger.info(f"Stability threshold:     {self.stability_threshold}")
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
+        self.logger.info(f"CPM Model:               {self.cpm_model}")
+        self.logger.info(f"Calculate residuals:     {'Yes' if self.calculate_residuals else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info("="*50)
 
@@ -207,11 +217,42 @@ class CPMRegression:
             if self.impute_missing_values:
                 X_train, X_test, cov_train, cov_test = impute_missing_values(X_train, X_test, cov_train, cov_test)
 
+            # residualize X to remove effect of covariates
+            if self.calculate_residuals == 'linear':
+                residual_model = LinearRegression().fit(cov_train, X_train)
+                X_train = X_train - residual_model.predict(cov_train)
+                X_test = X_test - residual_model.predict(cov_test)
+
+            elif self.calculate_residuals == 'GAM':
+                gam_terms = [s(i, n_splines = 10) for i in range(cov_train.shape[1])]
+                
+                if len(gam_terms) == 1:
+                    gam_terms = gam_terms[0]
+                else:
+                    gam_terms = reduce(operator.add, gam_terms)
+
+                for n_sample in range(X_train.shape[1]):
+                    residual_model = LinearGAM(gam_terms, lam = 1.0).fit(cov_train, X_train[:, n_sample])
+                    X_train[:, n_sample] = X_train[:, n_sample] - residual_model.predict(cov_train)
+                    X_test[:, n_sample] = X_test[:, n_sample] - residual_model.predict(cov_test)
+
+
             # if the user specified an inner cross-validation, estimate models witin inner loop
             if self.inner_cv:
+                if self.cpm_model == 'DecisionTreeCPM':
+                    model_params = [{'max_depth': max_depth, 'min_samples_leaf': min_samples_leaf, 'ccp_alpha': ccp_alpha} for max_depth in [4, 6, 8] 
+                                                                                                                        for min_samples_leaf in [5, 10, 20]
+                                                                                                                        for ccp_alpha in [0.0, 1e-4, 1e-3, 1e-2]]
+                elif self.cpm_model == 'GAMCPM':
+                    model_params = [{'n_splines': 20, 'lam': lam} for lam in np.logspace(-3, 3, 10)]
+                else:
+                    model_params = [{'': 0}]
+
                 best_params, stability_edges = run_inner_folds(X=X_train, y=y_train, covariates=cov_train,
                                                                inner_cv=self.inner_cv,
                                                                edge_selection=self.edge_selection,
+                                                               model_type=self.cpm_model,
+                                                               model_params= model_params,
                                                                results_directory=os.path.join(results_manager.results_directory, 'folds', str(outer_fold)),
                                                                perm_run=perm_run)
                 if not perm_run:
@@ -223,13 +264,20 @@ class CPMRegression:
             if self.select_stable_edges:
                 edges = select_stable_edges(stability_edges, self.stability_threshold)
             else:
-                self.edge_selection.set_params(**best_params)
+                if self.cpm_model == 'LinearCPM':
+                    self.edge_selection.set_params(**best_params['edge']) 
+                else:
+                    self.edge_selection.set_params(**best_params[list(best_params.keys())[0]]['edge'])
                 edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train).return_selected_edges()
 
             results_manager.store_edges(edges=edges, fold=outer_fold)
 
             # Build model and make predictions
-            model = GAMCPMModel(edges=edges).fit(X_train, y_train, cov_train)
+            if self.cpm_model == 'LinearCPM':
+                model = LinearCPMModel(edges=edges).fit(X_train, y_train, cov_train)
+            else:
+                model = NonLinearCPMModel(edges=edges, model=self.cpm_model, params=best_params[list(best_params.keys())[0]]['model']).fit(X_train, y_train, cov_train)
+            
             y_pred = model.predict(X_test, cov_test)
             network_strengths = model.get_network_strengths(X_test, cov_test)
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)

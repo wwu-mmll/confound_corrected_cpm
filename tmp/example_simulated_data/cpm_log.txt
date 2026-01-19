@@ -1,0 +1,12 @@
+Starting CPM Regression Analysis
+==================================================
+Results Directory:       ./tmp/example_simulated_data
+Outer CV strategy:       RepeatedKFold(n_repeats=1, n_splits=10, random_state=42)
+Inner CV strategy:       ShuffleSplit(n_splits=1, random_state=42, test_size=0.2, train_size=None)
+Edge selection method:   UnivariateEdgeSelection(edge_selection=[PThreshold(correction=[None],
+                                                   threshold=[0.05, 0.01])],
+                        edge_statistic=EdgeStatistic(edge_statistic='pearson'))
+Select stable edges:     No
+Impute Missing Values:   Yes
+Number of Permutations:  2
+==================================================

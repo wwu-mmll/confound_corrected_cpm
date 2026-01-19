@@ -88,7 +88,7 @@ class LinearCPMModel:
         for network in ['positive', 'negative']:
             # Compute sum_positive and sum_negative
             connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
-            self.models_residuals[network] = LinearRegression().fit(covariates, connectome[network])
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network])
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
@@ -127,6 +127,7 @@ class LinearCPMModel:
         for network in ['positive', 'negative']:
             # Compute sum_positive and sum_negative
             connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network])
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
@@ -148,20 +149,21 @@ class LinearCPMModel:
             # Compute sum_positive and sum_negative
             connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+
         return {"connectome": connectome, "residuals": residuals}
 
 
 class GAMCPMModel(LinearCPMModel):
 
-    def __init__(self, edges, gam_params = None):
+    def __init__(self, edges, gam_params):
         super().__init__(edges)
-        self.gam_params = gam_params if gam_params else {}
+        self.gam_params = gam_params
 
     def _make_gam_terms(self, n_features):
         
         gam_terms = []
         for i in range(n_features):
-            gam_terms.append(s(i))
+            gam_terms.append(s(i, n_splines = self.gam_params["n_splines"]))
 
         if len(gam_terms) == 1:
             return gam_terms[0]
@@ -176,7 +178,7 @@ class GAMCPMModel(LinearCPMModel):
                 connectome[network] = X[:, self.edges[network]]
             else:
                 connectome[network] = np.zeros((X.shape[0], 1))  
-            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True)) #np.zeros((X.shape[0], 1))  #LinearRegression().fit(covariates, connectome[network])
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network])
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
 
@@ -214,15 +216,12 @@ class GAMCPMModel(LinearCPMModel):
         connectome = {}
         residuals = {}
         for network in ['positive', 'negative']:
-            # Compute sum_positive and sum_negative
-            #for network in ['positive', 'negative']:
             if len(self.edges[network]) > 0:
                 connectome[network] = X[:, self.edges[network]]
             else:
                 connectome[network] = np.zeros((X.shape[0], 1))  
-            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True)) #np.zeros((X.shape[0], 1))  #LinearRegression().fit(covariates, connectome[network])
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network])#.mean(axis=1, keepdims=True))
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
-
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
         connectome['both'] = np.hstack((connectome['positive'], connectome['negative']))
@@ -243,6 +242,7 @@ class GAMCPMModel(LinearCPMModel):
             # Compute sum_positive and sum_negative
             connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+
         return {"connectome": connectome, "residuals": residuals}
 
 
@@ -260,7 +260,7 @@ class DecisionTreeCPMModel(LinearCPMModel):
                 connectome[network] = X[:, self.edges[network]]
             else:
                 connectome[network] = np.zeros((X.shape[0], 1))  
-            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True)) #np.zeros((X.shape[0], 1))  #LinearRegression().fit(covariates, connectome[network])
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network])#.mean(axis=1, keepdims=True))
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
@@ -301,7 +301,7 @@ class DecisionTreeCPMModel(LinearCPMModel):
                 connectome[network] = X[:, self.edges[network]]
             else:
                 connectome[network] = np.zeros((X.shape[0], 1))  
-            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True)) #np.zeros((X.shape[0], 1))  #LinearRegression().fit(covariates, connectome[network])
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True))
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
         residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
@@ -323,6 +323,110 @@ class DecisionTreeCPMModel(LinearCPMModel):
             # Compute sum_positive and sum_negative
             connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+
         return {"connectome": connectome, "residuals": residuals}
+
+
+class NonLinearCPMModel(LinearCPMModel):
+
+    def __init__(self, edges, model, params = None):
+        super().__init__(edges)
+        self.model = model
+        self.params = params if params else {}
+
+    def _make_gam_terms(self, n_features):
+    
+        gam_terms = []
+        for i in range(n_features):
+            gam_terms.append(s(i, n_splines = self.params["n_splines"]))
+
+        if len(gam_terms) == 1:
+            return gam_terms[0]
+        else:
+            return reduce(operator.add, gam_terms)
+        
+
+    def get_cpm_model(self, connectome_shape=None):
+
+        if self.model == 'GAMCPM':
+            return LinearGAM(self._make_gam_terms(connectome_shape), lam=self.params['lam'])
+        elif self.model == 'DecisionTreeCPM':
+            return DecisionTreeRegressor(random_state=0, **self.params)
+
+    
+    def fit(self, X, y, covariates):
+        connectome = {}
+        residuals = {}
+        for network in ['positive', 'negative']:
+            if len(self.edges[network]) > 0:
+                connectome[network] = X[:, self.edges[network]]
+            else:
+                connectome[network] = np.zeros((X.shape[0], 1))  
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network])
+            residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+
+        residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
+        connectome['both'] = np.hstack((connectome['positive'], connectome['negative']))
+
+        for network in NetworkDict().keys():
+            self.models['connectome'][network] = self.get_cpm_model(connectome[network].shape[1]).fit(connectome[network], y)
+            self.models['covariates'][network] = self.get_cpm_model(covariates.shape[1]).fit(covariates, y)
+            self.models['residuals'][network] = self.get_cpm_model(residuals[network].shape[1]).fit(residuals[network], y)
+            self.models['full'][network] = self.get_cpm_model(connectome[network].shape[1] + covariates.shape[1]).fit(np.hstack((connectome[network], covariates)), y)
+
+        return self
+    
+    def predict(self, X, covariates):
+        """
+        Predict using the fitted CPM model.
+
+        This method generates predictions for the target variable using the
+        connectome, covariates, residuals, and full models.
+
+        Parameters
+        ----------
+        X : numpy.ndarray
+            A 2D array of shape (n_samples, n_features) representing the connectome data.
+        covariates : numpy.ndarray
+            A 2D array of shape (n_samples, n_covariates) representing the covariates.
+
+        Returns
+        -------
+        ModelDict
+            A dictionary containing predictions for each network and model type
+            (connectome, covariates, residuals, and full model).
+        """
+        connectome = {}
+        residuals = {}
+        for network in ['positive', 'negative']:
+            if len(self.edges[network]) > 0:
+                connectome[network] = X[:, self.edges[network]]
+            else:
+                connectome[network] = np.zeros((X.shape[0], 1))  
+            self.models_residuals[network] =  LinearRegression().fit(covariates, connectome[network].mean(axis=1, keepdims=True))
+            residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+
+        residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
+        connectome['both'] = np.hstack((connectome['positive'], connectome['negative']))
+
+        predictions = ModelDict()
+        for network in ['positive', 'negative', 'both']:
+            predictions['connectome'][network] = self.models['connectome'][network].predict(connectome[network])
+            predictions['covariates'][network] = self.models['covariates'][network].predict(covariates)
+            predictions['residuals'][network] = self.models['residuals'][network].predict(residuals[network])
+            predictions['full'][network] = self.models['full'][network].predict(np.hstack((connectome[network], covariates)))
+
+        return predictions
+
+    def get_network_strengths(self, X, covariates):
+        connectome = {}
+        residuals = {}
+        for network in ['positive', 'negative']:
+            # Compute sum_positive and sum_negative
+            connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
+            residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
+
+        return {"connectome": connectome, "residuals": residuals}
+
 
 

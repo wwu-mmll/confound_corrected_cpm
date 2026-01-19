@@ -273,6 +273,22 @@ class HTMLReporter:
         blocks = ar.Blocks(blocks=[third_header, third_row], label='Brain Plots')
         return blocks
 
+    # def generate_edge_page(self):
+    #     import numpy as np
+
+    #     dfs = dict()
+    #     for network in ['positive', 'negative']:
+    #         edges = {'stability': np.load(os.path.join(self.results_directory, f"stability_{network}_edges.npy")),
+    #                  'stability_significance': np.load(os.path.join(self.results_directory, f"sig_stability_{network}_edges.npy"))}
+    #         dfs[network] = self.create_edge_table(edges, self.atlas_labels)
+
+
+    #     first_header = ar.Group(blocks=[ar.Text("## Positive Edges"), ar.Text("## Negative Edges")], columns=2)
+    #     first_row = ar.Group(blocks=[ar.DataTable(df=dfs['positive']), ar.DataTable(df=dfs['negative'])], columns=2)
+
+    #     blocks = ar.Blocks(blocks=[first_header, first_row], label='Stable Edges')
+    #     return blocks
+    
     def generate_edge_page(self):
         import numpy as np
 
@@ -282,12 +298,22 @@ class HTMLReporter:
                      'stability_significance': np.load(os.path.join(self.results_directory, f"sig_stability_{network}_edges.npy"))}
             dfs[network] = self.create_edge_table(edges, self.atlas_labels)
 
+        first_header = ar.Group(blocks=[ar.Text("## Positive Edges"), ar.Text("## Negative Edges")],columns=2)
 
-        first_header = ar.Group(blocks=[ar.Text("## Positive Edges"), ar.Text("## Negative Edges")], columns=2)
-        first_row = ar.Group(blocks=[ar.DataTable(df=dfs['positive']), ar.DataTable(df=dfs['negative'])], columns=2)
+        if dfs['positive'] is None or dfs['positive'].empty:
+            positive_block = ar.Text("Keine positiven stabilen Edges selektiert.")
+        else:
+            positive_block = ar.DataTable(df=dfs['positive'])
+        if dfs['negative'] is None or dfs['negative'].empty:
+            negative_block = ar.Text("Keine negativen stabilen Edges selektiert.")
+        else:
+            negative_block = ar.DataTable(df=dfs['negative'])
 
+        first_row = ar.Group(blocks=[positive_block, negative_block], columns=2)
         blocks = ar.Blocks(blocks=[first_header, first_row], label='Stable Edges')
+
         return blocks
+
 
     @staticmethod
     def create_edge_table(matrix, atlas):

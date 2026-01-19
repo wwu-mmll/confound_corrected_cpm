@@ -251,6 +251,12 @@ class ResultsManager:
         best_params_ids = self.agg_results['spearman_score'].groupby(['network', 'model'])['mean'].idxmax()
         best_params = self.cv_results.loc[(0, best_params_ids.loc[('both', 'full')][1], 'both', 'full'), 'params']
         best_param_id = best_params_ids.loc[('both', 'full')][1]
+
+        if isinstance(best_params, pd.Series):
+            best_params = best_params.to_dict()
+        elif isinstance(best_params, list) or isinstance(best_params, np.ndarray):
+            best_params = best_params[0]
+    
         return best_params, best_param_id
 
     @staticmethod
