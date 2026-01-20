@@ -36,7 +36,7 @@ Install the package from GitHub:
 
 ```bash
 git clone https://github.com/mmll/confound_corrected_cpm.git
-cd cpm_python
+cd confound_corrected_cpm
 pip install .
 ```
 
