@@ -107,7 +107,7 @@ class CPMRegression:
             self.logger.info(f"Stability threshold:     {self.stability_threshold}")
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
         self.logger.info(f"CPM Model:               {self.cpm_model}")
-        self.logger.info(f"Calculate residuals:     {'Yes' if self.calculate_residuals else 'No'}")
+        self.logger.info(f"Calculate residuals:     {self.calculate_residuals if self.calculate_residuals else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info("="*50)
 

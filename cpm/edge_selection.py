@@ -211,7 +211,7 @@ class EdgeStatistic(BaseEstimator):
             _, p_values = one_sample_t_test(X, 0)
             valid_edges = p_values < 0.05
         else:
-            valid_edges = np.bool(np.ones(X.shape[1]))
+            valid_edges = np.ones(X.shape[1], dtype=bool) #valid_edges = np.bool(np.ones(X.shape[1]))
 
         if self.edge_statistic == 'pearson':
             r_edges_masked, p_edges_masked = pearson_correlation_with_pvalues(y, X[:, valid_edges])
