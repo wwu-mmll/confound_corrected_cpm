@@ -69,6 +69,7 @@ class CPMRegression:
         np.random.seed(42)
         os.makedirs(self.results_directory, exist_ok=True)
         os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
+        os.makedirs(os.path.join(self.results_directory, "permutation"), exist_ok=True)
         setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
         self.logger = logging.getLogger(__name__)
 
@@ -198,8 +199,8 @@ class CPMRegression:
         self.logger.info("=" * 50)
         self.logger.info("Estimation completed.")
         self.logger.info("Generating results file.")
-        #reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
-        #reporter.generate_html_report()
+        reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
+        reporter.generate_html_report()
 
     def generate_html_report(self):
         self.logger.info("Generating HTML report.")
@@ -233,7 +234,11 @@ class CPMRegression:
         :param covariates: Covariates to control for.
         :param perm_run: Does this include permutation runs or is this a true run.
         """
-        results_manager = ResultsManager(output_dir=self.results_directory, n_runs=y.shape[1],
+        if perm_run:
+            results_directory = os.path.join(self.results_directory, "permutation")
+        else:
+            results_directory = self.results_directory
+        results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
                                          device=self.device)
 

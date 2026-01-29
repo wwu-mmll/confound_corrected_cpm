@@ -9,7 +9,8 @@ import torch
 from glob import glob
 
 from cccpm.constants import Networks, Models, Metrics
-from cccpm.utils import vector_to_upper_triangular_matrix, vector_to_matrix_tensor_version
+from cccpm.utils import vector_to_matrix_tensor_version, matrix_to_vector_tensor_version, matrix_to_vector_numpy, vector_to_matrix_numpy
+from statsmodels.stats.multitest import multipletests
 
 
 class ResultsManager:
@@ -114,17 +115,18 @@ class ResultsManager:
         :param results_directory: Directory to save the results.
         """
         if best_param_id is None:
-            best_param_id = 0
-            n_runs = 1
-        else:
-            n_runs = best_param_id.size(0)
-        run_indices = torch.arange(n_runs, device=self.cv_edges.device)
+            best_param_id = torch.arange(1, device=self.cv_edges.device)
+
+        run_indices = torch.arange(self.dims['runs'], device=self.cv_edges.device)
 
         # 1. Advanced Indexing: Select the specific param for each run simultaneously
         # Input Shape:  [N_Features, 2, Params, Folds, Runs]
         # We index Dim 2 (Params) and Dim 4 (Runs) with paired vectors.
-        # Result Shape: [N_Features, 2, Folds, Runs]
+        # Result Shape: [Runs, N_Features, 2, Folds]
         selected_edges = self.cv_edges[:, :, best_param_id, :, run_indices]
+
+        # reshape to [N_Features, 2, Folds, Runs]
+        selected_edges = selected_edges.permute(1, 2, 3, 0)
 
         # 2. Calculate Stability
         # Average over Folds (Dim 2)
@@ -195,7 +197,7 @@ class ResultsManager:
         :param folder: Directory containing the results file.
         :return: DataFrame with the loaded results.
         """
-        results = pd.read_csv(os.path.join(folder, 'cv_results_mean_std.csv'), header=[0, 1], index_col=[0, 1])
+        results = pd.read_csv(os.path.join(folder, 'cv_results_summary.csv'), header=[0, 1], index_col=[0, 1, 2])
         results = results.loc[:, results.columns.get_level_values(1) == 'mean']
         results.columns = results.columns.droplevel(1)
         return results
@@ -415,7 +417,7 @@ class PermutationManager:
             elif column.endswith('score'):
                 condition_count = (true_group[column].values[0] < perms_group[column].astype(float)).sum()
 
-            result_dict[column] = condition_count / (len(perms_group[column]) + 1)
+            result_dict[column] = (condition_count + 1) / (len(perms_group[column]))
 
         return pd.Series(result_dict)
 
@@ -429,35 +431,13 @@ class PermutationManager:
         true_results = ResultsManager.load_cv_results(results_directory)
 
         perm_dir = os.path.join(results_directory, 'permutation')
-        valid_perms = glob(os.path.join(perm_dir, '*'))
-        perm_results = list()
-        stability_positive = list()
-        stability_negative = list()
-        for perm_run_folder in valid_perms:
-            try:
-                perm_res = ResultsManager.load_cv_results(perm_run_folder)
-                perm_res['permutation'] = os.path.basename(perm_run_folder)
-                perm_res = perm_res.set_index('permutation', append=True)
-                perm_results.append(perm_res)
+        perm_results = ResultsManager.load_cv_results(perm_dir)
 
-                # load edge stability
-                stability_positive.append(np.load(os.path.join(perm_run_folder, 'stability_positive_edges.npy')))
-                stability_negative.append(np.load(os.path.join(perm_run_folder, 'stability_negative_edges.npy')))
+        true_edge_stability = np.load(os.path.join(results_directory, 'stability_edges.npy'))
+        perm_edge_stability = np.load(os.path.join(perm_dir, 'stability_edges.npy'))
 
-            except FileNotFoundError:
-                print(f'No permutation results found for {perm_run_folder}')
-        concatenated_df = pd.concat(perm_results)
-        concatenated_df.to_csv(os.path.join(results_directory, 'permutation_results.csv'))
-        p_values = PermutationManager.calculate_p_values(true_results, concatenated_df)
+        p_values = PermutationManager.calculate_p_values(true_results, perm_results)
         p_values.to_csv(os.path.join(results_directory, 'p_values.csv'))
-
-        # permutation stability
-        stability_positive = np.stack(stability_positive)
-        stability_negative = np.stack(stability_negative)
-
-        # actual stability
-        true_stability_positive = np.load(os.path.join(results_directory, 'stability_positive_edges.npy'))
-        true_stability_negative = np.load(os.path.join(results_directory, 'stability_negative_edges.npy'))
 
         use_fdr = True
         if use_fdr:
@@ -465,11 +445,9 @@ class PermutationManager:
         else:
             calculate_p_values_edges = PermutationManager.calculate_p_values_edges_max_value
 
-        sig_stability_positive = calculate_p_values_edges(true_stability_positive, stability_positive)
-        sig_stability_negative = calculate_p_values_edges(true_stability_negative, stability_negative)
+        stability_significance = calculate_p_values_edges(true_edge_stability, perm_edge_stability)
 
-        np.save(os.path.join(results_directory, 'sig_stability_positive_edges.npy'), sig_stability_positive)
-        np.save(os.path.join(results_directory, 'sig_stability_negative_edges.npy'), sig_stability_negative)
+        np.save(os.path.join(results_directory, 'stability_edges_significance.npy'), stability_significance)
 
         logger.debug("Saving significance of edge stability.")
         logger.info("Permutation test results")
@@ -550,25 +528,17 @@ class PermutationManager:
             computing empirical p-values and then applying the Benjamini–Yekutieli correction
             to control the expected false discovery rate across all edges.
         """
-        n_permutations = permutation_stability.shape[0]
-        triu_indices = np.triu_indices_from(true_stability, k=1)
-
-        # Flatten permutation values at upper triangle positions
-        perm_values = permutation_stability[:, triu_indices[0], triu_indices[1]]  # shape: (n_permutations, n_edges)
+        n_permutations = permutation_stability.shape[-1]
+        permutation_stability_flattenened = matrix_to_vector_numpy(permutation_stability, dim=0)
+        true_stability_flattenened = matrix_to_vector_numpy(true_stability, dim=0)
 
         # Compute empirical p-values for each edge
-        true_values = true_stability[triu_indices]
-        p_vals = (np.sum(perm_values >= true_values[None, :], axis=0) + 1) / (n_permutations + 1)
-        #p_vals = (np.sum(perm_values >= 1, axis=0) + 1) / 1000
+        condition_count = (true_stability_flattenened < permutation_stability_flattenened).sum(axis=-1)
+        p_vals = (condition_count + 1) / n_permutations
 
         # Apply Benjamini-Yekutieli correction
-        #_, p_vals_corrected, _, _ = multipletests(p_vals, alpha=0.05, method='fdr_by')
-        p_vals_corrected = p_vals
-        # Fill into symmetric matrix
-        sig_stability = np.ones_like(true_stability)
-        for idx, (i, j) in enumerate(zip(*triu_indices)):
-            p = p_vals_corrected[idx]
-            sig_stability[i, j] = p
-            sig_stability[j, i] = p
+        p_vals_corrected = np.full_like(p_vals, np.nan)
+        _, p_vals_corrected[:, 0], _, _ = multipletests(p_vals[:, 0], alpha=0.05, method='fdr_by')
+        _, p_vals_corrected[:, 1], _, _ = multipletests(p_vals[:, 1], alpha=0.05, method='fdr_by')
 
-        return sig_stability
+        return vector_to_matrix_numpy(p_vals_corrected, dim=0)
