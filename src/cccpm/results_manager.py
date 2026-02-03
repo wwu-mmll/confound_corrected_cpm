@@ -142,34 +142,40 @@ class ResultsManager:
                     vector_to_matrix_tensor_version(edge_stability, dim=0).cpu().numpy())
         return edge_stability
 
-    def store_predictions(self, y_pred, y_true, params, fold, param_id, test_indices):
-        """
-        Update predictions DataFrame with new predictions and parameters.
+    def store_predictions(self, y_pred, y_true, fold, test_indices):
+        y_pred = y_pred.detach().cpu().numpy().squeeze(-1)
+        y_true = y_true.reshape(-1)
 
-        :param y_pred: Predicted values.
-        :param y_true: True values.
-        :param params: Best hyperparameters from inner cross-validation.
-        :param fold: Current fold number.
-        :return: Updated predictions DataFrame.
-        """
-        #preds = (pd.DataFrame.from_dict(y_pred).stack().explode().reset_index().rename(
-        #    {'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1).set_index(['network', 'model']))
-        preds = (
-            pd.DataFrame.from_dict(y_pred)
-            .stack()
-            .explode()
-            .reset_index()
-            .rename({'level_0': 'network', 'level_1': 'model', 0: 'y_pred'}, axis=1)
-            .set_index(['network', 'model'])
+        batch_size = y_pred.shape[0]
+        n_models = len(Models)
+        n_networks = len(Networks)
+        n_combinations = n_models * n_networks
+        network_names = [n.name for n in sorted(Networks, key=lambda x: x.value)]
+        model_names = [m.name for m in sorted(Models, key=lambda x: x.value)]
+
+        flat_true = np.repeat(y_true, n_combinations)
+
+        multi_index = pd.MultiIndex.from_product(
+            [test_indices, model_names, network_names],
+            names=['sample_index', 'model', 'network']
         )
-        n_network_model = ModelDict.n_models() * NetworkDict.n_networks()
-        preds['y_true'] = np.tile(y_true, n_network_model)
-        preds['params'] = [params] * y_true.shape[0] * n_network_model
-        preds['fold'] = [fold] * y_true.shape[0] * n_network_model
-        preds['param_id'] = [param_id] * y_true.shape[0] * n_network_model
-        preds['sample_index'] = np.tile(test_indices, n_network_model)  # include indices
-        self.cv_predictions = pd.concat([self.cv_predictions, preds], axis=0)
-        return
+        flat_preds = y_pred.ravel()
+
+        # 5. Build Mini-DataFrame
+        batch_df = pd.DataFrame({
+            'y_pred': flat_preds,
+            'y_true': flat_true
+        }, index=multi_index)
+
+        # Add fold metadata
+        batch_df['fold'] = fold
+
+        # Reset index to turn MultiIndex levels into columns
+        batch_df = batch_df.reset_index()
+
+        self.cv_predictions.append(batch_df)
+
+
 
     def store_network_strengths(self, network_strengths, y_true, fold):
         dfs = list()
@@ -305,6 +311,10 @@ class ResultsManager:
 
         self.agg_results = df_agg.copy()
         df_agg.to_csv(os.path.join(self.results_directory, 'cv_results_summary.csv'), float_format='%.4f')
+
+        if self.cv_predictions:
+            self.cv_predictions = pd.concat(self.cv_predictions, ignore_index=True)
+            self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
         return df_agg
 
     def aggregate_inner_folds(self):

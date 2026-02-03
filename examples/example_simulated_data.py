@@ -6,7 +6,7 @@ from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
 
 
-X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=1000, n_features=4950, link_type='direct_link')
+X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=100, n_features=1225, link_type='direct_link')
 univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
                                                     edge_selection=[PThreshold(threshold=[0.05, 0.01],
                                                                                correction=[None])],
@@ -15,8 +15,8 @@ univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
 cpm = CPMRegression(results_directory='./tmp/example_simulated_data',
                     cv=RepeatedKFold(n_splits=10, n_repeats=1, random_state=42),
                     edge_selection=univariate_edge_selection,
-                    inner_cv=ShuffleSplit(n_splits=10, test_size=0.2, random_state=42),
-                    n_permutations=1000,
+                    inner_cv=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
+                    n_permutations=100,
                     #atlas_labels='atlas_labels.csv',
                     select_stable_edges=False,
                     device='cuda')

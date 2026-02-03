@@ -28,9 +28,9 @@ class HTMLReporter:
             self.atlas_labels = None
 
         # Load results
-        self.df = pd.read_csv(os.path.join(results_directory, 'cv_results.csv'))
-        self.df_mean = load_results_from_folder(results_directory, 'cv_results_mean_std.csv')
-        self.df_mean = self.df_mean.reorder_levels(["model", "network"])
+        self.df = pd.read_csv(os.path.join(results_directory, 'cv_results_full.csv')).drop("run", axis=1)
+        self.df_mean = load_results_from_folder(results_directory, 'cv_results_summary.csv')
+        self.df_mean = self.df_mean.reorder_levels(["model", "network", "run"])
         model_order = ["covariates", "connectome", "full", "residuals", "increment"]
         network_order = ["positive", "negative", "both"]
 
@@ -41,11 +41,11 @@ class HTMLReporter:
             )
         )
         # Now sort
-        self.df_mean = self.df_mean.sort_index()
+        self.df_mean = self.df_mean.sort_index().droplevel("run")
         self.df_predictions = load_data_from_folder(results_directory, 'cv_predictions.csv')
         self.df_p_values = load_data_from_folder(results_directory, 'p_values.csv')
-        self.df_permutations = load_data_from_folder(results_directory, 'permutation_results.csv')
-        self.df_network_strengths = load_data_from_folder(results_directory, 'cv_network_strengths.csv')
+        self.df_permutations = load_data_from_folder(os.path.join(results_directory, 'permutation'), 'cv_results_summary.csv')
+        #self.df_network_strengths = load_data_from_folder(results_directory, 'cv_network_strengths.csv')
 
     def generate_html_report(self):
 
@@ -53,7 +53,7 @@ class HTMLReporter:
         main_results_page = self.generate_main_results_page()
         edges_page = self.generate_brain_plot_page()
         edges_table_page = self.generate_edge_page()
-        network_strength_page = self.generate_network_strengths_page()
+        #network_strength_page = self.generate_network_strengths_page()
         data_description_page = self.generate_data_description_page()
         hyperparameters_page = self.generate_hyperparameters_page()
         data_insight_page = self.generate_target_cov_features_insights_page()  # <-- add this
@@ -64,7 +64,7 @@ class HTMLReporter:
             data_description_page,
             main_results_page,
             hyperparameters_page,
-            network_strength_page,
+            #network_strength_page,
             edges_page,
             edges_table_page
         ]
@@ -280,9 +280,11 @@ class HTMLReporter:
         import numpy as np
 
         dfs = dict()
-        for network in ['positive', 'negative']:
-            edges = {'stability': np.load(os.path.join(self.results_directory, f"stability_{network}_edges.npy")),
-                     'stability_significance': np.load(os.path.join(self.results_directory, f"sig_stability_{network}_edges.npy"))}
+        edge_stability = np.load(os.path.join(self.results_directory, f"stability_edges.npy"))
+        edge_stability_significance = np.load(os.path.join(self.results_directory, f"stability_edges_significance.npy"))
+        for i, network in enumerate(['positive', 'negative']):
+            edges = {'stability': edge_stability[:, :, i, :].squeeze(),
+                     'stability_significance': edge_stability_significance[:, :, i]}
             dfs[network] = self.create_edge_table(edges, self.atlas_labels)
 
 

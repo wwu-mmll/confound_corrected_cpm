@@ -13,7 +13,7 @@ import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold, RepeatedKFold, StratifiedKFold
 from sklearn.linear_model import LinearRegression
 
-from cccpm.fold import run_inner_folds
+from cccpm.inner_fold import run_inner_folds
 from cccpm.logging import setup_logging
 #from cccpm.more_models import BaseCPMModel, LinearCPMModel
 from cccpm.pytorch_model import LinearCPMModel
@@ -293,12 +293,15 @@ class CPMRegression:
             # Build model and make predictions
             model = self.cpm_model(edges=edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
-            network_strengths = model.get_network_strengths(X_test, cov_test)
+            if not perm_run:
+                results_manager.store_predictions(y_pred=y_pred, y_true=y_test, fold=outer_fold, test_indices=test)
+
+            # compute metrics
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
-            #results_manager.store_predictions(y_pred=y_pred, y_true=y_test, params=best_params, fold=outer_fold,
-            #                                  param_id=0, test_indices=test)
             results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
 
+            # compute network strengths
+            #network_strengths = model.get_network_strengths(X_test, cov_test)
             #results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test, fold=outer_fold)
 
         # once all outer folds are done, calculate final results and edge stability
@@ -307,6 +310,6 @@ class CPMRegression:
 
         if not perm_run:
             self.logger.info(results_manager.agg_results.round(4).to_string())
-            #results_manager.save_predictions()
+            results_manager.save_predictions()
             #results_manager.save_network_strengths()
             self.results_manager = results_manager
