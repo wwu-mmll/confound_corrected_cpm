@@ -21,5 +21,5 @@ cpm = CPMRegression(results_directory='./tmp/example_simulated_data',
                     select_stable_edges=False,
                     device='cuda')
 
-cpm.run(X=X, y=y, covariates=covariates)
-
+#cpm.run(X=X, y=y, covariates=covariates)
+cpm.generate_html_report()

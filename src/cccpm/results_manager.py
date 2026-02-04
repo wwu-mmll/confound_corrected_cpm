@@ -72,6 +72,7 @@ class ResultsManager:
 
         # Placeholder for predictions if you need them later
         self.cv_predictions = []
+        self.cv_network_strengths = pd.DataFrame()
         self.agg_results = None
 
     def store_edges(self, param_idx: int, fold_idx: int, edges_tensor):
@@ -178,22 +179,20 @@ class ResultsManager:
 
 
     def store_network_strengths(self, network_strengths, y_true, fold):
-        dfs = list()
-        models = ['connectome', 'residuals']
-        networks = ['positive', 'negative']
-        for model in models:
-            for network in networks:
-                df = pd.DataFrame()
-                df['y_true'] = y_true
-                df['network_strength'] = np.squeeze(network_strengths[model][network])
-                df['model'] = [model] * network_strengths[model][network].shape[0]
-                df['fold'] = [fold] * network_strengths[model][network].shape[0]
-                df['network'] = [network] * network_strengths[model][network].shape[0]
-                dfs.append(df)
+        # Use a list comprehension to build data more concisely
+        data = [
+            pd.DataFrame({
+                'y_true': y_true.squeeze(),
+                'network_strength': np.squeeze(network_strengths[m][n].cpu().numpy()),
+                'model': m,
+                'network': n,
+                'fold': fold
+            })
+            for m in ['connectome', 'residuals']
+            for n in ['positive', 'negative']
+        ]
 
-        df = pd.concat(dfs, axis=0)
-        self.cv_network_strengths = pd.concat([self.cv_network_strengths, df], axis=0)
-        return
+        self.cv_network_strengths = pd.concat([self.cv_network_strengths] + data, ignore_index=True)
 
     @staticmethod
     def load_cv_results(folder):
