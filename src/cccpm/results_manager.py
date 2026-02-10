@@ -8,7 +8,7 @@ import torch
 
 from glob import glob
 
-from cccpm.constants import Networks, Models, Metrics
+from cccpm.constants import Networks, Models, Metrics, TaskType, get_metrics_for_task
 from cccpm.utils import vector_to_matrix_tensor_version, matrix_to_vector_tensor_version, matrix_to_vector_numpy, vector_to_matrix_numpy
 from statsmodels.stats.multitest import multipletests
 
@@ -246,7 +246,7 @@ class ResultsManager:
         self.agg_results.to_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
         return
 
-    def calculate_final_cv_results(self):
+    def calculate_final_cv_results(self, task_type: TaskType = TaskType.regression):
         # Calculate increment: Full - Connectome
         self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.connectome]
 
@@ -259,7 +259,8 @@ class ResultsManager:
         # Get Lists of Names for Indices
         model_names = [m.name for m in Models]
         net_names = [n.name for n in Networks]
-        metrics = [m.name for m in Metrics]
+        all_metrics = [m.name for m in Metrics]
+        relevant_metrics = [m.name for m in get_metrics_for_task(task_type)]
         fold_indices = range(n_folds)
         run_indices = range(n_runs)
 
@@ -275,8 +276,9 @@ class ResultsManager:
             names=['model', 'network', 'fold', 'run']
         )
 
-        # 4. Create DataFrame
-        df_raw = pd.DataFrame(raw_matrix, index=raw_index, columns=metrics)
+        # 4. Create DataFrame and filter to relevant metrics
+        df_raw = pd.DataFrame(raw_matrix, index=raw_index, columns=all_metrics)
+        df_raw = df_raw[relevant_metrics]
 
         # Save Raw Results
         df_raw.to_csv(os.path.join(self.results_directory, 'cv_results_full.csv'))
@@ -300,9 +302,9 @@ class ResultsManager:
             names=['model', 'network', 'run']
         )
 
-        # 5. Create DataFrame with MultiIndex Columns
-        df_mean = pd.DataFrame(means_flat, index=agg_index, columns=metrics)
-        df_std = pd.DataFrame(stds_flat, index=agg_index, columns=metrics)
+        # 5. Create DataFrame with MultiIndex Columns, filtered to relevant metrics
+        df_mean = pd.DataFrame(means_flat, index=agg_index, columns=all_metrics)[relevant_metrics]
+        df_std = pd.DataFrame(stds_flat, index=agg_index, columns=all_metrics)[relevant_metrics]
 
         # Concatenate columns: Metric -> (Mean, Std)
         df_agg = pd.concat([df_mean, df_std], axis=1, keys=['mean', 'std'])
@@ -357,10 +359,16 @@ class ResultsManager:
         df.to_csv(path)
         print(f"Inner CV means saved to {path}")
 
-    def find_best_params(self):
+    def find_best_params(self, task_type=TaskType.regression):
+        # Select appropriate metric based on task type
+        if task_type == TaskType.classification:
+            metric = Metrics.balanced_accuracy
+        else:
+            metric = Metrics.pearson_score
+
         # Slice Result Shape: [Params, Folds]
         scores_slice = self.results[
-            Metrics.pearson_score,
+            metric,
             Models.connectome,
             Networks.both
         ]
@@ -409,6 +417,18 @@ class PermutationManager:
         p_values_df = p_values_df.set_index(['network', 'model'])
         return p_values_df
 
+    # Metrics where lower is better (p-value: true < perm)
+    LOWER_IS_BETTER = {'mean_squared_error', 'mean_absolute_error'}
+
+    @staticmethod
+    def _is_lower_better(column_name):
+        """Check if a metric is one where lower values are better."""
+        if column_name in PermutationManager.LOWER_IS_BETTER:
+            return True
+        if column_name.endswith('error'):
+            return True
+        return False
+
     @staticmethod
     def _calculate_group_p_value(true_group, perms_group):
         """
@@ -420,10 +440,10 @@ class PermutationManager:
         """
         result_dict = {}
         for column in true_group.columns:
-            condition_count = 0
-            if column.endswith('error'):
+            if PermutationManager._is_lower_better(column):
                 condition_count = (true_group[column].values[0] > perms_group[column].astype(float)).sum()
-            elif column.endswith('score'):
+            else:
+                # Higher is better: score, accuracy, balanced_accuracy, f1_score, roc_auc, etc.
                 condition_count = (true_group[column].values[0] < perms_group[column].astype(float)).sum()
 
             result_dict[column] = (condition_count + 1) / (len(perms_group[column]))

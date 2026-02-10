@@ -19,18 +19,22 @@ from cccpm.logging import setup_logging
 from cccpm.pytorch_model import LinearCPMModel
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager, PermutationManager
-from cccpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
-from cccpm.scoring import score_regression_models
+from cccpm.utils import (train_test_split, check_data, impute_missing_values,
+                         select_stable_edges, generate_data_insights, detect_task_type, validate_task_type)
+from cccpm.scoring import score_models
 from cccpm.reporting import HTMLReporter
-from cccpm.constants import Networks
+from cccpm.constants import Networks, TaskType
 
 
-class CPMRegression:
+class CPMAnalysis:
     """
-    This class handles the process of performing CPM Regression with cross-validation and permutation testing.
+    This class handles the process of performing CPM analysis with cross-validation and permutation testing.
+
+    Supports both regression and binary classification tasks.
     """
     def __init__(self,
                  results_directory: str,
+                 task_type: Union[TaskType, str, None] = None,
                  cpm_model: Type[LinearCPMModel] = LinearCPMModel,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = KFold(n_splits=10, shuffle=True, random_state=42),
                  inner_cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = None,
@@ -52,6 +56,9 @@ class CPMRegression:
         ----------
         results_directory: str
             Directory to save results.
+        task_type: TaskType, str, or None
+            Type of task: 'regression' or 'classification'.
+            If None, will be auto-detected from target variable.
         cv: Union[BaseCrossValidator, BaseShuffleSplit]
             Outer cross-validation strategy.
         inner_cv: Union[BaseCrossValidator, BaseShuffleSplit]
@@ -66,6 +73,11 @@ class CPMRegression:
             CSV file containing atlas and regions labels.
         """
         self.results_directory = results_directory
+
+        # Convert string to TaskType enum if needed
+        if isinstance(task_type, str):
+            task_type = TaskType(task_type)
+        self.task_type = task_type  # Will be validated/auto-detected in run()
         np.random.seed(42)
         os.makedirs(self.results_directory, exist_ok=True)
         os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
@@ -113,9 +125,11 @@ class CPMRegression:
         """
         Log important information about the analysis in a structured format.
         """
-        self.logger.info("Starting CPM Regression Analysis")
+        task_name = "CPM Classification" if self.task_type == TaskType.classification else "CPM Regression"
+        self.logger.info(f"Starting {task_name} Analysis")
         self.logger.info("="*50)
         self.logger.info(f"Results Directory:       {self.results_directory}")
+        self.logger.info(f"Task Type:               {self.task_type.value if self.task_type else 'Auto-detect'}")
         self.logger.info(f"CPM Model:               {self.cpm_model.name}")
         self.logger.info(f"Outer CV strategy:       {self.cv}")
         self.logger.info(f"Inner CV strategy:       {self.inner_cv}")
@@ -184,6 +198,18 @@ class CPMRegression:
         # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
+
+        # Detect or validate task type
+        if self.task_type is None:
+            self.task_type = detect_task_type(y)
+            self.logger.info(f"Auto-detected task type: {self.task_type.value}")
+        else:
+            validate_task_type(y, self.task_type)
+            self.logger.info(f"Using specified task type: {self.task_type.value}")
+
+        # Save task type to results directory for HTML report
+        with open(os.path.join(self.results_directory, 'task_type.txt'), 'w') as f:
+            f.write(self.task_type.value)
 
         # Estimate models on actual data
         self._single_run(X=X, y=y.reshape(-1, 1), covariates=covariates, perm_run=False)
@@ -274,9 +300,10 @@ class CPMRegression:
                                                                edge_selection=self.edge_selection,
                                                                results_directory=os.path.join(
                                                                    results_manager.results_directory, 'folds', str(outer_fold)),
-                                                               device=self.device)
+                                                               device=self.device,
+                                                               task_type=self.task_type)
             else:
-                best_params = self.edge_selection.param_grid[0]
+                best_params = [self.edge_selection.param_grid[0]] * y.shape[1]
 
             # Use best parameters to estimate performance on outer fold test set
             if self.select_stable_edges:
@@ -291,8 +318,8 @@ class CPMRegression:
             results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
 
             # Build model and make predictions
-            model = self.cpm_model(edges=edges).fit(X_train, y_train, cov_train)
-            y_pred = model.predict(X_test, cov_test)
+            model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type).fit(X_train, y_train, cov_train)
+            y_pred = model.predict(X_test, cov_test, return_proba=True)
             if not perm_run:
                 results_manager.store_predictions(y_pred=y_pred, y_true=y_test, fold=outer_fold, test_indices=test)
                 # compute network strengths
@@ -301,11 +328,11 @@ class CPMRegression:
                                                         fold=outer_fold)
 
             # compute metrics
-            metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
+            metrics = score_models(y_true=y_test, y_pred=y_pred, task_type=self.task_type, device=self.device)
             results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
 
         # once all outer folds are done, calculate final results and edge stability
-        results_manager.calculate_final_cv_results()
+        results_manager.calculate_final_cv_results(task_type=self.task_type)
         results_manager.calculate_edge_stability()
 
         if not perm_run:

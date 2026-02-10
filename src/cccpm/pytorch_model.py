@@ -1,12 +1,15 @@
 import numpy as np
 import torch
 
-from cccpm.constants import Networks, Models
+from cccpm.constants import Networks, Models, TaskType
 
 
 class LinearCPMModel:
     """
     A PyTorch implementation of CPM optimized for speed.
+
+    Supports both regression and binary classification tasks.
+    For classification, uses logistic regression (linear model + sigmoid).
 
     Optimizations:
     1. Vectorized Over Permutations: Fits all N_perms models in parallel.
@@ -19,14 +22,16 @@ class LinearCPMModel:
     """
     name = "LinearCPMTorch"
 
-    def __init__(self, edges, device='cuda'):
+    def __init__(self, edges, device='cuda', task_type=TaskType.regression):
         """
         Args:
             edges: Boolean masks tensor with shape [N_features, 2, N_runs].
                    Dimension 1 corresponds to [Positive, Negative].
             device: 'cuda' or 'cpu'
+            task_type: TaskType.regression or TaskType.classification
         """
         self.device = torch.device(device)
+        self.task_type = task_type
 
         self.edges = torch.as_tensor(edges, device=self.device)
 
@@ -72,9 +77,16 @@ class LinearCPMModel:
         }
 
         # 5. Fit Main Models
+        # Select solvers: logistic (IRLS) for classification, OLS for regression
+        if self.task_type == TaskType.classification:
+            solve_shared = self._solve_shared_logistic
+            solve_batched = self._solve_batched_logistic
+        else:
+            solve_shared = self._solve_shared
+            solve_batched = self._solve_batched_fast
 
         # A. Fit Covariates Model (Shared X) - Done once.
-        self.coefs['covariates'] = self._solve_shared(cov, y)
+        self.coefs['covariates'] = solve_shared(cov, y)
 
         for net in ['positive', 'negative', 'both']:
             # Helper: Reshape inputs into Batches [Perms, Samples, Features]
@@ -92,17 +104,29 @@ class LinearCPMModel:
             # Target y: [N, P] -> [P, N, 1]
             y_batch = y.t().unsqueeze(2)
 
-            # Fit Batched Models (Using Fast Cholesky)
-            self.coefs[f'connectome_{net}'] = self._solve_batched_fast(X_conn, y_batch)
-            self.coefs[f'residuals_{net}'] = self._solve_batched_fast(X_resid, y_batch)
-            self.coefs[f'full_{net}'] = self._solve_batched_fast(X_full, y_batch)
+            # Fit Models
+            self.coefs[f'connectome_{net}'] = solve_batched(X_conn, y_batch)
+            self.coefs[f'residuals_{net}'] = solve_batched(X_resid, y_batch)
+            self.coefs[f'full_{net}'] = solve_batched(X_full, y_batch)
 
         return self
 
-    def predict(self, X, covariates):
+    def predict(self, X, covariates, return_proba=False):
         """
         Predicts y for all permutations.
-        Returns tensor with shape [N_samples, N_models, N_networks, N_runs].
+
+        Args:
+            X: Features [N_samples, N_features]
+            covariates: Covariates [N_samples, N_cov]
+            return_proba: If True and task is classification, returns probabilities.
+                         If False and task is classification, returns class predictions (0/1).
+                         Ignored for regression.
+
+        Returns:
+            Tensor with shape [N_samples, N_models, N_networks, N_runs].
+            - For regression: continuous predictions
+            - For classification with return_proba=True: probabilities [0, 1]
+            - For classification with return_proba=False: class labels {0, 1}
         """
         X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
         cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
@@ -149,9 +173,145 @@ class LinearCPMModel:
             predictions[:, Models.residuals, net_idx, :] = self._pred_batched(X_resid, self.coefs[f'residuals_{net_idx.name}']).squeeze(2).t()
             predictions[:, Models.full, net_idx, :] = self._pred_batched(X_full, self.coefs[f'full_{net_idx.name}']).squeeze(2).t()
 
+        # Apply activation for classification
+        if self.task_type == TaskType.classification:
+            predictions = torch.sigmoid(predictions)
+
+            # Convert probabilities to class labels if requested
+            if not return_proba:
+                predictions = (predictions > 0.5).float()
+
         return predictions
 
+    def predict_proba(self, X, covariates):
+        """
+        Predict class probabilities for classification tasks.
+
+        Args:
+            X: Features [N_samples, N_features]
+            covariates: Covariates [N_samples, N_cov]
+
+        Returns:
+            Tensor with shape [N_samples, N_models, N_networks, N_runs] containing probabilities.
+
+        Note:
+            Only applicable for classification tasks. For regression, returns same as predict().
+        """
+        if self.task_type == TaskType.classification:
+            return self.predict(X, covariates, return_proba=True)
+        else:
+            return self.predict(X, covariates)
+
+    def predict_class(self, X, covariates):
+        """
+        Predict class labels (0/1) for classification tasks.
+
+        Args:
+            X: Features [N_samples, N_features]
+            covariates: Covariates [N_samples, N_cov]
+
+        Returns:
+            Tensor with shape [N_samples, N_models, N_networks, N_runs] containing class labels {0, 1}.
+
+        Note:
+            Only applicable for classification tasks. For regression, returns same as predict().
+        """
+        if self.task_type == TaskType.classification:
+            return self.predict(X, covariates, return_proba=False)
+        else:
+            return self.predict(X, covariates)
+
     # --- SOLVERS ---
+
+    # --- Logistic Regression (IRLS) ---
+
+    def _solve_shared_logistic(self, X, y, max_iter=25, tol=1e-6):
+        """
+        Logistic regression via IRLS for shared X, multiple targets.
+        X: [N, F], y: [N, P] -> Beta: [F+1, P]
+
+        Since IRLS weights differ per permutation, this internally expands
+        to batched operations over permutations.
+        """
+        N = X.size(0)
+        P = y.size(1)
+        ones = torch.ones(N, 1, device=self.device, dtype=X.dtype)
+        X_design = torch.cat([ones, X], dim=1)  # [N, F+1]
+
+        # Expand X for batched operations: [P, N, F+1]
+        X_batch = X_design.unsqueeze(0).expand(P, -1, -1)
+        # y: [N, P] -> [P, N, 1]
+        y_batch = y.t().unsqueeze(2)
+
+        # Initialize with OLS solution, reshaped to [P, F+1, 1]
+        beta = self._solve_shared(X, y).t().unsqueeze(2)
+
+        for _ in range(max_iter):
+            logits = torch.bmm(X_batch, beta)  # [P, N, 1]
+            p = torch.sigmoid(logits)
+
+            W = (p * (1 - p)).clamp(min=1e-8)  # [P, N, 1]
+
+            # Working response
+            z = logits + (y_batch - p) / W  # [P, N, 1]
+
+            # Weighted least squares
+            sqrt_W = torch.sqrt(W)
+            X_w = X_batch * sqrt_W  # [P, N, F+1]
+            z_w = z * sqrt_W  # [P, N, 1]
+
+            XtX = torch.bmm(X_w.transpose(1, 2), X_w)
+            XtX.diagonal(dim1=-2, dim2=-1).add_(1e-8)
+            Xtz = torch.bmm(X_w.transpose(1, 2), z_w)
+
+            beta_new = torch.linalg.solve(XtX, Xtz)
+
+            if torch.max(torch.abs(beta_new - beta)) < tol:
+                beta = beta_new
+                break
+            beta = beta_new
+
+        # Reshape back to [F+1, P]
+        return beta.squeeze(2).t()
+
+    def _solve_batched_logistic(self, X, y, max_iter=25, tol=1e-6):
+        """
+        Logistic regression via IRLS for batched inputs.
+        X: [P, N, F], y: [P, N, 1] -> Beta: [P, F+1, 1]
+        """
+        P, N, F = X.shape
+        ones = torch.ones(P, N, 1, device=self.device, dtype=X.dtype)
+        X_design = torch.cat([ones, X], dim=2)  # [P, N, F+1]
+
+        # Initialize with OLS solution
+        beta = self._solve_batched_fast(X, y)  # [P, F+1, 1]
+
+        for _ in range(max_iter):
+            logits = torch.bmm(X_design, beta)  # [P, N, 1]
+            p = torch.sigmoid(logits)
+
+            W = (p * (1 - p)).clamp(min=1e-8)  # [P, N, 1]
+
+            z = logits + (y - p) / W  # [P, N, 1]
+
+            sqrt_W = torch.sqrt(W)
+            X_w = X_design * sqrt_W  # [P, N, F+1]
+            z_w = z * sqrt_W  # [P, N, 1]
+
+            XtX = torch.bmm(X_w.transpose(1, 2), X_w)
+            XtX.diagonal(dim1=-2, dim2=-1).add_(1e-8)
+            Xtz = torch.bmm(X_w.transpose(1, 2), z_w)
+
+            beta_new = torch.linalg.solve(XtX, Xtz)
+
+            if torch.max(torch.abs(beta_new - beta)) < tol:
+                beta = beta_new
+                break
+            beta = beta_new
+
+        return beta
+
+    # --- Linear Regression (OLS) ---
 
     def _solve_shared(self, X, y):
         """

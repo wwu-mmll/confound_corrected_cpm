@@ -125,16 +125,20 @@ class ReportDataLoader:
         from cccpm.reporting.reporting_utils import load_data_from_folder
         return load_data_from_folder(self.results_directory, 'cv_predictions.csv')
 
-    def load_p_values(self) -> pd.DataFrame:
+    def load_p_values(self) -> Optional[pd.DataFrame]:
         """Load permutation test p-values."""
-        from cccpm.reporting.reporting_utils import load_data_from_folder
-        return load_data_from_folder(self.results_directory, 'p_values.csv')
+        csv_path = os.path.join(self.results_directory, 'p_values.csv')
+        if os.path.exists(csv_path):
+            return pd.read_csv(csv_path)
+        return None
 
-    def load_permutations(self) -> pd.DataFrame:
+    def load_permutations(self) -> Optional[pd.DataFrame]:
         """Load permutation test results."""
-        from cccpm.reporting.reporting_utils import load_data_from_folder
         perm_dir = os.path.join(self.results_directory, 'permutation')
-        return load_data_from_folder(perm_dir, 'cv_results_summary.csv')
+        csv_path = os.path.join(perm_dir, 'cv_results_summary.csv')
+        if os.path.exists(csv_path):
+            return pd.read_csv(csv_path)
+        return None
 
     def load_network_strengths(self) -> pd.DataFrame:
         """Load network strength values."""
@@ -150,12 +154,11 @@ class ReportDataLoader:
         """
         import numpy as np
 
-        edge_stability = np.load(
-            os.path.join(self.results_directory, "stability_edges.npy")
-        )
-        edge_stability_significance = np.load(
-            os.path.join(self.results_directory, "stability_edges_significance.npy")
-        )
+        stability_path = os.path.join(self.results_directory, "stability_edges.npy")
+        significance_path = os.path.join(self.results_directory, "stability_edges_significance.npy")
+
+        edge_stability = np.load(stability_path) if os.path.exists(stability_path) else None
+        edge_stability_significance = np.load(significance_path) if os.path.exists(significance_path) else None
 
         return edge_stability, edge_stability_significance
 
@@ -175,6 +178,19 @@ class ReportDataLoader:
             summary_df = pd.read_csv(summary_path, index_col=0)
 
         return summary_df, scatter_path, summary_path
+
+    def load_task_type(self) -> str:
+        """
+        Load task type from results directory.
+
+        Returns:
+            Task type string ('regression' or 'classification')
+        """
+        task_type_path = os.path.join(self.results_directory, 'task_type.txt')
+        if os.path.exists(task_type_path):
+            with open(task_type_path, 'r') as f:
+                return f.read().strip()
+        return 'regression'
 
     def load_all(self) -> dict:
         """

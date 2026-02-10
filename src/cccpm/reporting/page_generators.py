@@ -385,7 +385,8 @@ class MainResultsPageGenerator2(PageGenerator):
         df_mean: pd.DataFrame,
         df_p_values: pd.DataFrame,
         df_predictions: pd.DataFrame,
-        y_name: str
+        y_name: str,
+        task_type: str = 'regression'
     ) -> ar.Blocks:
         """
         Create main results page with performance plots and tables.
@@ -396,6 +397,7 @@ class MainResultsPageGenerator2(PageGenerator):
             df_p_values: P-values from permutation tests
             df_predictions: Predictions DataFrame
             y_name: Name of target variable
+            task_type: 'regression' or 'classification'
 
         Returns:
             Arakawa Blocks object for the main results page
@@ -405,14 +407,19 @@ class MainResultsPageGenerator2(PageGenerator):
         bar_plot_blocks = self._create_boxplots(df_full)
 
         # Generate prediction scatter plots
-        scatter_block = self._create_prediction_scatter(df_predictions, y_name)
+        scatter_block = self._create_prediction_scatter(df_predictions, y_name, task_type)
         scatter_block_covariates = self._create_covariates_scatter(df_predictions, y_name)
+
+        # Select metric choices based on task type
+        if task_type == 'classification':
+            metric_choices = ['accuracy', 'balanced_accuracy', 'f1_score', 'roc_auc']
+        else:
+            metric_choices = ['explained_variance_score', 'pearson_score', 'mean_squared_error']
 
         # Arrange in layout
         first_row = ar.Group(
             name='header',
-            blocks=[ar.Text("## Brain Connectome"), ar.ChoiceField('Choosemetric', ['explained_variance', 'pearson_score',
-                                                                              'mean_squared_error'])],
+            blocks=[ar.Text("## Brain Connectome"), ar.ChoiceField('Choosemetric', metric_choices)],
             columns=2,
             widths=[4, 1]
         )
@@ -456,15 +463,26 @@ class MainResultsPageGenerator2(PageGenerator):
 
         return bar_plot_blocks
 
-    def _create_prediction_scatter(self, df_predictions: pd.DataFrame, y_name: str) -> ar.Media:
+    def _create_prediction_scatter(self, df_predictions: pd.DataFrame, y_name: str,
+                                    task_type: str = 'regression') -> ar.Media:
         """Generate scatter plot of predictions."""
-        scatter_plot_name = scatter_plot(df_predictions, self.plots_dir, y_name)
-        return ar.Media(
-            file=scatter_plot_name,
-            name="Predictions",
-            caption="Scatter plot of true versus predicted scores.",
-            label='predictions'
-        )
+        if task_type == 'classification':
+            from cccpm.reporting.plots.plots import classification_scatter_plot
+            plot_name = classification_scatter_plot(df_predictions, self.plots_dir, y_name)
+            return ar.Media(
+                file=plot_name,
+                name="Predictions",
+                caption="Predicted probability by true class.",
+                label='predictions'
+            )
+        else:
+            scatter_plot_name = scatter_plot(df_predictions, self.plots_dir, y_name)
+            return ar.Media(
+                file=scatter_plot_name,
+                name="Predictions",
+                caption="Scatter plot of true versus predicted scores.",
+                label='predictions'
+            )
 
     def _create_covariates_scatter(self, df_predictions: pd.DataFrame, y_name: str) -> ar.Media:
         """Generate scatter plot for covariates model."""
@@ -578,8 +596,8 @@ class EdgeTablePageGenerator(PageGenerator):
 
     def generate(
         self,
-        edge_stability: np.ndarray,
-        edge_stability_significance: np.ndarray,
+        edge_stability: Optional[np.ndarray],
+        edge_stability_significance: Optional[np.ndarray],
         atlas_labels: Optional[pd.DataFrame]
     ) -> ar.Blocks:
         """
@@ -593,6 +611,12 @@ class EdgeTablePageGenerator(PageGenerator):
         Returns:
             Arakawa Blocks object for the edge table page
         """
+        if edge_stability is None or edge_stability_significance is None:
+            return ar.Blocks(
+                blocks=[ar.Text("No edge stability data available. Run with permutations to generate.")],
+                label='Stable Edges'
+            )
+
         dfs = {}
 
         # Create tables for positive and negative networks

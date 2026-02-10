@@ -64,6 +64,9 @@ class HTMLReporter:
         # Store atlas labels reference
         self.atlas_labels = self.data_loader.atlas_labels
 
+        # Load task type
+        self.task_type = self.data_loader.load_task_type()
+
         # Load all data needed for report generation
         self._load_data()
 
@@ -99,7 +102,8 @@ class HTMLReporter:
             ),
 
             MainResultsPageGenerator2(self.results_directory, self.plots_dir).generate(
-                self.df, self.df_mean, self.df_p_values, self.df_predictions, self.y_name
+                self.df, self.df_mean, self.df_p_values, self.df_predictions, self.y_name,
+                self.task_type
             ),
 
             HyperparametersPageGenerator(self.results_directory, self.plots_dir).generate(

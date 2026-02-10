@@ -16,12 +16,82 @@ import warnings
 import logging
 
 from cccpm.reporting.plots.plots import pairplot_flexible
+from cccpm.constants import TaskType
 
 
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", category=ConstantInputWarning)
 warnings.filterwarnings("ignore", category=NearConstantInputWarning)
+
+
+def detect_task_type(y):
+    """
+    Automatically detect whether the task is regression or classification.
+
+    Args:
+        y: Target variable (array-like)
+
+    Returns:
+        TaskType.regression or TaskType.classification
+
+    Raises:
+        ValueError: If y is not suitable for either regression or binary classification
+    """
+    y_arr = np.asarray(y).ravel()
+
+    # Get unique values
+    unique_vals = np.unique(y_arr[~np.isnan(y_arr)])  # Exclude NaNs
+
+    # Check if binary (exactly 2 unique values)
+    if len(unique_vals) == 2:
+        # Check if values are 0/1 or -1/1
+        if set(unique_vals) == {0, 1} or set(unique_vals) == {-1, 1}:
+            logger.info(f"Detected binary classification task (unique values: {unique_vals})")
+            return TaskType.classification
+        else:
+            # Two unique values but not standard binary encoding
+            logger.warning(
+                f"Target has only 2 unique values {unique_vals} but not in {0,1} or {-1,1} format. "
+                f"Treating as regression. For classification, please encode as 0/1."
+            )
+            return TaskType.regression
+
+    # More than 2 unique values -> regression
+    elif len(unique_vals) > 2:
+        logger.info(f"Detected regression task ({len(unique_vals)} unique values)")
+        return TaskType.regression
+
+    # Less than 2 unique values (constant target)
+    else:
+        raise ValueError(
+            f"Target variable has only {len(unique_vals)} unique value(s): {unique_vals}. "
+            f"Cannot perform prediction with constant target."
+        )
+
+
+def validate_task_type(y, task_type):
+    """
+    Validate that the specified task type matches the target variable.
+
+    Args:
+        y: Target variable (array-like)
+        task_type: Specified TaskType
+
+    Raises:
+        ValueError: If task_type doesn't match the data
+    """
+    detected_task = detect_task_type(y)
+
+    if task_type != detected_task:
+        y_arr = np.asarray(y).ravel()
+        unique_vals = np.unique(y_arr[~np.isnan(y_arr)])
+        raise ValueError(
+            f"Specified task_type='{task_type}' but detected '{detected_task}' "
+            f"from target variable (unique values: {unique_vals}). "
+            f"Please check your data or task_type specification."
+        )
+
 
 def train_test_split(train, test, X, y, covariates):
     return X[train], X[test], y[train], y[test], covariates[train], covariates[test]

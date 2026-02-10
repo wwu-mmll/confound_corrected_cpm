@@ -1,13 +1,13 @@
 import torch
 
 from cccpm.utils import train_test_split
-from cccpm.scoring import score_regression_models
+from cccpm.scoring import score_models
 from cccpm.results_manager import ResultsManager
 from cccpm.edge_selection import BaseEdgeSelector
 
 
 def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector, results_directory,
-                    device):
+                    device, task_type):
     """
     Run inner cross-validation over all folds and hyperparameter configurations.
 
@@ -35,8 +35,8 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
         for param_id, config in enumerate(param_grid):
             edge_selection.set_params(**config)
             selected_edges = edge_selection.fit_transform(X_train, y_train, cov_train, device=device).return_selected_edges()
-            y_pred = cpm_model(edges=selected_edges, device=device).fit(X_train, y_train, cov_train).predict(X_test, cov_test)
-            metrics = score_regression_models(y_true=y_test, y_pred=y_pred, device=device)
+            y_pred = cpm_model(edges=selected_edges, device=device, task_type=task_type).fit(X_train, y_train, cov_train).predict(X_test, cov_test, return_proba=True)
+            metrics = score_models(y_true=y_test, y_pred=y_pred, task_type=task_type, device=device)
 
             results_manager.store_edges(param_idx=param_id, fold_idx=fold_id, edges_tensor=selected_edges)
             results_manager.store_metrics(param_idx=param_id, fold_idx=fold_id, metrics_tensor=metrics)
@@ -44,7 +44,7 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
     # once all outer folds are done, calculate final results and edge stability
     results_manager.aggregate_inner_folds()
 
-    best_param_id = results_manager.find_best_params()
+    best_param_id = results_manager.find_best_params(task_type=task_type)
     best_params = [param_grid[i] for i in best_param_id.tolist()]
     stability_edges = results_manager.calculate_edge_stability(write=False, best_param_id=best_param_id)
 

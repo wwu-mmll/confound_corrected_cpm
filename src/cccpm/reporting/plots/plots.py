@@ -36,7 +36,8 @@ def apply_nature_style():
 def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     apply_nature_style()
 
-    df = df[df['model'].isin(['connectome', 'residuals', 'full'])]
+    #df = df[df['model'].isin(['connectome', 'residuals', 'full'])]
+    df = df[df['model'].isin(['connectome'])]
 
     def regplot_colored(data, **kwargs):
         color = COLOR_MAP.get(data['network'].iloc[0], "#000000")
@@ -48,7 +49,7 @@ def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
             **kwargs
         )
 
-    g = sns.FacetGrid(df, row="model", col="network", margin_titles=True, height=1.5, aspect=1)
+    g = sns.FacetGrid(df, row="network", col="model", margin_titles=True, height=1.5, aspect=1)
     g.map_dataframe(regplot_colored)
     g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
     g.set_xlabels(y_name)
@@ -328,6 +329,43 @@ def boxplot_models(
     fig.savefig(svg_path, bbox_inches="tight")
 
     return png_path
+
+def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
+    """
+    Generate a strip/swarm plot of predicted probabilities by true class for classification.
+    """
+    apply_nature_style()
+
+    df = df[df['model'].isin(['connectome'])]
+
+    def stripplot_colored(data, **kwargs):
+        color = COLOR_MAP.get(data['network'].iloc[0], "#000000")
+        kwargs.pop('color', None)
+        sns.stripplot(
+            data=data,
+            x="y_true", y="y_pred",
+            jitter=0.2, alpha=0.7, size=3, edgecolor="white", linewidth=0.3,
+            color=color,
+            **kwargs
+        )
+        ax = plt.gca()
+        ax.axhline(y=0.5, color="gray", linewidth=0.5, linestyle="--")
+
+    g = sns.FacetGrid(df, row="network", col="model", margin_titles=True, height=1.5, aspect=1)
+    g.map_dataframe(stripplot_colored)
+    g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
+    g.set_xlabels(f"true {y_name}")
+    g.set_ylabels("predicted probability")
+    sns.despine(trim=True)
+    g.fig.tight_layout(pad=0.5)
+
+    png_path = os.path.join(results_folder, "predictions_classification.png")
+    pdf_path = os.path.join(results_folder, "predictions_classification.pdf")
+    g.fig.savefig(png_path, dpi=600, bbox_inches="tight")
+    g.fig.savefig(pdf_path, bbox_inches="tight")
+
+    return png_path
+
 
 def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
     sns.set_theme(style="white")

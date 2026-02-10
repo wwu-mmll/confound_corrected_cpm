@@ -67,9 +67,9 @@ univariate_edge_selection = UnivariateEdgeSelection(
 Create an instance of the CPMRegression class with the required inputs:
 
 ```python
-from src.cccpm.cpm_analysis import CPMRegression
+from src.cccpm.cpm_analysis import CPMAnalysis
 
-cpm = CPMRegression(
+cpm = CPMAnalysis(
     results_directory="results/",
     cv=outer_cv,
     inner_cv=inner_cv,  # Optional

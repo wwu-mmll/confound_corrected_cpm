@@ -187,19 +187,109 @@ def get_residuals(data, confounds):
         raise ValueError(f"Data shape {data.shape} incompatible with confounds {confounds.shape}")
 
 
+def point_biserial_correlation(X, Y_perms, confounds=None):
+    """
+    Computes point-biserial correlation for binary target variables.
+
+    Point-biserial correlation measures the relationship between a continuous
+    variable (features in X) and a binary variable (Y). It is mathematically
+    equivalent to Pearson correlation when one variable is binary.
+
+    Args:
+        X: (N_samples, N_features) - Continuous features
+        Y_perms: (N_samples, N_perms) - Binary target (0 or 1)
+        confounds: Optional (N_samples, N_confounds) tensor for partial correlation
+
+    Returns:
+        r_matrix: (N_features, N_perms) - Point-biserial correlations
+        p_matrix: (N_features, N_perms) - P-values
+    """
+    n_samples = X.size(0)
+
+    # Handle partial correlation (residualize first)
+    if confounds is not None:
+        confounds = torch.from_numpy(confounds) if isinstance(confounds, np.ndarray) else confounds
+        X = get_residuals(X, confounds)
+        Y_perms = get_residuals(Y_perms, confounds)
+        k_confounds = confounds.size(1)
+    else:
+        k_confounds = 0
+
+    # Y_perms shape: (N_samples, N_perms)
+    # Create masks for binary groups (0 and 1)
+    mask_1 = (Y_perms == 1).unsqueeze(1)  # (N_samples, 1, N_perms)
+    mask_0 = (Y_perms == 0).unsqueeze(1)  # (N_samples, 1, N_perms)
+
+    # Expand X for broadcasting: (N_samples, N_features) -> (N_samples, N_features, 1)
+    X_expanded = X.unsqueeze(2)
+
+    # Calculate group statistics
+    # Sum and count for each group
+    n1 = mask_1.sum(dim=0)  # (1, N_perms)
+    n0 = mask_0.sum(dim=0)  # (1, N_perms)
+
+    # Mean for each group and feature
+    sum_1 = (X_expanded * mask_1).sum(dim=0)  # (N_features, N_perms)
+    sum_0 = (X_expanded * mask_0).sum(dim=0)  # (N_features, N_perms)
+
+    M1 = sum_1 / (n1 + 1e-8)  # (N_features, N_perms)
+    M0 = sum_0 / (n0 + 1e-8)  # (N_features, N_perms)
+
+    # Standard deviation (pooled)
+    # Var = E[X^2] - E[X]^2
+    X_squared = X_expanded ** 2
+    sum_sq_1 = (X_squared * mask_1).sum(dim=0)
+    sum_sq_0 = (X_squared * mask_0).sum(dim=0)
+
+    # Pooled variance
+    ss_1 = sum_sq_1 - (sum_1 ** 2) / (n1 + 1e-8)
+    ss_0 = sum_sq_0 - (sum_0 ** 2) / (n0 + 1e-8)
+    pooled_var = (ss_1 + ss_0) / (n1 + n0 - 2 + 1e-8)
+    s = torch.sqrt(pooled_var)
+
+    # Point-biserial correlation formula:
+    # r_pb = (M1 - M0) / s * sqrt(n0 * n1 / (n0 + n1)^2)
+    r_matrix = (M1 - M0) / (s + 1e-8) * torch.sqrt(n0 * n1 / ((n0 + n1) ** 2 + 1e-8))
+
+    # Clamp to valid correlation range
+    r_matrix = torch.clamp(r_matrix, -0.999999, 0.999999)
+
+    # Calculate p-values using t-distribution
+    df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=X.dtype)
+    t_stats = r_matrix * torch.sqrt(df / (1 - r_matrix ** 2))
+
+    # Approximate p-values using normal distribution (fast approximation)
+    z = t_stats / torch.sqrt(df / (df + 1))
+    val = -torch.abs(z) / 1.41421356
+    p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
+
+    return r_matrix, p_matrix  # Shape: (N_features, N_perms)
+
+
 def correlations_and_pvalues(X, Y_perms,
                              correlation_type='pearson',
                              confounds=None):
     """
-    Computes correlations (Pearson/Spearman/Partial) and p-values on GPU.
+    Computes correlations (Pearson/Spearman/Partial/Point-Biserial) and p-values on GPU.
 
     Args:
         X: (N_samples, N_features)
         Y_perms: (N_perms, N_samples)
-        correlation_type: 'pearson' or 'spearman'
+        correlation_type: 'pearson', 'spearman', or 'point_biserial'
         confounds: Optional (N_samples, N_confounds) tensor.
                    If provided, partial correlation is computed.
     """
+    # Check if Y is binary and auto-select point-biserial if appropriate
+    Y_unique = torch.unique(Y_perms)
+    is_binary = len(Y_unique) == 2 and set(Y_unique.cpu().numpy()).issubset({0, 1, -1})
+
+    if is_binary and correlation_type in ['pearson', 'spearman']:
+        # Binary target detected - use point-biserial (equivalent to Pearson for binary)
+        # Convert -1/1 to 0/1 if needed
+        if -1 in Y_unique:
+            Y_perms = (Y_perms + 1) / 2
+        return point_biserial_correlation(X, Y_perms, confounds)
+
     n_samples = X.size(0)
 
     # --- A. HANDLE PARTIAL CORRELATION (RESIDUALIZE) ---
@@ -385,8 +475,14 @@ class EdgeStatistic(BaseEstimator):
             r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
                                                                       confounds=covariates,
                                                                       correlation_type='spearman')
+        elif self.edge_statistic == 'point_biserial':
+            r_edges_masked, p_edges_masked = point_biserial_correlation(X=X[:, valid_edges], Y_perms=y,
+                                                                        confounds=None)
+        elif self.edge_statistic == 'point_biserial_partial':
+            r_edges_masked, p_edges_masked = point_biserial_correlation(X=X[:, valid_edges], Y_perms=y,
+                                                                        confounds=covariates)
         else:
-            raise NotImplemented("Unsupported edge selection method")
+            raise NotImplementedError("Unsupported edge selection method")
         r_edges[valid_edges] = r_edges_masked
         p_edges[valid_edges] = p_edges_masked
         return r_edges, p_edges
