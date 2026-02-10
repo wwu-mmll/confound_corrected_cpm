@@ -282,11 +282,23 @@ class CPMRegression:
             if self.select_stable_edges:
                 edges = select_stable_edges(stability_edges, self.stability_threshold)
             else:
-                edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params))
-                for best_params_run_id, best_params_run in enumerate(best_params):
-                    self.edge_selection.set_params(**best_params_run)
-                    current_edges = self.edge_selection.fit_transform(X=X_train, y=y_train[:, best_params_run_id].reshape(-1, 1), covariates=cov_train).return_selected_edges()
-                    edges[:, :, best_params_run_id] = current_edges.squeeze()
+                # Determine number of targets
+                n_targets = y_train.shape[1]
+
+                # Initialize with n_targets instead of len(best_params)
+                edges = torch.zeros(X_train.shape[1], len(Networks) - 1, n_targets)
+
+                # Set parameters once
+                self.edge_selection.set_params(**best_params)
+
+                for target_id in range(n_targets):
+                    current_edges = self.edge_selection.fit_transform(
+                        X=X_train,
+                        y=y_train[:, target_id].reshape(-1, 1),
+                        covariates=cov_train
+                    ).return_selected_edges()
+
+                    edges[:, :, target_id] = current_edges.squeeze()
 
             results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
 
@@ -307,6 +319,35 @@ class CPMRegression:
 
         if not perm_run:
             self.logger.info(results_manager.agg_results.round(4).to_string())
-            #results_manager.save_predictions()
-            #results_manager.save_network_strengths()
+
+            # The HTML reporter expects two specific CSV files:
+            # 1. cv_results.csv - the full detailed results (all folds)
+            # 2. cv_results_mean_std.csv - the aggregated mean/std results
+
+            # Load the full results that were saved by calculate_final_cv_results()
+            df_full = pd.read_csv(
+                os.path.join(results_directory, 'cv_results_full.csv'),
+                index_col=[0, 1, 2, 3]  # model, network, fold, run
+            )
+
+            # Save it with the name the HTML reporter expects
+            df_full.to_csv(os.path.join(results_directory, 'cv_results.csv'))
+
+            # For mean/std, we need to aggregate over the 'run' dimension
+            # agg_results has index: [model, network, run]
+            # We need to remove 'run' by taking the first value (since there's only 1 run in your case)
+            # or by aggregating if there are multiple runs
+
+            if results_manager.agg_results.index.nlevels == 3:
+                # Remove the 'run' level - take the first run (index 0)
+                df_mean_std = results_manager.agg_results.xs(0, level='run')
+            else:
+                df_mean_std = results_manager.agg_results
+
+            # Save with the correct name
+            df_mean_std.to_csv(
+                os.path.join(results_directory, 'cv_results_mean_std.csv'),
+                float_format='%.4f'
+            )
+
             self.results_manager = results_manager
