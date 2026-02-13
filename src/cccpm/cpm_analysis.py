@@ -79,6 +79,7 @@ class CPMAnalysis:
             task_type = TaskType(task_type)
         self.task_type = task_type  # Will be validated/auto-detected in run()
         np.random.seed(42)
+        torch.manual_seed(42)
         os.makedirs(self.results_directory, exist_ok=True)
         os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
         os.makedirs(os.path.join(self.results_directory, "permutation"), exist_ok=True)
@@ -235,16 +236,18 @@ class CPMAnalysis:
 
     def _create_permuted_y(self, y):
         # 1. Create a matrix of the repeat vector
-        y_matrix = np.tile(y, (self.n_permutations, 1))
+        y_tensor = torch.as_tensor(y, dtype=torch.float32)
+        y_matrix = y_tensor.unsqueeze(0).expand(self.n_permutations, -1)
 
-        # 2. Create a random noise matrix of the same shape
-        noise = np.random.rand(*y_matrix.shape)
+        # 2. Create random noise and get sorting indices (random permutation per row)
+        noise = torch.rand_like(y_matrix)
+        indices = noise.argsort(dim=1)
 
-        # 3. Get indices that would sort the noise (random indices)
-        indices = np.argsort(noise, axis=1)
+        # 3. Apply these indices to permute each row
+        permuted = y_matrix.gather(1, indices)
 
-        # 4. Apply these indices to your matrix
-        return np.take_along_axis(y_matrix, indices, axis=1).transpose()
+        # 4. Return as numpy [N_samples, N_perms] (boundary: this feeds into the pipeline)
+        return permuted.t().numpy()
 
     def _single_run(self,
                     X,

@@ -61,22 +61,6 @@ def compute_correlation_and_pvalues(x, Y, rank=False):
     return correlations, p_values
 
 
-def get_residuals(X, Z):
-    # Add a column of ones to Z for the intercept
-    Z = np.hstack([Z, np.ones((Z.shape[0], 1))])
-
-    # Compute the coefficients using the normal equation
-    B = np.linalg.lstsq(Z, X, rcond=None)[0]
-
-    # Predict X from Z
-    X_hat = Z.dot(B)
-
-    # Compute residuals
-    residuals = X - X_hat
-
-    return residuals
-
-
 def semi_partial_correlation(x, Y, Z, rank=False):
     # ToDo: THIS IS A PARTIAL CORRELATION, NOT SEMI-PARTIAL
     if rank:
@@ -140,19 +124,24 @@ def get_residuals(data, confounds):
 
     Args:
         data: (..., N_samples) or (N_samples, ...)
-              The target data (can be X or Y).
-        confounds: (N_samples, N_confounds)
+              The target data (can be X or Y). Can be numpy or torch.
+        confounds: (N_samples, N_confounds). Can be numpy or torch.
 
     Returns:
-        residuals: Same shape as data
+        residuals: Same shape and type as data
     """
     # 1. Add Intercept column to confounds (standard OLS practice)
     # Shape: (N_samples, N_confounds + 1)
     if not hasattr(confounds, 'shape'):  # Safety check
         return data
 
+    # Convert numpy to torch if needed, track for conversion back
+    return_numpy = isinstance(data, np.ndarray)
+    data = torch.as_tensor(data, dtype=torch.float64)
+    confounds = torch.as_tensor(confounds, dtype=torch.float64)
+
     n_samples = confounds.shape[0]
-    ones = torch.ones(n_samples, 1, device=confounds.device, dtype=confounds.dtype)
+    ones = torch.ones(n_samples, 1, dtype=confounds.dtype)
     Z = torch.cat((ones, confounds), dim=1)
 
     # 2. Compute the Projector (Hat Matrix component)
@@ -165,13 +154,16 @@ def get_residuals(data, confounds):
     # We need to handle data shapes carefully.
     # Data is usually [N_samples, Features] OR [N_perms, N_samples]
 
+    def _maybe_to_numpy(result):
+        return result.numpy() if return_numpy else result
+
     # CASE A: Data is [N_samples, Features] (Like X)
     if data.shape[0] == n_samples:
         # Beta: (Confounds, Features) = (Confounds, Samples) @ (Samples, Features)
         beta = torch.matmul(Z_pinv, data)
         # Preds: (Samples, Features) = (Samples, Confounds) @ (Confounds, Features)
         preds = torch.matmul(Z, beta)
-        return data - preds
+        return _maybe_to_numpy(data - preds)
 
     # CASE B: Data is [Batch, N_samples] (Like Y_perms)
     elif data.shape[-1] == n_samples:
@@ -181,7 +173,7 @@ def get_residuals(data, confounds):
         beta = torch.matmul(Z_pinv, data_T)  # [Confounds, Batch]
         preds = torch.matmul(Z, beta)  # [Samples, Batch]
 
-        return (data_T - preds).transpose(-1, -2)  # Return to [Batch, Samples]
+        return _maybe_to_numpy((data_T - preds).transpose(-1, -2))  # Return to [Batch, Samples]
 
     else:
         raise ValueError(f"Data shape {data.shape} incompatible with confounds {confounds.shape}")
@@ -208,7 +200,7 @@ def point_biserial_correlation(X, Y_perms, confounds=None):
 
     # Handle partial correlation (residualize first)
     if confounds is not None:
-        confounds = torch.from_numpy(confounds) if isinstance(confounds, np.ndarray) else confounds
+        confounds = torch.as_tensor(confounds, device=X.device, dtype=X.dtype)
         X = get_residuals(X, confounds)
         Y_perms = get_residuals(Y_perms, confounds)
         k_confounds = confounds.size(1)
@@ -281,7 +273,7 @@ def correlations_and_pvalues(X, Y_perms,
     """
     # Check if Y is binary and auto-select point-biserial if appropriate
     Y_unique = torch.unique(Y_perms)
-    is_binary = len(Y_unique) == 2 and set(Y_unique.cpu().numpy()).issubset({0, 1, -1})
+    is_binary = Y_unique.numel() == 2 and set(Y_unique.tolist()).issubset({0, 1, -1})
 
     if is_binary and correlation_type in ['pearson', 'spearman']:
         # Binary target detected - use point-biserial (equivalent to Pearson for binary)
@@ -294,7 +286,7 @@ def correlations_and_pvalues(X, Y_perms,
 
     # --- A. HANDLE PARTIAL CORRELATION (RESIDUALIZE) ---
     if confounds is not None:
-        confounds = torch.from_numpy(confounds)
+        confounds = torch.as_tensor(confounds, device=X.device, dtype=X.dtype)
         # 1. Clean X (Fixed)
         X = get_residuals(X, confounds)
         # 2. Clean Y (Batch)

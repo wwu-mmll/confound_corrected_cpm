@@ -89,7 +89,7 @@ class ResultsManager:
         # This matches cv_edges shape directly
 
         # Target Slice: [:, :, param, fold, :]
-        self.cv_edges[:, :, param_idx, fold_idx, :] = torch.Tensor(edges_tensor)
+        self.cv_edges[:, :, param_idx, fold_idx, :] = torch.as_tensor(edges_tensor, dtype=torch.bool)
 
 
     def store_metrics(self, param_idx: int, fold_idx: int, metrics_tensor: torch.Tensor):
