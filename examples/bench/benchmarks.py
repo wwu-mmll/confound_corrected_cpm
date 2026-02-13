@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import RepeatedKFold
+import torch
 
 from cccpm import CPMRegression
 from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
@@ -78,6 +79,9 @@ for n_samples in sample_sizes:
             except Exception as e:
                 print("  Exception: ", e)
 
+            del cpm
+            torch.cuda.empty_cache()
+
             elapsed = time.perf_counter() - start_time
             run_times.append(elapsed)
 
@@ -89,16 +93,16 @@ for n_samples in sample_sizes:
         std_time = run_times.std(ddof=1)  # sample std
 
         print(f"  Mittelwert (1 Perm): {mean_time:.2f} ± {std_time:.2f} s")
-        print(f"  Hochgerechnet (1000): {mean_time * 1000 / 60:.2f} min")
+        #print(f"  Hochgerechnet (1000): {mean_time * 1000 / 60:.2f} min")
 
         results.append({
             "N": n_samples,
             "P": n_features,
             "n_runs": n_repetitions,
             "mean_time_1perm_sec": mean_time,
-            "std_time_1perm_sec": std_time,
-            "mean_time_1000perm_sec": mean_time * 1000,
-            "std_time_1000perm_sec": std_time * 1000
+            "std_time_1perm_sec": std_time
+            #"mean_time_1000perm_sec": mean_time * 1000,
+            #"std_time_1000perm_sec": std_time * 1000
         })
 
 
