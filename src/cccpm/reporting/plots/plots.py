@@ -274,6 +274,61 @@ def boxplot_model_performance(
     return png_path
 
 
+def boxplot_models(
+    df: pd.DataFrame,
+    metric: str,
+    results_folder: str,
+    models: list[str],
+    filename_suffix: str = ""
+) -> str:
+    """
+    Creates a horizontal boxplot comparing models across network types.
+
+    Parameters:
+        df: Input dataframe.
+        metric: Name of the column to be plotted on the x-axis.
+        results_folder: Output folder path.
+        models: List of model names to include (e.g. ['increment'] or others).
+        filename_suffix: Optional string to append to the output filename.
+    """
+    apply_nature_style()
+
+    df = df[df["model"].isin(models)]
+
+    # Adjust figure size based on model count
+    fig, ax = plt.subplots(figsize=(3, 2))
+
+    sns.boxplot(
+        data=df,
+        y=metric,
+        x="network",
+        orient="v",
+        fliersize=2,
+        linewidth=0.5,
+        width=0.3,
+        ax=ax
+    )
+
+    if metric in ["pearson_score", "spearman_score", "explained_variance_score"]:
+        ax.axhline(y=0, color="black", linewidth=0.5)
+        ax.set_ylim(-0.3, 1)
+
+    ax.set_ylabel(metric.replace("_", " "))
+    ax.set_xlabel("network")
+    sns.despine(ax=ax)
+
+    # Save plot
+    suffix = f"_{filename_suffix}" if filename_suffix else ""
+    png_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.png")
+    pdf_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.pdf")
+    svg_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.svg")
+    fig.tight_layout(pad=0.2)
+    fig.savefig(png_path, dpi=600, bbox_inches="tight")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(svg_path, bbox_inches="tight")
+
+    return png_path
+
 def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
     sns.set_theme(style="white")
     variables = df.columns

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import torch
 
 from sklearn.utils import check_X_y
 from sklearn.impute import SimpleImputer
@@ -121,6 +122,157 @@ def vector_to_matrix_3d(vector_2d, shape):
     np.put_along_axis(flat_matrix, upper_tri_indices[None, :], vector_2d, axis=1)
 
     return matrix_3d
+
+
+def vector_to_matrix_tensor_version(tensor, dim):
+    """
+    Expands a specific dimension containing vectorised upper-triangular edges
+    into a symmetric square matrix at that same location.
+
+    Args:
+        tensor: Arbitrary shape, e.g. [Networks, Folds, Features, Perms]
+        dim: The index of the dimension to expand (e.g., 2 for Features)
+
+    Returns:
+        Tensor with 'dim' replaced by two dimensions (Nodes, Nodes).
+        Example: [Net, Fold, Feat, Perm] -> [Net, Fold, Nodes, Nodes, Perm]
+    """
+    # 1. Normalize dim to positive index (handles -1, etc.)
+    ndim = tensor.ndim
+    dim = dim % ndim
+
+    # 2. Calculate Number of Nodes
+    # Formula: F = N(N-1)/2  =>  N = (1 + sqrt(1 + 8F)) / 2
+    n_features = tensor.shape[dim]
+    n_nodes = int((1 + (1 + 8 * n_features) ** 0.5) / 2)
+
+    # 3. Move the target dimension to the end for easier broadcasting
+    # shape: [..., Features]
+    temp_tensor = tensor.movedim(dim, -1)
+
+    # 4. Create the Output Placeholder
+    # shape: [..., Nodes, Nodes]
+    out_shape = temp_tensor.shape[:-1] + (n_nodes, n_nodes)
+    out = torch.zeros(out_shape, device=tensor.device, dtype=tensor.dtype)
+
+    # 5. Get Upper Triangle Indices
+    rows, cols = torch.triu_indices(n_nodes, n_nodes, offset=1, device=tensor.device)
+
+    # 6. Assign Values (Vectorized)
+    # The '...' ellipses handle any number of preceding dimensions automatically
+    out[..., rows, cols] = temp_tensor
+
+    # 7. Make Symmetric
+    out[..., cols, rows] = temp_tensor
+
+    # 8. Move the Matrix dimensions back to the original location
+    # We moved 'dim' to the end. Now we have two dims at the end (-2, -1).
+    # We want to put them back at 'dim' and 'dim+1'.
+    return out.movedim((-2, -1), (dim, dim + 1))
+
+
+import torch
+
+
+def matrix_to_vector_tensor_version(tensor, dim):
+    """
+    Collapses two adjacent dimensions (representing a symmetric matrix)
+    into a single dimension containing the upper-triangular edges.
+
+    Args:
+        tensor: Arbitrary shape, e.g. [Net, Fold, Nodes, Nodes, Perm]
+        dim: The index of the first of the two matrix dimensions.
+
+    Returns:
+        Tensor with [dim, dim+1] replaced by a single dimension of size Features.
+        Example: [Net, Fold, Nodes, Nodes, Perm] -> [Net, Fold, Features, Perm]
+    """
+    # 1. Normalize dim to positive index
+    ndim = tensor.ndim
+    dim = dim % ndim
+
+    # 2. Identify Matrix Size (N)
+    n_nodes = tensor.shape[dim]
+    if n_nodes != tensor.shape[dim + 1]:
+        raise ValueError(f"Dimensions at {dim} and {dim + 1} must be square.")
+
+    # 3. Move the target dimensions to the end for indexing
+    # Current: [..., Nodes, Nodes, ...] -> [..., Nodes, Nodes]
+    # We move dim and dim+1 to the last two positions
+    temp_tensor = tensor.movedim((dim, dim + 1), (-2, -1))
+
+    # 4. Get Upper Triangle Indices (matching your offset=1)
+    rows, cols = torch.triu_indices(n_nodes, n_nodes, offset=1, device=tensor.device)
+
+    # 5. Extract Values
+    # Indexing with [..., rows, cols] returns a tensor where the last
+    # two dimensions are flattened into the length of the indices.
+    out = temp_tensor[..., rows, cols]
+
+    # 6. Move the collapsed dimension back to the original 'dim' position
+    # After step 5, the new "Features" dimension is at the very end (-1).
+    return out.movedim(-1, dim)
+
+
+
+def vector_to_matrix_numpy(array, dim):
+    """
+    Expands a dimension containing vectorized upper-triangular edges
+    into a symmetric square matrix.
+    """
+    # 1. Normalize dim
+    ndim = array.ndim
+    dim = dim % ndim
+
+    # 2. Calculate Number of Nodes
+    n_features = array.shape[dim]
+    n_nodes = int((1 + np.sqrt(1 + 8 * n_features)) / 2)
+
+    # 3. Move target dimension to the end
+    temp_array = np.moveaxis(array, dim, -1)
+
+    # 4. Create Output Placeholder
+    out_shape = temp_array.shape[:-1] + (n_nodes, n_nodes)
+    out = np.zeros(out_shape, dtype=array.dtype)
+
+    # 5. Get Upper Triangle Indices (k=1 excludes diagonal)
+    rows, cols = np.triu_indices(n_nodes, k=1)
+
+    # 6. Assign Values
+    # NumPy advanced indexing allows assigning to the last two dims at once
+    out[..., rows, cols] = temp_array
+
+    # 7. Make Symmetric
+    out[..., cols, rows] = temp_array
+
+    # 8. Move the Matrix dimensions back to the original location
+    return np.moveaxis(out, (-2, -1), (dim, dim + 1))
+
+def matrix_to_vector_numpy(array, dim):
+    """
+    Collapses two adjacent dimensions of a NumPy array into a
+    single dimension of upper-triangular elements.
+    """
+    ndim = array.ndim
+    dim = dim % ndim
+
+    n_nodes = array.shape[dim]
+    if n_nodes != array.shape[dim + 1]:
+        raise ValueError(f"Dimensions at {dim} and {dim + 1} must be square.")
+
+    # 1. Move target dimensions to the end
+    temp_array = np.moveaxis(array, (dim, dim + 1), (-2, -1))
+
+    # 2. Get Upper Triangle Indices
+    rows, cols = np.triu_indices(n_nodes, k=1)
+
+    # 3. Extract Values
+    # In NumPy, trailing indices work slightly differently with '...'
+    # We slice the last two dimensions using the coordinate pairs
+    out = temp_array[..., rows, cols]
+
+    # 4. Move the new vector dimension back to the original 'dim'
+    return np.moveaxis(out, -1, dim)
 
 def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     """

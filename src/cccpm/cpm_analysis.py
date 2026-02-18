@@ -3,6 +3,9 @@ import logging
 import shutil
 
 from typing import Union, Type
+
+import torch
+from torch.xpu import device
 from tqdm import tqdm
 
 import numpy as np
@@ -10,14 +13,16 @@ import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold, RepeatedKFold, StratifiedKFold
 from sklearn.linear_model import LinearRegression
 
-from cccpm.fold import run_inner_folds
+from cccpm.inner_fold import run_inner_folds
 from cccpm.logging import setup_logging
-from cccpm.more_models import BaseCPMModel, LinearCPMModel
+#from cccpm.more_models import BaseCPMModel, LinearCPMModel
+from cccpm.pytorch_model import LinearCPMModel
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
 from cccpm.scoring import score_regression_models
 from cccpm.reporting import HTMLReporter
+from cccpm.constants import Networks
 
 
 class CPMRegression:
@@ -26,7 +31,7 @@ class CPMRegression:
     """
     def __init__(self,
                  results_directory: str,
-                 cpm_model: Type[BaseCPMModel] = LinearCPMModel,
+                 cpm_model: Type[LinearCPMModel] = LinearCPMModel,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = KFold(n_splits=10, shuffle=True, random_state=42),
                  inner_cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
@@ -38,7 +43,8 @@ class CPMRegression:
                  impute_missing_values: bool = True,
                  calculate_residuals: bool = False,
                  n_permutations: int = 0,
-                 atlas_labels: str = None):
+                 atlas_labels: str = None,
+                 device: str = 'cpu'):
         """
         Initialize the CPMRegression object.
 
@@ -60,6 +66,13 @@ class CPMRegression:
             CSV file containing atlas and regions labels.
         """
         self.results_directory = results_directory
+        np.random.seed(42)
+        os.makedirs(self.results_directory, exist_ok=True)
+        os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
+        os.makedirs(os.path.join(self.results_directory, "permutation"), exist_ok=True)
+        setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
+        self.logger = logging.getLogger(__name__)
+
         self.cpm_model = cpm_model
         self.cv = cv
         self.inner_cv = inner_cv
@@ -70,11 +83,14 @@ class CPMRegression:
         self.calculate_residuals = calculate_residuals
         self.n_permutations = n_permutations
 
-        np.random.seed(42)
-        os.makedirs(self.results_directory, exist_ok=True)
-        os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
-        setup_logging(os.path.join(self.results_directory, "cpm_log.txt"))
-        self.logger = logging.getLogger(__name__)
+        if device.lower() == 'gpu' or device.lower() == 'cuda':
+            if torch.cuda.is_available():
+                self.device = torch.device('cuda')
+            else:
+                self.logger.warning("CUDA or GPU not available, using CPU instead.")
+                self.device = torch.device('cpu')
+        else:
+            self.device = torch.device('cpu')
 
         # Log important configuration details
         self._log_analysis_details()
@@ -110,6 +126,7 @@ class CPMRegression:
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
         self.logger.info(f"Calculate residuals:     {'Yes' if self.calculate_residuals else 'No'}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
+        self.logger.info(f"Device:                  {self.device}")
         self.logger.info("="*50)
 
     def _validate_and_copy_atlas_file(self, csv_path):
@@ -162,24 +179,24 @@ class CPMRegression:
         covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
 
         """
-        self.logger.info(f"Starting estimation with {self.n_permutations} permutations.")
+        self.logger.info(f"Starting CPM estimation.")
 
         # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
 
         # Estimate models on actual data
-        self._single_run(X=X, y=y, covariates=covariates, perm_run=0)
+        self._single_run(X=X, y=y.reshape(-1, 1), covariates=covariates, perm_run=False)
         self.logger.info("=" * 50)
 
         # Estimate models on permuted data
-        for perm_id in tqdm(range(1, self.n_permutations + 1), desc="Permutation runs", unit="run",
-                            total=self.n_permutations):
-            y = np.random.permutation(y)
-            self._single_run(X=X, y=y, covariates=covariates, perm_run=perm_id)
-
         if self.n_permutations > 0:
+            self.logger.info(f"Running {self.n_permutations} permutations.")
+            y_perms = self._create_permuted_y(y)
+            self._single_run(X=X, y=y_perms, covariates=covariates, perm_run=True)
             PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
+
+        self.logger.info("=" * 50)
         self.logger.info("Estimation completed.")
         self.logger.info("Generating results file.")
         reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
@@ -190,11 +207,24 @@ class CPMRegression:
         reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
         reporter.generate_html_report()
 
+    def _create_permuted_y(self, y):
+        # 1. Create a matrix of the repeat vector
+        y_matrix = np.tile(y, (self.n_permutations, 1))
+
+        # 2. Create a random noise matrix of the same shape
+        noise = np.random.rand(*y_matrix.shape)
+
+        # 3. Get indices that would sort the noise (random indices)
+        indices = np.argsort(noise, axis=1)
+
+        # 4. Apply these indices to your matrix
+        return np.take_along_axis(y_matrix, indices, axis=1).transpose()
+
     def _single_run(self,
-                    X: Union[pd.DataFrame, np.ndarray],
-                    y: Union[pd.Series, pd.DataFrame, np.ndarray],
-                    covariates: Union[pd.Series, pd.DataFrame, np.ndarray],
-                    perm_run: int = 0):
+                    X,
+                    y,
+                    covariates,
+                    perm_run: bool = False):
         """
         Perform an estimation run (either real or permuted data). Includes outer cross-validation loop. For permutation
         runs, the same strategy is used, but printing is less verbose and the results folder changes.
@@ -202,20 +232,23 @@ class CPMRegression:
         :param X: Features (predictors).
         :param y: Labels (target variable).
         :param covariates: Covariates to control for.
-        :param perm_run: Permutation run identifier.
+        :param perm_run: Does this include permutation runs or is this a true run.
         """
-        results_manager = ResultsManager(output_dir=self.results_directory, perm_run=perm_run,
-                                         n_folds=self.cv.get_n_splits(), n_features=X.shape[1])
+        if perm_run:
+            results_directory = os.path.join(self.results_directory, "permutation")
+        else:
+            results_directory = self.results_directory
+        results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
+                                         n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
+                                         device=self.device)
 
         iterator = (
             tqdm(
-                enumerate(self.cv.split(X, y)),
+                enumerate(self.cv.split(X, y[:, 0])),
                 total=self.cv.get_n_splits(),
                 desc="Running outer folds",
                 unit="fold"
             )
-            if not perm_run else
-            enumerate(self.cv.split(X, y))
         )
         for outer_fold, (train, test) in iterator:
             # split according to single outer fold
@@ -234,11 +267,14 @@ class CPMRegression:
             # if the user specified an inner cross-validation, estimate models witin inner loop
             if self.inner_cv:
                 best_params, stability_edges = run_inner_folds(cpm_model=self.cpm_model,
-                                                               X=X_train, y=y_train, covariates=cov_train,
+                                                               X=X_train,
+                                                               y=y_train,
+                                                               covariates=cov_train,
                                                                inner_cv=self.inner_cv,
                                                                edge_selection=self.edge_selection,
-                                                               results_directory=os.path.join(results_manager.results_directory, 'folds', str(outer_fold)),
-                                                               perm_run=perm_run)
+                                                               results_directory=os.path.join(
+                                                                   results_manager.results_directory, 'folds', str(outer_fold)),
+                                                               device=self.device)
             else:
                 best_params = self.edge_selection.param_grid[0]
 
@@ -246,20 +282,27 @@ class CPMRegression:
             if self.select_stable_edges:
                 edges = select_stable_edges(stability_edges, self.stability_threshold)
             else:
-                self.edge_selection.set_params(**best_params)
-                edges = self.edge_selection.fit_transform(X=X_train, y=y_train, covariates=cov_train).return_selected_edges()
+                edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params))
+                for best_params_run_id, best_params_run in enumerate(best_params):
+                    self.edge_selection.set_params(**best_params_run)
+                    current_edges = self.edge_selection.fit_transform(X=X_train, y=y_train[:, best_params_run_id].reshape(-1, 1), covariates=cov_train).return_selected_edges()
+                    edges[:, :, best_params_run_id] = current_edges.squeeze()
 
-            results_manager.store_edges(edges=edges, fold=outer_fold)
+            results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
 
             # Build model and make predictions
             model = self.cpm_model(edges=edges).fit(X_train, y_train, cov_train)
             y_pred = model.predict(X_test, cov_test)
-            network_strengths = model.get_network_strengths(X_test, cov_test)
+            if not perm_run:
+                results_manager.store_predictions(y_pred=y_pred, y_true=y_test, fold=outer_fold, test_indices=test)
+                # compute network strengths
+                network_strengths = model.get_network_strengths(X_test, cov_test)
+                results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test,
+                                                        fold=outer_fold)
+
+            # compute metrics
             metrics = score_regression_models(y_true=y_test, y_pred=y_pred)
-            results_manager.store_predictions(y_pred=y_pred, y_true=y_test, params=best_params, fold=outer_fold,
-                                              param_id=0, test_indices=test)
-            results_manager.store_metrics(metrics=metrics, params=best_params, fold=outer_fold, param_id=0)
-            results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test, fold=outer_fold)
+            results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
 
         # once all outer folds are done, calculate final results and edge stability
         results_manager.calculate_final_cv_results()
