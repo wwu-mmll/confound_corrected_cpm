@@ -58,7 +58,7 @@ class ResultsManager:
 
         # 3. Handle Edges (Features)
         # Shape: [N_Features, 2, Params, Folds, Runs]
-        # Only store positive and negative edges (not "both")
+        # Only store positive and negative edges (not "combined")
         self.n_features = n_features
         self.cv_edges = torch.zeros(
             self.n_features,
@@ -362,7 +362,7 @@ class ResultsManager:
         scores_slice = self.results[
             Metrics.pearson_score,
             Models.connectome,
-            Networks.both
+            Networks.combined
         ]
 
         # 2. Calculate Means across Folds (now Dimension 1) -> Shape: [Params, Perms]

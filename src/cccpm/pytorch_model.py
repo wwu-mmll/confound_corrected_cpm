@@ -67,7 +67,7 @@ class LinearCPMModel:
         feats = {
             'positive': {'conn': pos_str, 'resid': pos_resid},
             'negative': {'conn': neg_str, 'resid': neg_resid},
-            'both': {'conn': torch.stack([pos_str, neg_str], dim=2),  # [N, P, 2]
+            'combined': {'conn': torch.stack([pos_str, neg_str], dim=2),  # [N, P, 2]
                      'resid': torch.stack([pos_resid, neg_resid], dim=2)}
         }
 
@@ -76,7 +76,7 @@ class LinearCPMModel:
         # A. Fit Covariates Model (Shared X) - Done once.
         self.coefs['covariates'] = self._solve_shared(cov, y)
 
-        for net in ['positive', 'negative', 'both']:
+        for net in ['positive', 'negative', 'combined']:
             # Helper: Reshape inputs into Batches [Perms, Samples, Features]
             def to_batch(t):
                 if t.dim() == 2: return t.t().unsqueeze(2)  # [N, P] -> [P, N, 1]
@@ -135,7 +135,7 @@ class LinearCPMModel:
         networks = [
             (Networks.positive, pos_str, pos_resid),
             (Networks.negative, neg_str, neg_resid),
-            (Networks.both, torch.stack([pos_str, neg_str], dim=2), torch.stack([pos_resid, neg_resid], dim=2))
+            (Networks.combined, torch.stack([pos_str, neg_str], dim=2), torch.stack([pos_resid, neg_resid], dim=2))
         ]
 
         cov_expanded = cov.unsqueeze(0).expand(n_perms, -1, -1)

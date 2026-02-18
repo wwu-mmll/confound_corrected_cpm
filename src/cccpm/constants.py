@@ -4,7 +4,7 @@ from enum import IntEnum, auto
 class Networks(IntEnum):
     positive = 0
     negative = 1
-    both = 2
+    combined = 2
 
 class Models(IntEnum):
     connectome = 0

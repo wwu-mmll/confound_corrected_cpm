@@ -100,7 +100,7 @@ class ReportDataLoader:
         df = df.reorder_levels(["model", "network", "run"])
 
         model_order = ["covariates", "connectome", "full", "residuals", "increment"]
-        network_order = ["positive", "negative", "both"]
+        network_order = ["positive", "negative", "combined"]
 
         # Create categorical index for proper sorting
         df.index = pd.MultiIndex.from_frame(

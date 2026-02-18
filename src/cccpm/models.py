@@ -5,7 +5,7 @@ from sklearn.linear_model import LinearRegression
 class NetworkDict(dict):
     def __init__(self):
         super().__init__(self)
-        self.update({'positive': {}, 'negative': {}, 'both': {}})
+        self.update({'positive': {}, 'negative': {}, 'combined': {}})
 
     @staticmethod
     def n_networks():
@@ -88,8 +88,8 @@ class LinearCPMModel:
             self.models_residuals[network] = LinearRegression().fit(covariates, connectome[network])
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
-        residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
-        connectome['both'] = np.hstack((connectome['positive'], connectome['negative']))
+        residuals['combined'] = np.hstack((residuals['positive'], residuals['negative']))
+        connectome['combined'] = np.hstack((connectome['positive'], connectome['negative']))
 
         for network in NetworkDict().keys():
             self.models['connectome'][network] = LinearRegression().fit(connectome[network], y)
@@ -126,11 +126,11 @@ class LinearCPMModel:
             connectome[network] = np.sum(X[:, self.edges[network]], axis=1).reshape(-1, 1)
             residuals[network] = connectome[network] - self.models_residuals[network].predict(covariates)
 
-        residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
-        connectome['both'] = np.hstack((connectome['positive'], connectome['negative']))
+        residuals['combined'] = np.hstack((residuals['positive'], residuals['negative']))
+        connectome['combined'] = np.hstack((connectome['positive'], connectome['negative']))
 
         predictions = ModelDict()
-        for network in ['positive', 'negative', 'both']:
+        for network in ['positive', 'negative', 'combined']:
             predictions['connectome'][network] = self.models['connectome'][network].predict(connectome[network])
             predictions['covariates'][network] = self.models['covariates'][network].predict(covariates)
             predictions['residuals'][network] = self.models['residuals'][network].predict(residuals[network])

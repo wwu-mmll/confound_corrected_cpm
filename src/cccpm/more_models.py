@@ -12,7 +12,7 @@ from pygam import LinearGAM
 class NetworkDict(dict):
     def __init__(self):
         super().__init__(self)
-        self.update({'positive': {}, 'negative': {}, 'both': {}})
+        self.update({'positive': {}, 'negative': {}, 'combined': {}})
 
     @staticmethod
     def n_networks():
@@ -76,12 +76,12 @@ class BaseCPMModel(ABC):
                 connectome[network] = X[:, self.edges[network]]
 
         # Combine networks
-        residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
-        network_strengths['both'] = np.hstack((network_strengths['positive'], network_strengths['negative']))
+        residuals['combined'] = np.hstack((residuals['positive'], residuals['negative']))
+        network_strengths['combined'] = np.hstack((network_strengths['positive'], network_strengths['negative']))
         if np.concatenate([X[:, self.edges['positive']], X[:, self.edges['negative']]], axis=1).shape[1] == 0:
-            connectome['both'] = np.zeros((X.shape[0], 1))
+            connectome['combined'] = np.zeros((X.shape[0], 1))
         else:
-            connectome['both'] = np.concatenate([X[:, self.edges['positive']], X[:, self.edges['negative']]], axis=1)
+            connectome['combined'] = np.concatenate([X[:, self.edges['positive']], X[:, self.edges['negative']]], axis=1)
 
         # Fit per-network, per-variant models using subclass algorithm
         for network in NetworkDict().keys():
@@ -110,15 +110,15 @@ class BaseCPMModel(ABC):
             else:
                 connectome[network] = X[:, self.edges[network]]
 
-        residuals['both'] = np.hstack((residuals['positive'], residuals['negative']))
-        network_strengths['both'] = np.hstack((network_strengths['positive'], network_strengths['negative']))
+        residuals['combined'] = np.hstack((residuals['positive'], residuals['negative']))
+        network_strengths['combined'] = np.hstack((network_strengths['positive'], network_strengths['negative']))
         if np.concatenate([X[:, self.edges['positive']], X[:, self.edges['negative']]], axis=1).shape[1] == 0:
-            connectome['both'] = np.zeros((X.shape[0], 1))
+            connectome['combined'] = np.zeros((X.shape[0], 1))
         else:
-            connectome['both'] = np.concatenate([X[:, self.edges['positive']], X[:, self.edges['negative']]], axis=1)
+            connectome['combined'] = np.concatenate([X[:, self.edges['positive']], X[:, self.edges['negative']]], axis=1)
 
         predictions = ModelDict()
-        for network in ['positive', 'negative', 'both']:
+        for network in ['positive', 'negative', 'combined']:
             predictions['connectome'][network] = self.predict_model(self.models['connectome'][network],
                                                                    connectome[network])
             predictions['covariates'][network]  = self.models['covariates'][network].predict(covariates)
