@@ -1,6 +1,7 @@
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
 from pygam import LinearGAM, s
 from functools import reduce
 import operator
@@ -351,7 +352,9 @@ class NonLinearCPMModel(LinearCPMModel):
         if self.model == 'GAMCPM':
             return LinearGAM(self._make_gam_terms(connectome_shape), lam=self.params['lam'])
         elif self.model == 'DecisionTreeCPM':
-            return DecisionTreeRegressor(random_state=0, **self.params)
+            return DecisionTreeRegressor(random_state=42, **self.params)
+        elif self.model == 'RandomForestCPM':
+            return RandomForestRegressor(random_state=42, **self.params)
 
     
     def fit(self, X, y, covariates):

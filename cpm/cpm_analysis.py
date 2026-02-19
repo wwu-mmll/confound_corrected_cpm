@@ -245,6 +245,11 @@ class CPMRegression:
                                                                                                                         for ccp_alpha in [0.0, 1e-4, 1e-3, 1e-2]]
                 elif self.cpm_model == 'GAMCPM':
                     model_params = [{'n_splines': 20, 'lam': lam} for lam in np.logspace(-3, 3, 10)]
+                elif self.cpm_model == 'RandomForestCPM':
+                     model_params = model_params = [{'n_estimators': n_estimators, 'max_depth': max_depth, 'min_samples_leaf': min_samples_leaf, 'max_features': max_features} for n_estimators in [100, 300, 500]
+                                                                                                                                                                               for max_depth in [None, 10, 20]
+                                                                                                                                                                               for min_samples_leaf in [1, 5, 10]
+                                                                                                                                                                               for max_features in ['sqrt', 0.3, 0.5]]
                 else:
                     model_params = [{'': 0}]
 
