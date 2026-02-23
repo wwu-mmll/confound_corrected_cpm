@@ -5,7 +5,6 @@ import shutil
 from typing import Union, Type
 
 import torch
-from torch.xpu import device
 from tqdm import tqdm
 
 import numpy as np
@@ -15,8 +14,7 @@ from sklearn.linear_model import LinearRegression
 
 from cccpm.inner_fold import run_inner_folds
 from cccpm.logging import setup_logging
-#from cccpm.more_models import BaseCPMModel, LinearCPMModel
-from cccpm.pytorch_model import LinearCPMModel
+from cccpm.models.linear_model import LinearCPM
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import (train_test_split, check_data, impute_missing_values,
@@ -35,7 +33,7 @@ class CPMAnalysis:
     def __init__(self,
                  results_directory: str,
                  task_type: Union[TaskType, str, None] = None,
-                 cpm_model: Type[LinearCPMModel] = LinearCPMModel,
+                 cpm_model: Type[LinearCPM] = LinearCPM,
                  cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = KFold(n_splits=10, shuffle=True, random_state=42),
                  inner_cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
@@ -249,92 +247,33 @@ class CPMAnalysis:
         # 4. Return as numpy [N_samples, N_perms] (boundary: this feeds into the pipeline)
         return permuted.t().numpy()
 
-    def _single_run(self,
-                    X,
-                    y,
-                    covariates,
-                    perm_run: bool = False):
+    def _single_run(self, X, y, covariates, perm_run: bool = False):
         """
-        Perform an estimation run (either real or permuted data). Includes outer cross-validation loop. For permutation
-        runs, the same strategy is used, but printing is less verbose and the results folder changes.
+        Perform a full cross-validation run (real data or permuted targets).
 
-        :param X: Features (predictors).
-        :param y: Labels (target variable).
-        :param covariates: Covariates to control for.
-        :param perm_run: Does this include permutation runs or is this a true run.
+        Sets up the ResultsManager, iterates over outer folds, then
+        aggregates and saves results.
         """
         if perm_run:
             results_directory = os.path.join(self.results_directory, "permutation")
         else:
             results_directory = self.results_directory
+
         results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
                                          device=self.device)
 
-        iterator = (
-            tqdm(
-                enumerate(self.cv.split(X, y[:, 0])),
-                total=self.cv.get_n_splits(),
-                desc="Running outer folds",
-                unit="fold"
-            )
+        iterator = tqdm(
+            enumerate(self.cv.split(X, y[:, 0])),
+            total=self.cv.get_n_splits(),
+            desc="Running outer folds",
+            unit="fold",
         )
         for outer_fold, (train, test) in iterator:
-            # split according to single outer fold
-            X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(train, test, X, y, covariates)
+            self._run_outer_fold(outer_fold, train, test, X, y, covariates,
+                                 results_manager, perm_run)
 
-            # impute missing values
-            if self.impute_missing_values:
-                X_train, X_test, cov_train, cov_test = impute_missing_values(X_train, X_test, cov_train, cov_test)
-
-            # residualize X to remove effect of covariates
-            if self.calculate_residuals:
-                residual_model = LinearRegression().fit(cov_train, X_train)
-                X_train = X_train - residual_model.predict(cov_train)
-                X_test = X_test - residual_model.predict(cov_test)
-
-            # if the user specified an inner cross-validation, estimate models witin inner loop
-            if self.inner_cv:
-                best_params, stability_edges = run_inner_folds(cpm_model=self.cpm_model,
-                                                               X=X_train,
-                                                               y=y_train,
-                                                               covariates=cov_train,
-                                                               inner_cv=self.inner_cv,
-                                                               edge_selection=self.edge_selection,
-                                                               results_directory=os.path.join(
-                                                                   results_manager.results_directory, 'folds', str(outer_fold)),
-                                                               device=self.device,
-                                                               task_type=self.task_type)
-            else:
-                best_params = [self.edge_selection.param_grid[0]] * y.shape[1]
-
-            # Use best parameters to estimate performance on outer fold test set
-            if self.select_stable_edges:
-                edges = select_stable_edges(stability_edges, self.stability_threshold)
-            else:
-                edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params))
-                for best_params_run_id, best_params_run in enumerate(best_params):
-                    self.edge_selection.set_params(**best_params_run)
-                    current_edges = self.edge_selection.fit_transform(X=X_train, y=y_train[:, best_params_run_id].reshape(-1, 1), covariates=cov_train).return_selected_edges()
-                    edges[:, :, best_params_run_id] = current_edges.squeeze()
-
-            results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
-
-            # Build model and make predictions
-            model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type).fit(X_train, y_train, cov_train)
-            y_pred = model.predict(X_test, cov_test, return_proba=True)
-            if not perm_run:
-                results_manager.store_predictions(y_pred=y_pred, y_true=y_test, fold=outer_fold, test_indices=test)
-                # compute network strengths
-                network_strengths = model.get_network_strengths(X_test, cov_test)
-                results_manager.store_network_strengths(network_strengths=network_strengths, y_true=y_test,
-                                                        fold=outer_fold)
-
-            # compute metrics
-            metrics = score_models(y_true=y_test, y_pred=y_pred, task_type=self.task_type, device=self.device)
-            results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
-
-        # once all outer folds are done, calculate final results and edge stability
+        # Aggregate across folds
         results_manager.calculate_final_cv_results(task_type=self.task_type)
         results_manager.calculate_edge_stability()
 
@@ -343,3 +282,85 @@ class CPMAnalysis:
             results_manager.save_predictions()
             results_manager.save_network_strengths()
             self.results_manager = results_manager
+
+    def _run_outer_fold(self, outer_fold, train, test, X, y, covariates,
+                        results_manager, perm_run):
+        """
+        Execute a single outer CV fold: preprocess, select edges, fit model,
+        predict, and store results.
+        """
+        # Split
+        X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(
+            train, test, X, y, covariates)
+
+        # Impute missing values
+        if self.impute_missing_values:
+            X_train, X_test, cov_train, cov_test = impute_missing_values(
+                X_train, X_test, cov_train, cov_test)
+
+        # Residualize X to remove effect of covariates
+        if self.calculate_residuals:
+            residual_model = LinearRegression().fit(cov_train, X_train)
+            X_train = X_train - residual_model.predict(cov_train)
+            X_test = X_test - residual_model.predict(cov_test)
+
+        # Select edges (via inner CV or directly)
+        edges = self._select_edges(X_train, y_train, cov_train,
+                                   results_manager, outer_fold)
+        results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
+
+        # Build model and make predictions
+        model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
+        model.fit(X_train, y_train, cov_train)
+        y_pred = model.predict(X_test, cov_test, return_proba=True)
+
+        if not perm_run:
+            results_manager.store_predictions(y_pred=y_pred, y_true=y_test,
+                                              fold=outer_fold, test_indices=test)
+            network_strengths = model.get_network_strengths(X_test, cov_test)
+            results_manager.store_network_strengths(network_strengths=network_strengths,
+                                                    y_true=y_test, fold=outer_fold)
+
+        # Score and store metrics
+        metrics = score_models(y_true=y_test, y_pred=y_pred,
+                               task_type=self.task_type, device=self.device)
+        results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
+
+    def _select_edges(self, X_train, y_train, cov_train, results_manager, outer_fold):
+        """
+        Determine edge masks for this fold, either via inner CV hyperparameter
+        search (with optional stability selection) or directly from the single
+        configured edge-selection threshold.
+
+        Returns
+        -------
+        edges : torch.Tensor [N_features, 2, N_runs]
+        """
+        if self.inner_cv:
+            best_params, stability_edges = run_inner_folds(
+                cpm_model=self.cpm_model,
+                X=X_train,
+                y=y_train,
+                covariates=cov_train,
+                inner_cv=self.inner_cv,
+                edge_selection=self.edge_selection,
+                results_directory=os.path.join(
+                    results_manager.results_directory, 'folds', str(outer_fold)),
+                device=self.device,
+                task_type=self.task_type,
+            )
+        else:
+            best_params = [self.edge_selection.param_grid[0]] * y_train.shape[1]
+
+        if self.select_stable_edges:
+            return select_stable_edges(stability_edges, self.stability_threshold)
+
+        edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params))
+        for run_id, params in enumerate(best_params):
+            self.edge_selection.set_params(**params)
+            current_edges = self.edge_selection.fit_transform(
+                X=X_train, y=y_train[:, run_id].reshape(-1, 1), covariates=cov_train
+            ).return_selected_edges()
+            edges[:, :, run_id] = current_edges.squeeze()
+
+        return edges

@@ -4,7 +4,7 @@ import torch
 from cccpm.constants import Networks, Models, TaskType
 
 
-class LinearCPMModel:
+class LinearCPM:
     """
     A PyTorch implementation of CPM optimized for speed.
 
@@ -20,7 +20,7 @@ class LinearCPMModel:
       - X: [N_samples, N_features]
       - y: [N_samples, N_perms]
     """
-    name = "LinearCPMTorch"
+    name = "LinearCPM"
 
     def __init__(self, edges, device='cuda', task_type=TaskType.regression):
         """

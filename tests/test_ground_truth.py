@@ -17,7 +17,7 @@ from sklearn.model_selection import KFold, StratifiedKFold
 
 from cccpm.cpm_analysis import CPMAnalysis
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
-from cccpm.constants import TaskType, Metrics, Models, Networks
+from cccpm.constants import TaskType, Models, Networks
 
 
 def generate_regression_data_known_edges(
@@ -387,7 +387,7 @@ class TestModelFitting:
         negatively, the 'both' network (using both strengths) should yield
         a strong prediction.
         """
-        from cccpm.pytorch_model import LinearCPMModel
+        from cccpm.models.linear_model import LinearCPM
 
         rng = np.random.RandomState(42)
         n_samples = 100
@@ -404,7 +404,7 @@ class TestModelFitting:
         edges[:n_pos, Networks.positive, 0] = True
         edges[n_pos:, Networks.negative, 0] = True
 
-        model = LinearCPMModel(edges=edges, device='cpu', task_type=TaskType.regression)
+        model = LinearCPM(edges=edges, device='cpu', task_type=TaskType.regression)
         cov = np.zeros((n_samples, 1), dtype=np.float32)
         model.fit(X, y, cov)
 
@@ -423,7 +423,7 @@ class TestModelFitting:
         When all true coefficients are equal, the sum-based aggregation
         in CPM should recover the signal perfectly.
         """
-        from cccpm.pytorch_model import LinearCPMModel
+        from cccpm.models.linear_model import LinearCPM
 
         rng = np.random.RandomState(42)
         n_samples = 100
@@ -436,7 +436,7 @@ class TestModelFitting:
         edges = torch.ones(n_features, 2, 1, dtype=torch.bool)
         edges[:, Networks.negative, :] = False
 
-        model = LinearCPMModel(edges=edges, device='cpu', task_type=TaskType.regression)
+        model = LinearCPM(edges=edges, device='cpu', task_type=TaskType.regression)
         cov = np.zeros((n_samples, 1), dtype=np.float32)
         model.fit(X, y, cov)
 
@@ -454,7 +454,7 @@ class TestModelFitting:
         With linearly separable data, logistic regression should achieve
         near-perfect classification.
         """
-        from cccpm.pytorch_model import LinearCPMModel
+        from cccpm.models.linear_model import LinearCPM
 
         rng = np.random.RandomState(42)
         n_samples = 100
@@ -469,7 +469,7 @@ class TestModelFitting:
         edges = torch.ones(1, 2, 1, dtype=torch.bool)
         edges[:, Networks.negative, :] = False
 
-        model = LinearCPMModel(edges=edges, device='cpu', task_type=TaskType.classification)
+        model = LinearCPM(edges=edges, device='cpu', task_type=TaskType.classification)
         cov = np.zeros((n_samples, 1), dtype=np.float32)
         model.fit(X, y, cov)
 
