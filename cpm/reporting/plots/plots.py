@@ -243,7 +243,8 @@ def boxplot_model_performance(
         fliersize=2,
         linewidth=0.5,
         width=0.5,
-        ax=ax
+        ax=ax,
+        legend=False
     )
 
     if metric in ["pearson_score", "spearman_score", "explained_variance_score"]:
