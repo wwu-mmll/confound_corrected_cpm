@@ -12,6 +12,7 @@ from cccpm.reporting.plots.plots import (scatter_plot, scatter_plot_covariates_m
                                              histograms_network_strengths)
 from cccpm.reporting.plots.cpm_chord_plot import plot_netplotbrain
 from cccpm.reporting.reporting_utils import format_results_table, extract_log_block, load_results_from_folder, load_data_from_folder
+from cccpm.reporting.plots.chord_plot import plot_chord_diagram
 
 
 class HTMLReporter:
@@ -83,6 +84,60 @@ class HTMLReporter:
         plt.close('all')
         return
 
+    def generate_brain_plot_page(self):
+        if self.atlas_labels is None:
+            return ar.Blocks(
+                blocks=[ar.Group(blocks=[ar.Text("Provide atlas labels as csv file.")], columns=1)],
+                label='Brain Plots'
+            )
+
+        # ── existing brain plots (netplotbrain) ──────────────────────────────
+        brain_plots = []
+        for metric in ["sig_stability_positive_edges", "sig_stability_negative_edges"]:
+            plot_brainplot, _ = plot_netplotbrain(
+                results_folder=self.results_directory,
+                selected_metric=metric,
+                atlas_labels=self.atlas_labels,
+            )
+            brain_plots.append(plot_brainplot)
+
+        brain_header = ar.Group(
+            blocks=[ar.Text("Significantly Stable Positive Edges"),
+                    ar.Text("Significantly Stable Negative Edges")],
+            columns=2,
+        )
+        brain_row = ar.Group(
+            blocks=[ar.Media(file=brain_plots[0]), ar.Media(file=brain_plots[1])],
+            columns=2,
+        )
+
+        # ── Chord diagram: reuse the already-saved PNG from _generate_chord_diagram() ──
+        chord_path = os.path.join(self.results_directory, "edges", "chord_diagram.png")
+
+        if os.path.exists(chord_path):
+            chord_section = ar.Group(
+                blocks=[
+                    ar.Text("### Brain Connectivity Chord Diagram (mean |r| across subjects)"),
+                    ar.Media(file=chord_path, name="ChordDiagram",
+                             caption="Chord diagram aggregating mean absolute connectivity by brain network."),
+                ],
+                columns=1,
+            )
+        else:
+            chord_section = ar.Text(
+                "Chord diagram not found. Make sure atlas_labels is provided and run() was called."
+            )
+
+        return ar.Blocks(
+            blocks=[
+                brain_header,
+                brain_row,
+                ar.Text("---"),
+                chord_section,
+            ],
+            label='Brain Plots',
+        )
+
     def generate_hyperparameters_page(self):
         try:
             if 'params' not in self.df.columns:
@@ -92,7 +147,7 @@ class HTMLReporter:
             hyper_df = self.df[['fold', 'model', 'params']].copy()
             hyper_df = (
                 hyper_df
-                .drop(columns='model')  # we don’t need the model any more
+                .drop(columns='model')  # we don’t need the model anymore
                 .drop_duplicates(subset=['fold'])  # keep first row per fold
                 .reset_index(drop=True)
             )
@@ -258,23 +313,23 @@ class HTMLReporter:
         row = ar.Group(name='network_strengths', blocks=[scatter_block_network_strength, hist_block_network_strength], columns=4)
         return ar.Blocks(blocks=[row], label='Network Strengths')
 
-    def generate_brain_plot_page(self):
-        if self.atlas_labels is None:
-            return ar.Blocks(blocks=[ar.Group(blocks=[ar.Text("Provide atlas labels as csv file.")], columns=1)],
-                             label='Brain Plots')
-        plots = list()
-        edges = list()
-        for metric in ["sig_stability_positive_edges", "sig_stability_negative_edges"]:
-            plot_brainplot, edge_list = plot_netplotbrain(results_folder=self.results_directory,
-                                                          selected_metric=metric,
-                                                          atlas_labels=self.atlas_labels)
-            plots.append(plot_brainplot)
-            edges.append(edge_list)
-
-        third_header = ar.Group(blocks=[ar.Text("Significantly Stable Positive Edges"), ar.Text("Significantly Stable Negative Edges")], columns=2)
-        third_row = ar.Group(blocks=[ar.Media(file=plots[0]), ar.Media(file=plots[1])], columns=2)
-        blocks = ar.Blocks(blocks=[third_header, third_row], label='Brain Plots')
-        return blocks
+    # def generate_brain_plot_page(self):
+    #     if self.atlas_labels is None:
+    #         return ar.Blocks(blocks=[ar.Group(blocks=[ar.Text("Provide atlas labels as csv file.")], columns=1)],
+    #                          label='Brain Plots')
+    #     plots = list()
+    #     edges = list()
+    #     for metric in ["sig_stability_positive_edges", "sig_stability_negative_edges"]:
+    #         plot_brainplot, edge_list = plot_netplotbrain(results_folder=self.results_directory,
+    #                                                       selected_metric=metric,
+    #                                                       atlas_labels=self.atlas_labels)
+    #         plots.append(plot_brainplot)
+    #         edges.append(edge_list)
+    #
+    #     third_header = ar.Group(blocks=[ar.Text("Significantly Stable Positive Edges"), ar.Text("Significantly Stable Negative Edges")], columns=2)
+    #     third_row = ar.Group(blocks=[ar.Media(file=plots[0]), ar.Media(file=plots[1])], columns=2)
+    #     blocks = ar.Blocks(blocks=[third_header, third_row], label='Brain Plots')
+    #     return blocks
 
     def generate_edge_page(self):
         import numpy as np

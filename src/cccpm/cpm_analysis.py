@@ -14,6 +14,7 @@ from cccpm.fold import run_inner_folds
 from cccpm.logging import setup_logging
 from cccpm.more_models import BaseCPMModel, LinearCPMModel
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm.reporting.plots.chord_plot import plot_chord_diagram
 from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import train_test_split, check_data, impute_missing_values, select_stable_edges, generate_data_insights
 from cccpm.scoring import score_regression_models
@@ -69,6 +70,8 @@ class CPMRegression:
         self.impute_missing_values = impute_missing_values
         self.calculate_residuals = calculate_residuals
         self.n_permutations = n_permutations
+
+        self._X_raw: np.ndarray = None
 
         np.random.seed(42)
         os.makedirs(self.results_directory, exist_ok=True)
@@ -168,6 +171,8 @@ class CPMRegression:
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
 
+        self._X_raw = X
+
         # Estimate models on actual data
         self._single_run(X=X, y=y, covariates=covariates, perm_run=0)
         self.logger.info("=" * 50)
@@ -182,8 +187,44 @@ class CPMRegression:
             PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
         self.logger.info("Estimation completed.")
         self.logger.info("Generating results file.")
+        self._generate_chord_diagram()
+
         reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
         reporter.generate_html_report()
+
+    def _generate_chord_diagram(self):
+        """
+        Build and save a chord diagram from the raw edge matrix X and atlas labels.
+        Called automatically at the end of run() before the HTML report.
+        Only executed when an atlas_labels file is available.
+        """
+        if self.atlas_labels is None:
+            self.logger.warning(
+                "Chord diagram skipped: no atlas_labels file provided. "
+                "Pass atlas_labels='path/to/labels.csv' to CPMRegression to enable it."
+            )
+            return
+
+        if self._X_raw is None:
+            self.logger.warning("Chord diagram skipped: no data found (run() not called yet?).")
+            return
+
+        try:
+            atlas_df = pd.read_csv(self.atlas_labels)
+            output_path = os.path.join(self.results_directory, "edges", "chord_diagram.png")
+
+            self.logger.info("Generating chord diagram …")
+            saved = plot_chord_diagram(
+                X=self._X_raw,
+                atlas_labels=atlas_df,
+                output_path=output_path,
+                title="Brain Connectivity Chord Diagram (mean |r| across subjects)",
+            )
+            self.logger.info(f"Chord diagram saved to {saved}")
+
+        except Exception as e:
+            # Non-fatal: log the error but don't abort the pipeline
+            self.logger.error(f"Chord diagram generation failed: {e}", exc_info=True)
 
     def generate_html_report(self):
         self.logger.info("Generating HTML report.")

@@ -47,6 +47,7 @@ bleach = "*"
 tinycss2 = "*"
 plotly = "*"
 scikit-image = "*"
+pycirclize = "^1.10.1"
 
 [tool.poetry.group.dev.dependencies]
 pingouin = "*"
