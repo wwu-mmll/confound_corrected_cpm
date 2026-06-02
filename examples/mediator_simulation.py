@@ -4,38 +4,12 @@ from scipy.linalg import toeplitz
 from sklearn.model_selection import RepeatedKFold
 from cccpm import CPMRegression
 from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
+from cccpm.simulation.mediator_simulation import generate_confound_simulation
 import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
 import logging
-
-# ── Data generation ───────────────────────────────────────────────────────────
-def generate_confound_simulation(n_samples=1000, n_features=100,
-                                 sparsity=0.8, x_collinearity=0.6,
-                                 target_r2=0.36, confounder_rho=0.4,
-                                 random_state=None):
-    if random_state is not None:
-        np.random.seed(random_state)
-    cov_row = x_collinearity ** np.arange(n_features)
-    cov_matrix = toeplitz(cov_row)
-    X = np.random.multivariate_normal(np.zeros(n_features), cov_matrix, size=n_samples)
-    weights = np.random.randn(n_features)
-    n_zero_weights = int(n_features * sparsity)
-    zero_indices = np.random.choice(n_features, n_zero_weights, replace=False)
-    weights[zero_indices] = 0.0
-    signal = X @ weights
-    var_signal = np.var(signal)
-    if target_r2 == 0:
-        y = np.random.randn(n_samples)
-    else:
-        var_noise = var_signal * ((1.0 - target_r2) / target_r2)
-        noise = np.random.normal(0, np.sqrt(var_noise), size=n_samples)
-        y = signal + noise
-    y = (y - np.mean(y)) / np.std(y)
-    noise_c = np.random.normal(0, 1, size=n_samples)
-    c = confounder_rho * y + np.sqrt(1 - confounder_rho**2) * noise_c
-    return X, y, c
 
 import shutil, os
 import gc
@@ -113,7 +87,7 @@ def log_mem(label=""):
 # ── Grid ──────────────────────────────────────────────────────────────────────
 R2_TARGETS    = [0.09, 0.36, 0.81]
 RHO_CONFOUNDS = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
-N_SIMULATIONS = 3
+N_SIMULATIONS = 10
 
 records = []
 
@@ -133,7 +107,7 @@ for sim_idx in range(N_SIMULATIONS):
             print(f"  R2_TARGET={r2_target}  RHO_CONFOUND={rho}", end="  ", flush=True)
 
             X, y, c = generate_confound_simulation(
-                n_samples=5000, n_features=105,
+                n_samples=1000, n_features=105,
                 sparsity=0.8, x_collinearity=0.7,
                 target_r2=r2_target, confounder_rho=rho,
                 random_state=sim_seed)
@@ -237,6 +211,6 @@ fig.suptitle(
     fontsize=13, y=0.98
 )
 plt.tight_layout(rect=[0, 0, 1, 0.95])
-plt.savefig('./results/simulation_bar_chart.png', dpi=150, bbox_inches='tight')
+plt.savefig('./results/simulation_bar_chart.pdf', dpi=150, bbox_inches='tight')
 plt.show()
-print("Figure saved to ./results/simulation_bar_chart.png")
+print("Figure saved to ./results/simulation_bar_chart.pdf")
