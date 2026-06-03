@@ -475,8 +475,8 @@ class EdgeStatistic(BaseEstimator):
                                                                         confounds=covariates)
         else:
             raise NotImplementedError("Unsupported edge selection method")
-        r_edges[valid_edges] = r_edges_masked
-        p_edges[valid_edges] = p_edges_masked
+        r_edges[valid_edges] = r_edges_masked.to(r_edges.dtype)
+        p_edges[valid_edges] = p_edges_masked.to(p_edges.dtype)
         return r_edges, p_edges
 
 

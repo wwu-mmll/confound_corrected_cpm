@@ -1,12 +1,12 @@
 import numpy as np
 import pandas as pd
-from scipy.linalg import toeplitz
 from sklearn.model_selection import RepeatedKFold
-from cccpm import CPMRegression
+from cccpm import CPMAnalysis
 from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
 from cccpm.simulation.mediator_simulation import generate_confound_simulation
 import matplotlib.pyplot as plt
 import warnings
+
 warnings.filterwarnings('ignore')
 
 import logging
@@ -14,23 +14,28 @@ import logging
 import shutil, os
 import gc
 
+
 def cleanup_results():
     if os.path.exists('./results'):
         shutil.rmtree('./results')
     os.makedirs('./results', exist_ok=True)
+
 
 def _silence_cccpm():
     logging.getLogger('cccpm').setLevel(logging.CRITICAL)
     # Also silence the root logger that cccpm's setup_logging hijacks
     logging.getLogger().setLevel(logging.CRITICAL)
 
+
 def _restore_logging():
     logging.getLogger().setLevel(logging.WARNING)
 
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def get_r2(cpm_obj):
+    print(cpm_obj.results_manager.agg_results.index)
     return cpm_obj.results_manager.agg_results.loc[
-        'both', 'connectome']['explained_variance_score']['mean']
+        'connectome', 'both']['explained_variance_score']['mean']
 
 
 def run_baseline(X, y, c, cv):
@@ -38,9 +43,9 @@ def run_baseline(X, y, c, cv):
         edge_statistic='pearson',
         edge_selection=[PThreshold(threshold=0.05, correction=[None])],
         t_test_filter=False)
-    cpm = CPMRegression(results_directory='./results',
-                        cv=cv, edge_selection=ue,
-                        n_permutations=1, select_stable_edges=False)
+    cpm = CPMAnalysis(results_directory='./results',
+                      cv=cv, edge_selection=ue,
+                      n_permutations=1, select_stable_edges=False)
     _silence_cccpm()
     cpm.run(X=X, y=y, covariates=c)
     _restore_logging()
@@ -55,9 +60,9 @@ def run_partial(X, y, c, cv):
         edge_statistic='pearson_partial',
         edge_selection=[PThreshold(threshold=0.05, correction=[None])],
         t_test_filter=False)
-    cpm = CPMRegression(results_directory='./results',
-                        cv=cv, edge_selection=ue,
-                        n_permutations=1, select_stable_edges=False)
+    cpm = CPMAnalysis(results_directory='./results',
+                      cv=cv, edge_selection=ue,
+                      n_permutations=1, select_stable_edges=False)
     _silence_cccpm()
     cpm.run(X=X, y=y, covariates=c)
     _restore_logging()
@@ -69,23 +74,26 @@ def run_cr(X, y, c, cv):
         edge_statistic='pearson',
         edge_selection=[PThreshold(threshold=0.05, correction=[None])],
         t_test_filter=False)
-    cpm = CPMRegression(results_directory='./results',
-                        cv=cv, edge_selection=ue,
-                        n_permutations=1, calculate_residuals=True,
-                        select_stable_edges=False)
+    cpm = CPMAnalysis(results_directory='./results',
+                      cv=cv, edge_selection=ue,
+                      n_permutations=1, calculate_residuals=True,
+                      select_stable_edges=False)
     _silence_cccpm()
     cpm.run(X=X, y=y, covariates=c)
     _restore_logging()
     return get_r2(cpm)
 
+
 import psutil, os
+
 
 def log_mem(label=""):
     mb = psutil.Process(os.getpid()).memory_info().rss / 1e6
     print(f"[MEM {label}] {mb:.0f} MB")
 
+
 # ── Grid ──────────────────────────────────────────────────────────────────────
-R2_TARGETS    = [0.09, 0.36, 0.81]
+R2_TARGETS = [0.09, 0.36, 0.81]
 RHO_CONFOUNDS = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
 N_SIMULATIONS = 10
 
@@ -94,13 +102,13 @@ records = []
 for sim_idx in range(N_SIMULATIONS):
     cleanup_results()
     # Use a different random seed per simulation; CV split seed is fixed per sim
-    sim_seed = sim_idx * 100          # data seed varies across simulations
-    cv_seed  = sim_idx                # CV seed also varies so folds differ
+    sim_seed = sim_idx * 100  # data seed varies across simulations
+    cv_seed = sim_idx  # CV seed also varies so folds differ
     CV = RepeatedKFold(n_splits=2, n_repeats=1, random_state=cv_seed)
 
-    print(f"\n{'#'*60}")
+    print(f"\n{'#' * 60}")
     print(f"  SIMULATION {sim_idx + 1}/{N_SIMULATIONS}  (data seed={sim_seed})")
-    print(f"{'#'*60}")
+    print(f"{'#' * 60}")
 
     for r2_target in R2_TARGETS:
         for rho in RHO_CONFOUNDS:
@@ -112,15 +120,15 @@ for sim_idx in range(N_SIMULATIONS):
                 target_r2=r2_target, confounder_rho=rho,
                 random_state=sim_seed)
 
-            r2_base    = run_baseline(X, y, c, CV)
+            r2_base = run_baseline(X, y, c, CV)
             r2_partial = run_partial(X, y, c, CV)
-            r2_cr      = run_cr(X, y, c, CV)
+            r2_cr = run_cr(X, y, c, CV)
 
             # Theoretical expected R² after confound removal
             if rho == 1.0:
                 r2_theory = 0.0
             else:
-                r2_theory = (r2_target * (1 - rho**2)**2) / (1 - (rho**2 * r2_target))
+                r2_theory = (r2_target * (1 - rho ** 2) ** 2) / (1 - (rho ** 2 * r2_target))
 
             records.append(dict(
                 simulation=sim_idx,
@@ -131,7 +139,7 @@ for sim_idx in range(N_SIMULATIONS):
                 r2_cr=r2_cr,
                 ExpectedAfterRemoval=r2_theory,
             ))
-            print(f"raw={r2_base:.3f}  partial={r2_partial:.3f}  CR={r2_cr:.3f}", flush=True)
+            print(f"raw={r2_base}  partial={r2_partial}  CR={r2_cr}", flush=True)
 
             log_mem(f"sim={sim_idx} r2={r2_target} rho={rho}")
 
@@ -157,12 +165,12 @@ fig, axes = plt.subplots(
 )
 
 bar_width = 0.22
-colors    = ['#4C72B0', '#DD8452', '#55A868']   # blue, orange, green
+colors = ['#4C72B0', '#DD8452', '#55A868']  # blue, orange, green
 
 for idx, r2 in enumerate(R2_TARGETS):
-    ax  = axes[idx]
+    ax = axes[idx]
     sub = agg[agg['r2_target'] == r2].reset_index(drop=True)
-    x   = np.arange(len(RHO_CONFOUNDS))
+    x = np.arange(len(RHO_CONFOUNDS))
 
     # ── Bars with error bars (±1 SD) ──────────────────────────────────────
     ax.bar(
