@@ -387,6 +387,12 @@ def check_data(X, y, covariates, impute_missings: bool = False):
         2D array of covariates.
     """
     # Convert to numpy for dimension checks
+    if isinstance(X, torch.Tensor):
+        X = X.detach().cpu().numpy()
+    if isinstance(y, torch.Tensor):
+        y = y.detach().cpu().numpy()
+    if isinstance(covariates, torch.Tensor):
+        covariates = covariates.detach().cpu().numpy()
     X_arr = np.asarray(X)
     # Handle 3D connectivity matrices
     if X_arr.ndim == 3:
@@ -513,6 +519,12 @@ def generate_data_insights(X, y, covariates, results_directory):
                 covariates.columns = ["covariate 1"]
 
     # --- Combine all data to check for missing values ---
+    if isinstance(X, torch.Tensor):
+        X = pd.DataFrame(X.detach().cpu().numpy())
+    if isinstance(y, torch.Tensor):
+        y = pd.Series(y.detach().cpu().numpy(), name="target")
+    if isinstance(covariates, torch.Tensor):
+        covariates = pd.DataFrame(covariates.detach().cpu().numpy())
     full_data = pd.concat([X, y.rename("target"), covariates], axis=1)
     missing_total = full_data.isnull().sum().sum()
 
