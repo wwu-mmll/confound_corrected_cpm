@@ -5,8 +5,30 @@ import pandas as pd
 from cccpm.utils import (
     check_data,
     matrix_to_vector_3d,
-    get_variable_names
+    get_variable_names,
+    infer_n_nodes,
 )
+
+
+def test_infer_n_nodes():
+    # Valid upper-triangular edge counts
+    assert infer_n_nodes(1) == 2      # 2 nodes -> 1 edge
+    assert infer_n_nodes(6) == 4      # 4 nodes -> 6 edges
+    assert infer_n_nodes(45) == 10    # 10 nodes -> 45 edges
+    assert infer_n_nodes(1225) == 50  # 50 nodes -> 1225 edges
+    # Invalid counts return None
+    assert infer_n_nodes(5) is None
+    assert infer_n_nodes(400) is None
+    assert infer_n_nodes(0) is None
+
+
+def test_check_data_rejects_non_triangular_n_features(small_data_setup):
+    """A non-connectome number of features should fail fast with a clear error."""
+    _, y1d, cov2d, _, _, _ = small_data_setup
+    n_samples = 30
+    X_bad = np.random.randn(n_samples, 400)  # 400 is not n*(n-1)/2 for any n
+    with pytest.raises(ValueError, match="not a valid connectome size"):
+        check_data(X_bad, y1d[:n_samples], cov2d[:n_samples])
 
 # We create a local fixture for the specific small dataset used in these tests
 @pytest.fixture
@@ -14,10 +36,10 @@ def small_data_setup(simulated_data):
     """
     Creates the specific data shapes used in the original TestUtils.setUp
     """
-    # Original code used n_samples=50, n_features=5
-    # We can just slice the larger simulated_data fixture
+    # n_features must be a valid connectome size (n_nodes*(n_nodes-1)/2);
+    # 6 corresponds to a 4-node connectome.
     X, y, cov = simulated_data
-    n_samples, n_features = 50, 5
+    n_samples, n_features = 50, 6
 
     X2d = X[:n_samples, :n_features]
     y1d = y[:n_samples]

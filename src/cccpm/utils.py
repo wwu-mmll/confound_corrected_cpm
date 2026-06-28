@@ -1,4 +1,5 @@
 import os
+import math
 import numpy as np
 import pandas as pd
 import torch
@@ -360,6 +361,22 @@ def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     return colors
 
 
+def infer_n_nodes(n_features: int):
+    """
+    Return the number of nodes ``n`` for which ``n * (n - 1) / 2 == n_features``,
+    i.e. the connectome size whose upper triangle has exactly ``n_features`` edges.
+
+    Returns ``None`` if ``n_features`` is not a valid upper-triangular edge count.
+    """
+    if n_features is None or n_features < 1:
+        return None
+    discriminant = 1 + 8 * n_features
+    root = math.isqrt(discriminant)
+    if root * root != discriminant or (1 + root) % 2 != 0:
+        return None
+    return (1 + root) // 2
+
+
 def check_data(X, y, covariates, impute_missings: bool = False):
     """
     Validate and format input data for modeling.
@@ -399,6 +416,25 @@ def check_data(X, y, covariates, impute_missings: bool = False):
         X_arr = matrix_to_vector_3d(X_arr)
     elif X_arr.ndim != 2:
         raise ValueError(f"X must be 2D or 3D, got shape {X_arr.shape}")
+
+    # Connectome features must be the upper triangle of a symmetric node-by-node
+    # matrix, i.e. n_features == n_nodes * (n_nodes - 1) / 2. Otherwise edge
+    # selection/stability cannot map edges back to a connectome and the run would
+    # later fail with a cryptic shape-mismatch error. Fail fast with a clear message.
+    n_features = X_arr.shape[1]
+    if infer_n_nodes(n_features) is None:
+        n_lower = int((1 + (1 + 8 * n_features) ** 0.5) / 2)
+        lower = n_lower * (n_lower - 1) // 2
+        upper = (n_lower + 1) * n_lower // 2
+        raise ValueError(
+            f"X has {n_features} features, which is not a valid connectome size. "
+            f"CCCPM expects the upper-triangular edges of a symmetric node-by-node "
+            f"connectome, i.e. n_features = n_nodes * (n_nodes - 1) / 2. "
+            f"The nearest valid sizes are {lower} ({n_lower} nodes) and "
+            f"{upper} ({n_lower + 1} nodes). Alternatively, pass connectivity "
+            f"matrices of shape (n_samples, n_nodes, n_nodes) and CCCPM will "
+            f"vectorize them for you."
+        )
 
     # Ensure y is 1D vector
     y_arr = np.asarray(y)

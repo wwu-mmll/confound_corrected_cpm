@@ -32,11 +32,10 @@ You don't trust the tests; turn 115 green checks into real confidence.
       results) on at least one dataset so numbers are defensible in a paper.
 - [ ] Numerical correctness spot-checks: partial correlation, FDR correction,
       permutation p-value definition (off-by-one / +1 convention), residualization.
-- [ ] **Input validation gap (found while writing examples):** `n_features` must be a
-      valid upper-triangular connectome size `n*(n-1)/2`. A non-triangular count (e.g.
-      400) silently maps to the wrong matrix size and crashes deep in
-      `vector_to_matrix_tensor_version` / edge stability with a cryptic shape error.
-      Validate `X` up front in `check_data()` and raise a clear message.
+- [x] **Input validation gap (found while writing examples):** `check_data()` now
+      validates that `n_features` is a valid upper-triangular connectome size
+      (`infer_n_nodes`) and raises a clear error suggesting the nearest valid sizes,
+      instead of crashing deep in edge stability. Covered by new tests.
 - [ ] Classification path: expand beyond current tests (probabilities, AUC, class
       imbalance, StratifiedKFold edge cases).
 - [ ] Determinism: `CPMAnalysis.__init__` calls global `np.random.seed(42)` /
