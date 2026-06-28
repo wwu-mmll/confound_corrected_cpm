@@ -166,3 +166,5 @@ tests/tmp
 
 poetry.lock
 src/cccpm/simulation/simulation_results
+
+*.DS_Store
