@@ -152,6 +152,9 @@ artifact a run produces, grounded in the actual output files, for both task type
       (empty package -> linear/nonlinear modules), retitled "CPM Regression" ->
       "CPM Analysis". Added a `docs` poetry group; `mkdocs build --strict` now passes.
 - [x] Fix `build_docs.yml`: removed stray `photonai`, now uses Poetry + `docs` group.
+- [x] Completed the `CPMAnalysis` constructor docstring (was missing `cpm_model`,
+      `select_stable_edges`, `stability_threshold`, `calculate_residuals`, `device`);
+      now documents every parameter and renders in the API reference.
 - [x] Add `CHANGELOG.md` (Keep a Changelog, 0.3.0 section), `CONTRIBUTING.md`
       (dev setup, tests, docs, PR flow), and `CITATION.cff` (validated YAML, both
       contributors). *Nils: review CITATION authors/affiliations before release.*

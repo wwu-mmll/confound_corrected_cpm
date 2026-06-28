@@ -48,27 +48,48 @@ class CPMAnalysis:
                  atlas_labels: str = None,
                  device: str = 'cpu'):
         """
-        Initialize the CPMRegression object.
+        Initialize the CPMAnalysis object.
 
         Parameters
         ----------
         results_directory: str
-            Directory to save results.
-        task_type: TaskType, str, or None
-            Type of task: 'regression' or 'classification'.
-            If None, will be auto-detected from target variable.
-        cv: Union[BaseCrossValidator, BaseShuffleSplit]
-            Outer cross-validation strategy.
-        inner_cv: Union[BaseCrossValidator, BaseShuffleSplit]
-            Inner cross-validation strategy for edge selection.
-        edge_selection:  UnivariateEdgeSelection
-            Method for edge selection.
-        impute_missing_values: bool
-            Whether to impute missing values.
-        n_permutations: int
-            Number of permutations to run for permutation testing.
-        atlas_labels: str
-            CSV file containing atlas and regions labels.
+            Directory to which all results, plots, and the HTML report are saved.
+        task_type: TaskType, str, or None, default=None
+            Type of task: ``'regression'`` or ``'classification'``. If ``None``,
+            it is auto-detected from the target variable (a binary target is
+            treated as classification).
+        cpm_model: type, default=LinearCPM
+            The CPM model class to fit each fold. One of ``LinearCPM``,
+            ``DecisionTreeCPM``, ``RandomForestCPM``, or ``GAMCPM``.
+        cv: BaseCrossValidator or BaseShuffleSplit, default=KFold(10, shuffle=True)
+            Outer cross-validation strategy used for performance estimation.
+        inner_cv: BaseCrossValidator or BaseShuffleSplit, default=None
+            Inner cross-validation strategy for hyperparameter tuning (e.g. the
+            p-threshold) and stable-edge selection. If ``None``, no inner loop is
+            run and exactly one edge-selection configuration must be provided.
+        edge_selection: UnivariateEdgeSelection
+            Edge-selection method and its hyperparameter grid.
+        select_stable_edges: bool, default=False
+            If ``True``, keep only edges selected in a sufficient fraction of inner
+            folds (see ``stability_threshold``). Requires an ``inner_cv``.
+        stability_threshold: float, default=0.8
+            Minimum fraction of inner folds in which an edge must be selected to be
+            considered stable. Only used when ``select_stable_edges=True``.
+        impute_missing_values: bool, default=True
+            Whether to impute missing values in ``X`` and the covariates (NaNs in
+            the target ``y`` always raise an error).
+        calculate_residuals: bool, default=False
+            If ``True``, regress the covariates out of the connectome before
+            modeling (residualization), in addition to the model variants.
+        n_permutations: int, default=0
+            Number of label permutations for significance testing. ``0`` disables
+            permutation testing; use 1000+ for publishable p-values.
+        atlas_labels: str, default=None
+            Path to a CSV file with atlas region labels (columns ``x``, ``y``,
+            ``z``, ``region``) used for the brain plots in the report.
+        device: str, default='cpu'
+            Compute device: ``'cpu'``, or ``'cuda'``/``'gpu'`` to use an available
+            GPU (falls back to CPU with a warning if CUDA is unavailable).
         """
         self.results_directory = results_directory
 
