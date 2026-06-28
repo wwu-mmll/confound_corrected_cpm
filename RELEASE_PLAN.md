@@ -91,8 +91,10 @@ Outdated and incomplete. Make it the on-ramp for researchers.
       string `edge_statistic`), and repo badges.
 - [x] Fix `getting_started.md`: `CPMRegression` -> `CPMAnalysis`, imports, the
       `edge_statistic` list/string bug, and the `estimate` -> `run` method name.
-- [ ] Rewrite `installation.md`: per-OS instructions, Python version notes, torch/GPU
-      guidance, troubleshooting (the arm64/Rosetta + torch wheel issue we hit).
+- [x] Rewrite `installation.md`: venv/conda quick start, per-OS tabs (macOS arm64/
+      Rosetta caveat, Linux CUDA wheel size, Windows notes), CPU vs GPU/MPS guidance,
+      dev install via Poetry, and a troubleshooting section (incl. the missing-torch /
+      Rosetta issue). Enabled `pymdownx.tabbed`; `mkdocs build --strict` passes.
 - [ ] Rewrite `getting_started.md`: replace `CPMRegression` → `CPMAnalysis`, fix
       imports and the `edge_statistic` list/string bug, verify every snippet runs.
 - [ ] New: conceptual docs explaining the method — edge selection, confound control
