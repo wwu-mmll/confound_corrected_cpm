@@ -71,8 +71,12 @@ You explicitly care that users on Mac/Linux/Windows + various Python versions su
       (homepage, docs, repository, issues), maintainers. Consider PEP 621 `[project]`.
 - [ ] Set sensible version floors for numpy (1.x vs 2.x), pandas, scikit-learn,
       nilearn — verify the package works under numpy 2.x.
-- [ ] Expand CI test matrix: `{ubuntu, macos, windows} × {3.10, 3.11, 3.12, 3.13}`.
-      Add pip-cache / poetry-cache for speed.
+- [x] Expand CI test matrix: `test.yml` now runs `{ubuntu, macos, windows} ×
+      {3.10, 3.11, 3.12, 3.13}` (12 jobs, `fail-fast: false`), Poetry installed via
+      `pipx` for cross-OS support, coverage uploaded from one representative job.
+      *Needs a real CI run (push to develop) to confirm heavy deps build on every
+      combo — esp. Windows + 3.13.*
+- [ ] Optional speed-up: add Poetry/pip caching (best paired with committing the lock).
 - [ ] `poetry.lock` is currently **gitignored** — decide whether to commit it (helps
       CI reproducibility) and verify it installs reproducibly on all OSes.
 - [ ] Add a clean-environment install smoke test to CI (build wheel, install in a
