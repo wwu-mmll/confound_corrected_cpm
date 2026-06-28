@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sklearn.model_selection import KFold
+
+from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
 from cccpm.utils import check_data
 
 
@@ -49,6 +52,44 @@ def test_nan_in_y(simulated_data):
     # values in y should never be missing
     with pytest.raises(ValueError):
         check_data(X, y_nan, covariates, impute_missings=True)
+
+
+# --- Reproducibility ---
+
+def test_pipeline_is_reproducible(tmp_path, simulated_data):
+    """
+    Running the same analysis twice with the same configuration must produce
+    identical results — a basic requirement for reproducible research.
+    """
+    X, y, covariates = simulated_data
+
+    def run_once(subdir):
+        edge_selection = UnivariateEdgeSelection(
+            edge_statistic="pearson",
+            edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
+        )
+        cpm = CPMAnalysis(
+            results_directory=str(tmp_path / subdir),
+            cv=KFold(n_splits=5, shuffle=True, random_state=42),
+            edge_selection=edge_selection,
+            n_permutations=0,
+            impute_missing_values=True,
+        )
+        cpm.run(X=X, y=y, covariates=covariates)
+        return cpm
+
+    run_once("run_a")
+    run_once("run_b")
+
+    # Aggregated metrics (loaded from disk) must match exactly across runs
+    res_a = pd.read_csv(tmp_path / "run_a" / "cv_results_summary.csv")
+    res_b = pd.read_csv(tmp_path / "run_b" / "cv_results_summary.csv")
+    pd.testing.assert_frame_equal(res_a, res_b)
+
+    # The same edges must be selected
+    edges_a = np.load(tmp_path / "run_a" / "stability_edges.npy")
+    edges_b = np.load(tmp_path / "run_b" / "stability_edges.npy")
+    np.testing.assert_array_equal(edges_a, edges_b)
 
 
 # --- Permutation generation ---

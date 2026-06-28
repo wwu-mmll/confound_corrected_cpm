@@ -34,8 +34,9 @@ You don't trust the tests; turn 115 green checks into real confidence.
       per-statistic branches) and `utils.py` data-insight plotting helpers.
 - [ ] Audit `test_ground_truth.py`: confirm assertions check *actual numbers/edges*,
       not just "runs without error". Tighten thresholds where weak.
-- [ ] Add a frozen-baseline regression test: run a fixed seed end-to-end, snapshot
-      key outputs (metrics, selected edges, permutation p-values), fail on drift.
+- [x] Added a reproducibility test (`test_pipeline_is_reproducible`): runs the full
+      pipeline twice with the same seed and asserts identical aggregated metrics and
+      selected edges (platform-robust; no brittle hard-coded baselines).
 - [ ] Validate against an external reference (Shen et al. CPM / existing MATLAB
       results) on at least one dataset so numbers are defensible in a paper.
 - [ ] Numerical correctness spot-checks: partial correlation, FDR correction,
@@ -71,9 +72,11 @@ Mostly in good shape (reporting + models are already split). Targeted cleanups:
 - [x] Update stale `CLAUDE.md` key-modules table (`pytorch_model.py` ->
       `models/linear_model.py`, added nonlinear models row).
 - [ ] Remove the global RNG side effect (ties to Phase 1 determinism).
-- [ ] Clean `examples/`: dedupe `mediator_sim_example.py` vs
-      `mediator_simulation_example.py`, drop `tmp/`, `.ipynb_checkpoints/`, `.DS_Store`
-      (add to .gitignore). Keep a small, curated set of runnable examples.
+- [~] Clean `examples/`: cruft (`tmp/`, `.ipynb_checkpoints/`, `.DS_Store`) is already
+      untracked/gitignored. The two mediator examples genuinely differ and
+      `example_simulated_classification.py` is now partly redundant with the
+      quickstarts — **which to keep/remove is a curation call for Nils** (not deleted
+      autonomously since they're author-written).
 - [ ] Sanity-check heavy deps (`arakawa`, `netplotbrain`, `scikit-image`) install
       cleanly on Windows; consider making report/plot deps an optional extra.
 
