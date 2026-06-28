@@ -1,0 +1,66 @@
+name: Package Smoke Test
+
+# Builds the distributable wheel and installs it into a *clean* virtual
+# environment (only declared dependencies available), then imports the package
+# and runs a tiny end-to-end analysis. This catches undeclared-dependency bugs
+# that the normal test suite misses, because the dev environment has many
+# packages available transitively.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  clean-install:
+    name: Clean install from built wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Build wheel
+        run: poetry build
+
+      - name: Install the wheel into a clean virtual environment
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install --upgrade pip
+          /tmp/clean/bin/pip install dist/*.whl
+
+      - name: Import and run a tiny analysis (no dev deps available)
+        env:
+          MPLBACKEND: Agg
+        run: |
+          /tmp/clean/bin/python - <<'PY'
+          import numpy as np
+          import cccpm
+          from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
+          from sklearn.model_selection import KFold
+
+          rng = np.random.RandomState(0)
+          X = rng.randn(80, 45).astype("float32")
+          y = (X[:, :5].sum(1) + rng.randn(80) * 0.1).astype("float32")
+          cov = rng.randn(80, 1).astype("float32")
+
+          es = UnivariateEdgeSelection(
+              edge_statistic="pearson",
+              edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
+          )
+          CPMAnalysis(
+              results_directory="smoke_out",
+              cv=KFold(5, shuffle=True, random_state=1),
+              edge_selection=es,
+              n_permutations=0,
+          ).run(X=X, y=y, covariates=cov)
+          print("clean-install end-to-end OK:", cccpm.__version__)
+          PY

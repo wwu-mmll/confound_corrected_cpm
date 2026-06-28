@@ -106,7 +106,9 @@ You explicitly care that users on Mac/Linux/Windows + various Python versions su
       `seaborn` (and directly-imported `scipy`, `matplotlib`, `statsmodels`) were not
       declared, so `import cccpm` failed on a clean install. All four are now declared;
       re-verified the wheel installs and runs end-to-end in a fresh venv.
-- [ ] Add this smoke test to CI as an automated job (so it can't regress).
+- [x] Added a CI job (`.github/workflows/package_smoke.yml`) that builds the wheel,
+      installs it into a clean venv (declared deps only), imports `cccpm`, and runs a
+      tiny analysis — so undeclared-dependency regressions are caught automatically.
 
 ## Phase 4 — Documentation overhaul
 Outdated and incomplete. Make it the on-ramp for researchers.
