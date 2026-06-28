@@ -133,7 +133,9 @@ artifact a run produces, grounded in the actual output files, for both task type
       (empty package -> linear/nonlinear modules), retitled "CPM Regression" ->
       "CPM Analysis". Added a `docs` poetry group; `mkdocs build --strict` now passes.
 - [x] Fix `build_docs.yml`: removed stray `photonai`, now uses Poetry + `docs` group.
-- [ ] Add `CHANGELOG.md`, `CONTRIBUTING.md`, `CITATION.cff` (researchers will cite it).
+- [x] Add `CHANGELOG.md` (Keep a Changelog, 0.3.0 section), `CONTRIBUTING.md`
+      (dev setup, tests, docs, PR flow), and `CITATION.cff` (validated YAML, both
+      contributors). *Nils: review CITATION authors/affiliations before release.*
 
 ## Phase 5 — HTML report polish (Nils-driven, visual)
 You'll own the visual decisions; I can support structure + iteration speed.
