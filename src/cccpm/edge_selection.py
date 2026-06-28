@@ -357,11 +357,28 @@ class BaseEdgeSelector(BaseEstimator):
 
 
 class PThreshold(BaseEdgeSelector):
+    """
+    Select edges whose correlation with the target is significant at a p-value
+    threshold, optionally after multiple-comparison correction.
+
+    Pass a list of thresholds (and/or corrections) to search over them with an
+    inner cross-validation loop.
+    """
     def __init__(self, threshold: Union[float, list] = 0.05, correction: Union[str, list] = None):
         """
-
-        :param threshold:
-        :param correction: can be one of statsmodels methods
+        :param threshold: p-value threshold(s); edges with p below the threshold
+                          are selected. A single value (e.g. ``0.05``) or a list
+                          (e.g. ``[0.01, 0.05]``) to tune via inner CV.
+        :param correction: multiple-comparison correction, or ``None`` for no
+                            correction. Can be one of statsmodels' methods:
+                            bonferroni : one-step correction
+                            sidak : one-step correction
+                            holm-sidak : step down method using Sidak adjustments
+                            holm : step-down method using Bonferroni adjustments
+                            simes-hochberg : step-up method (independent)
+                            hommel : closed method based on Simes tests (non-negative)
+                            fdr_bh : Benjamini/Hochberg (non-negative)
+                            fdr_by : Benjamini/Yekutieli (negative)
                             bonferroni : one-step correction
                             sidak : one-step correction
                             holm-sidak : step down method using Sidak adjustments
@@ -498,6 +515,28 @@ class EdgeStatistic(BaseEstimator):
 
 
 class UnivariateEdgeSelection(BaseEstimator):
+    """
+    Univariate edge selection for CPM.
+
+    Correlates each edge with the target using the chosen statistic and selects
+    edges with one or more selection strategies (e.g. a p-value threshold). When
+    several configurations are supplied, they form a hyperparameter grid that the
+    inner cross-validation loop searches over.
+
+    Parameters
+    ----------
+    edge_statistic: str, default='spearman'
+        Correlation statistic used to relate each edge to the target. One of
+        ``'pearson'``, ``'spearman'``, ``'pearson_partial'``, ``'spearman_partial'``
+        (continuous target), or ``'point_biserial'`` / ``'point_biserial_partial'``
+        (binary target). The ``*_partial`` variants control for the covariates
+        during selection.
+    t_test_filter: bool, default=False
+        Reserved for an optional pre-filtering step (currently inactive).
+    edge_selection: list of selectors (e.g. PThreshold), default=None
+        One or more selection strategies. Provide a list of multiple
+        configurations to tune them via an inner CV.
+    """
     def __init__(self,
                  edge_statistic: str = 'spearman',
                  t_test_filter: bool = False,

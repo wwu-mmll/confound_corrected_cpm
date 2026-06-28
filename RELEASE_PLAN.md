@@ -157,6 +157,8 @@ artifact a run produces, grounded in the actual output files, for both task type
 - [x] Completed the `CPMAnalysis` constructor docstring (was missing `cpm_model`,
       `select_stable_edges`, `stability_threshold`, `calculate_residuals`, `device`);
       now documents every parameter and renders in the API reference.
+- [x] Added class/parameter docstrings to the public `UnivariateEdgeSelection` and
+      `PThreshold` classes (previously rendered nearly empty in the API reference).
 - [x] Add `CHANGELOG.md` (Keep a Changelog, 0.3.0 section), `CONTRIBUTING.md`
       (dev setup, tests, docs, PR flow), and `CITATION.cff` (validated YAML, both
       contributors). *Nils: review CITATION authors/affiliations before release.*
