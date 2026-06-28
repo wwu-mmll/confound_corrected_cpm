@@ -106,8 +106,10 @@ in both flavors so users can copy the one matching their task.
 - [x] `examples/regression_quickstart.py` — minimal, well-commented, simulated data.
 - [x] `examples/classification_quickstart.py` — minimal, well-commented, simulated data.
 - [x] Both wired into `test_integration.py` so CI verifies they run end-to-end.
-- [ ] Mirror both as docs tutorials (regression + classification), every snippet
-      verified to run (covered by `test_integration.py`).
+- [x] Mirror both as docs tutorials: `examples/regression.md` and
+      `examples/classification.md` embed the actual quickstart scripts via mkdocs
+      snippets (so docs can't drift), explain each step, and cross-link to
+      "Interpreting Results". Added to nav; `mkdocs build --strict` passes.
 - [ ] Show the key variations in both: confound control (partial corr vs residuals),
       nested CV with p-threshold tuning, stable-edge selection, permutation testing,
       and passing `atlas_labels` for brain plots.

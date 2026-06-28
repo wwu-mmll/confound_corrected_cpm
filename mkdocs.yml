@@ -45,6 +45,8 @@ nav:
 - Getting Started: 'getting_started.md'
 - Interpreting Results: 'interpreting_results.md'
 - Examples:
+    - Regression: 'examples/regression.md'
+    - Classification: 'examples/classification.md'
     - Simulated Data: 'examples/simulated_data.md'
 - API:
     - CPM Analysis: api/cpm_regression.md
