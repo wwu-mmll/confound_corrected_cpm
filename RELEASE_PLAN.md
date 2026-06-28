@@ -23,7 +23,15 @@ Highest priority. A fresh `pip install cccpm` currently fails (no torch).
 ## Phase 1 — Trust the results (testing & correctness)
 You don't trust the tests; turn 115 green checks into real confidence.
 
-- [ ] Review coverage report (`pytest --cov --cov-report=html`), find untested paths.
+- [x] Reviewed coverage (63% overall). Core numerical modules are well covered
+      (linear_model 99%, nonlinear 100%, scoring 99%, inner_fold 100%); the gaps are
+      visualization (chord plots — Phase 5) and alternative simulation utilities.
+      Added round-trip + numpy/tensor-consistency tests for the connectome <-> vector
+      conversions (foundation of edge stability & p-value mapping). 8 new tests.
+- [ ] Dead code: `vector_to_matrix_3d` is unused and its triu/tril index ordering
+      doesn't invert `matrix_to_vector_3d` — remove it or fix+document if ever needed.
+- [ ] Remaining low-coverage core paths to revisit: `edge_selection.py` (81%, the
+      per-statistic branches) and `utils.py` data-insight plotting helpers.
 - [ ] Audit `test_ground_truth.py`: confirm assertions check *actual numbers/edges*,
       not just "runs without error". Tighten thresholds where weak.
 - [ ] Add a frozen-baseline regression test: run a fixed seed end-to-end, snapshot
