@@ -162,6 +162,7 @@ cython_debug/
 
 examples/tmp
 examples/simulated_data
+examples/results
 tests/tmp
 
 poetry.lock

@@ -32,6 +32,11 @@ You don't trust the tests; turn 115 green checks into real confidence.
       results) on at least one dataset so numbers are defensible in a paper.
 - [ ] Numerical correctness spot-checks: partial correlation, FDR correction,
       permutation p-value definition (off-by-one / +1 convention), residualization.
+- [ ] **Input validation gap (found while writing examples):** `n_features` must be a
+      valid upper-triangular connectome size `n*(n-1)/2`. A non-triangular count (e.g.
+      400) silently maps to the wrong matrix size and crashes deep in
+      `vector_to_matrix_tensor_version` / edge stability with a cryptic shape error.
+      Validate `X` up front in `check_data()` and raise a clear message.
 - [ ] Classification path: expand beyond current tests (probabilities, AUC, class
       imbalance, StratifiedKFold edge cases).
 - [ ] Determinism: `CPMAnalysis.__init__` calls global `np.random.seed(42)` /
@@ -92,8 +97,9 @@ Outdated and incomplete. Make it the on-ramp for researchers.
 ### Paired regression + classification examples (first-class deliverable)
 Every concept gets a runnable script in `examples/` **and** a matching docs tutorial,
 in both flavors so users can copy the one matching their task.
-- [ ] `examples/regression_quickstart.py` — minimal, well-commented, simulated data.
-- [ ] `examples/classification_quickstart.py` — minimal, well-commented, simulated data.
+- [x] `examples/regression_quickstart.py` — minimal, well-commented, simulated data.
+- [x] `examples/classification_quickstart.py` — minimal, well-commented, simulated data.
+- [x] Both wired into `test_integration.py` so CI verifies they run end-to-end.
 - [ ] Mirror both as docs tutorials (regression + classification), every snippet
       verified to run (covered by `test_integration.py`).
 - [ ] Show the key variations in both: confound control (partial corr vs residuals),
