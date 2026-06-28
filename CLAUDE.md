@@ -49,7 +49,8 @@ mkdocs build
 | Module | Role |
 |--------|------|
 | `cpm_analysis.py` | Main `CPMAnalysis` class — entry point and orchestrator |
-| `pytorch_model.py` | `LinearCPMModel` — PyTorch linear/logistic regression with Cholesky solver |
+| `models/linear_model.py` | `LinearCPM` — PyTorch linear/logistic regression with Cholesky solver |
+| `models/nonlinear_models.py` | `DecisionTreeCPM` / `RandomForestCPM` / `GAMCPM` — alternative CPM model backends |
 | `edge_selection.py` | `UnivariateEdgeSelection` — correlation-based feature selection (Pearson/Spearman/partial) with p-value thresholding |
 | `scoring.py` | `FastCPMMetrics` / `FastCPMClassificationMetrics` — GPU-accelerated metrics |
 | `inner_fold.py` | Inner CV for hyperparameter optimization |

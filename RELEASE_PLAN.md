@@ -1,0 +1,148 @@
+# CCCPM Release Readiness Plan
+
+Goal: make `cccpm` easy and reliable for researchers to install and use for
+connectome-based predictive modeling (CPM) across macOS / Linux / Windows and
+Python 3.10–3.14, with trustworthy results, modern docs, and a polished HTML report.
+
+Status legend: [ ] todo · [~] in progress · [x] done
+
+---
+
+## Phase 0 — Stop the bleeding (the published package is broken)
+Highest priority. A fresh `pip install cccpm` currently fails (no torch).
+
+- [ ] Add `torch` to declared dependencies (done locally in pyproject; must ship).
+- [ ] Decide torch version floor + platform strategy (see Phase 3). At minimum pin `torch>=2.2`.
+- [ ] Reconcile version numbers: repo says 0.1.1, PyPI is 0.2.1. Bump to a clean
+      next version (proposed **0.3.0**) and make repo the source of truth.
+- [ ] Add a real `LICENSE` file (MIT) at repo root.
+- [ ] Constrain `requires_python` to `>=3.10,<3.15` on PyPI metadata (done locally).
+- [ ] Publish a fixed release to **TestPyPI** first (tag `vX.Y.Z-test`), install it
+      clean on all 3 OSes, confirm `import cccpm` + run an example, THEN publish to PyPI.
+
+## Phase 1 — Trust the results (testing & correctness)
+You don't trust the tests; turn 115 green checks into real confidence.
+
+- [ ] Review coverage report (`pytest --cov --cov-report=html`), find untested paths.
+- [ ] Audit `test_ground_truth.py`: confirm assertions check *actual numbers/edges*,
+      not just "runs without error". Tighten thresholds where weak.
+- [ ] Add a frozen-baseline regression test: run a fixed seed end-to-end, snapshot
+      key outputs (metrics, selected edges, permutation p-values), fail on drift.
+- [ ] Validate against an external reference (Shen et al. CPM / existing MATLAB
+      results) on at least one dataset so numbers are defensible in a paper.
+- [ ] Numerical correctness spot-checks: partial correlation, FDR correction,
+      permutation p-value definition (off-by-one / +1 convention), residualization.
+- [ ] Classification path: expand beyond current tests (probabilities, AUC, class
+      imbalance, StratifiedKFold edge cases).
+- [ ] Determinism: `CPMAnalysis.__init__` calls global `np.random.seed(42)` /
+      `torch.manual_seed(42)` — this mutates the user's global RNG as a side effect.
+      Decide on a local RNG / `random_state` param instead.
+- [ ] Device default mismatch: `LinearCPM.__init__` defaults `device='cuda'` while
+      `CPMAnalysis` defaults `'cpu'`. Make consistent; verify CPU/MPS/CUDA all work.
+- [ ] Run the full suite on macOS (arm64), Linux, Windows locally or in CI.
+
+## Phase 2 — Code structure / modularization
+Mostly in good shape (reporting + models are already split). Targeted cleanups:
+
+- [ ] Improve top-level public API in `src/cccpm/__init__.py`: also export
+      `UnivariateEdgeSelection`, `PThreshold`, `TaskType` so users don't dig into
+      submodules. Add `__version__`.
+- [ ] Update stale `CLAUDE.md`: it references `pytorch_model.py` (now
+      `models/linear_model.py`) and other drifted details.
+- [ ] Remove the global RNG side effect (ties to Phase 1 determinism).
+- [ ] Clean `examples/`: dedupe `mediator_sim_example.py` vs
+      `mediator_simulation_example.py`, drop `tmp/`, `.ipynb_checkpoints/`, `.DS_Store`
+      (add to .gitignore). Keep a small, curated set of runnable examples.
+- [ ] Sanity-check heavy deps (`arakawa`, `netplotbrain`, `scikit-image`) install
+      cleanly on Windows; consider making report/plot deps an optional extra.
+
+## Phase 3 — Packaging, dependencies, cross-platform install
+You explicitly care that users on Mac/Linux/Windows + various Python versions succeed.
+
+- [ ] torch install strategy — the hard one. Default torch wheels differ per platform
+      (Linux pulls large CUDA wheels; macOS arm64 = MPS; Windows = CPU). Decide:
+      (a) keep default torch and document GPU separately, or
+      (b) default to CPU torch + an optional `cccpm[gpu]` extra / install instructions.
+- [ ] Add proper packaging metadata: `keywords`, `classifiers`, project URLs
+      (homepage, docs, repository, issues), maintainers. Consider PEP 621 `[project]`.
+- [ ] Set sensible version floors for numpy (1.x vs 2.x), pandas, scikit-learn,
+      nilearn — verify the package works under numpy 2.x.
+- [ ] Expand CI test matrix: `{ubuntu, macos, windows} × {3.10, 3.11, 3.12, 3.13}`.
+      Add pip-cache / poetry-cache for speed.
+- [ ] `poetry.lock` is currently **gitignored** — decide whether to commit it (helps
+      CI reproducibility) and verify it installs reproducibly on all OSes.
+- [ ] Add a clean-environment install smoke test to CI (build wheel, install in a
+      fresh venv, import, run a tiny example) — catches the missing-torch class of bug.
+
+## Phase 4 — Documentation overhaul
+Outdated and incomplete. Make it the on-ramp for researchers.
+
+- [ ] Fix README: correct install (clone URL, dir, or `pip install cccpm`), correct
+      quick-start (`from cccpm import CPMAnalysis`, string `edge_statistic`), fix badges
+      to the `confound_corrected_cpm` repo.
+- [ ] Rewrite `installation.md`: per-OS instructions, Python version notes, torch/GPU
+      guidance, troubleshooting (the arm64/Rosetta + torch wheel issue we hit).
+- [ ] Rewrite `getting_started.md`: replace `CPMRegression` → `CPMAnalysis`, fix
+      imports and the `edge_statistic` list/string bug, verify every snippet runs.
+- [ ] New: conceptual docs explaining the method — edge selection, confound control
+      (partial correlation vs residualization), nested CV, stable edges, permutation
+      testing, the four model variants (connectome/covariates/full/residuals),
+      network strengths, and how to interpret outputs.
+
+### Paired regression + classification examples (first-class deliverable)
+Every concept gets a runnable script in `examples/` **and** a matching docs tutorial,
+in both flavors so users can copy the one matching their task.
+- [ ] `examples/regression_quickstart.py` — minimal, well-commented, simulated data.
+- [ ] `examples/classification_quickstart.py` — minimal, well-commented, simulated data.
+- [ ] Mirror both as docs tutorials (regression + classification), every snippet
+      verified to run (covered by `test_integration.py`).
+- [ ] Show the key variations in both: confound control (partial corr vs residuals),
+      nested CV with p-threshold tuning, stable-edge selection, permutation testing,
+      and passing `atlas_labels` for brain plots.
+- [ ] Optional: a real-data (or realistic simulated) end-to-end tutorial.
+
+### "Interpreting your results" deliverable (explain everything CCCPM outputs)
+A dedicated docs page (+ in-report captions) that explains every artifact a run
+produces, for both task types. Inventory to document:
+- [ ] **HTML report pages**: Info, Data Description, Data Insights, Hyperparameters,
+      Main Results, Network Strengths, Brain Plots, Edge Table — what each shows and
+      how to read it.
+- [ ] **Metrics**: regression = explained variance, Pearson r, MSE, MAE;
+      classification = accuracy, balanced accuracy, F1, ROC AUC. Define each, note
+      which to trust when, and how the four model variants compare.
+- [ ] **Output CSVs**: `cv_predictions.csv`, `cv_network_strengths.csv`,
+      `cv_results*.csv` (raw / mean±std / summary), `p_values.csv` (permutation),
+      plus `edges/`, `plots/`, `cpm_log.txt`, `task_type.txt` — document schema/meaning.
+- [ ] Explain permutation p-values and how significance is determined.
+- [ ] Explain edge stability and how to interpret selected positive/negative networks.
+- [ ] Verify API reference pages match current module names; auto-build cleanly.
+- [ ] Add `CHANGELOG.md`, `CONTRIBUTING.md`, `CITATION.cff` (researchers will cite it).
+- [ ] Fix `build_docs.yml`: it pip-installs `photonai` (looks like leftover) — confirm
+      it's actually needed or remove.
+
+## Phase 5 — HTML report polish (Nils-driven, visual)
+You'll own the visual decisions; I can support structure + iteration speed.
+
+- [ ] Set up a fast iteration loop: a script that regenerates the report from a fixed
+      fixture and opens it, so visual changes are a few seconds to preview.
+- [ ] Make plots/theming configurable; ensure the report is self-contained & portable
+      (assets embedded or relative), works offline.
+- [ ] Add explanatory captions so a researcher unfamiliar with the internals can read
+      it; consistent terminology with the docs.
+- [ ] Accessibility / print-friendliness pass.
+
+## Phase 6 — Release
+- [ ] Final version bump + CHANGELOG entry.
+- [ ] Tag `-test` → TestPyPI → clean-install verification on 3 OSes.
+- [ ] Tag real version → PyPI (publish.yml OIDC trusted publisher already configured).
+- [ ] Post-release: install from PyPI on a clean machine, run an example, confirm docs
+      site deployed.
+
+---
+
+## Open decisions (need Nils' input)
+1. **torch/GPU packaging**: default torch + doc GPU, or CPU-default + `[gpu]` extra?
+2. **Next version number**: 0.3.0 (proposed) given 0.2.1 is on PyPI?
+3. **Python version ceiling**: support up to 3.13 now, or also 3.14?
+4. **PEP 621 migration** for pyproject, or stay on Poetry's `[tool.poetry]` table?
+5. **Reference dataset** for ground-truth validation — do we have one to validate against?
