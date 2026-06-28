@@ -108,23 +108,22 @@ in both flavors so users can copy the one matching their task.
 - [ ] Optional: a real-data (or realistic simulated) end-to-end tutorial.
 
 ### "Interpreting your results" deliverable (explain everything CCCPM outputs)
-A dedicated docs page (+ in-report captions) that explains every artifact a run
-produces, for both task types. Inventory to document:
-- [ ] **HTML report pages**: Info, Data Description, Data Insights, Hyperparameters,
-      Main Results, Network Strengths, Brain Plots, Edge Table — what each shows and
-      how to read it.
-- [ ] **Metrics**: regression = explained variance, Pearson r, MSE, MAE;
-      classification = accuracy, balanced accuracy, F1, ROC AUC. Define each, note
-      which to trust when, and how the four model variants compare.
-- [ ] **Output CSVs**: `cv_predictions.csv`, `cv_network_strengths.csv`,
-      `cv_results*.csv` (raw / mean±std / summary), `p_values.csv` (permutation),
-      plus `edges/`, `plots/`, `cpm_log.txt`, `task_type.txt` — document schema/meaning.
-- [ ] Explain permutation p-values and how significance is determined.
-- [ ] Explain edge stability and how to interpret selected positive/negative networks.
-- [ ] Verify API reference pages match current module names; auto-build cleanly.
+Done: `documentation/docs/interpreting_results.md` (added to nav) documents every
+artifact a run produces, grounded in the actual output files, for both task types.
+- [x] **HTML report pages**: Info, Data Description, Data Insights, Hyperparameters,
+      Main Results, Network Strengths, Brain Plots, Edge Table — explained.
+- [x] **Models & networks** explained (connectome/covariates/full/residuals/increment
+      × positive/negative/both), with guidance on the `increment` model.
+- [x] **Metrics**: both task types defined, with "which to trust" guidance.
+- [x] **Output files**: all CSVs + npy + plots + logs documented with real columns.
+- [x] Permutation p-values and edge stability explained.
+- [ ] Add matching in-report captions (Phase 5, Nils-driven visual pass).
+- [x] Verify API reference pages match current module names; auto-build cleanly.
+      Fixed broken `api/fold.md` (`cccpm.fold` -> `cccpm.inner_fold`), `api/models.md`
+      (empty package -> linear/nonlinear modules), retitled "CPM Regression" ->
+      "CPM Analysis". Added a `docs` poetry group; `mkdocs build --strict` now passes.
+- [x] Fix `build_docs.yml`: removed stray `photonai`, now uses Poetry + `docs` group.
 - [ ] Add `CHANGELOG.md`, `CONTRIBUTING.md`, `CITATION.cff` (researchers will cite it).
-- [ ] Fix `build_docs.yml`: it pip-installs `photonai` (looks like leftover) — confirm
-      it's actually needed or remove.
 
 ## Phase 5 — HTML report polish (Nils-driven, visual)
 You'll own the visual decisions; I can support structure + iteration speed.

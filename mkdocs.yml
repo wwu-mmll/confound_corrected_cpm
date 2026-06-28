@@ -43,13 +43,14 @@ nav:
 - Home: 'index.md'
 - Installation: 'installation.md'
 - Getting Started: 'getting_started.md'
+- Interpreting Results: 'interpreting_results.md'
 - Examples:
     - Simulated Data: 'examples/simulated_data.md'
 - API:
-    - CPM Regression: api/cpm_regression.md
+    - CPM Analysis: api/cpm_regression.md
     - Edge Selection: api/edge_selection.md
     - Models: api/models.md
-    - Fold: api/fold.md
+    - Inner Fold: api/fold.md
     - Results Manager: api/results_manager.md
 
 extra_css:
