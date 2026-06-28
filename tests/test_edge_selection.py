@@ -1,12 +1,16 @@
 import numpy as np
 import pandas as pd
+import pytest
 import pingouin as pg
 from scipy.stats import pearsonr, spearmanr
 from cccpm.edge_selection import (
     pearson_correlation_with_pvalues,
     spearman_correlation_with_pvalues,
-    semi_partial_correlation_pearson
+    semi_partial_correlation_pearson,
+    UnivariateEdgeSelection,
+    PThreshold,
 )
+from cccpm.constants import Networks
 
 
 def test_cpm_pearson(simulated_data):
@@ -80,3 +84,45 @@ def test_semi_partial_correlation_pearson(simulated_data):
 
     np.testing.assert_almost_equal(partial_corr, pcorr_pingouin, decimal=10)
     np.testing.assert_almost_equal(p_values, pval_pingouin, decimal=10)
+
+
+@pytest.mark.parametrize("statistic,binary_target", [
+    ("pearson", False),
+    ("spearman", False),
+    ("pearson_partial", False),
+    ("spearman_partial", False),
+    ("point_biserial", True),
+    ("point_biserial_partial", True),
+])
+def test_edge_selection_recovers_signed_edges(statistic, binary_target):
+    """
+    End-to-end test of the production edge-selection path
+    (UnivariateEdgeSelection -> EdgeStatistic dispatch -> PThreshold.select)
+    for every supported edge statistic: a strongly positive edge must be
+    selected as positive, a strongly negative edge as negative, and the sign
+    must not be confused.
+    """
+    rng = np.random.RandomState(42)
+    n_samples, n_features = 200, 10
+    X = rng.randn(n_samples, n_features).astype(np.float32)
+    # feature 0 drives y up, feature 1 drives y down
+    signal = X[:, 0] * 2.0 - X[:, 1] * 2.0 + rng.randn(n_samples) * 0.3
+    if binary_target:
+        y = (signal > np.median(signal)).astype(np.float32).reshape(-1, 1)
+    else:
+        y = signal.astype(np.float32).reshape(-1, 1)
+    covariates = rng.randn(n_samples, 1).astype(np.float32)
+
+    sel = UnivariateEdgeSelection(
+        edge_statistic=statistic,
+        edge_selection=[PThreshold(threshold=[0.01], correction=[None])],
+    )
+    # Configure as a single selector, exactly as the pipeline does
+    sel.set_params(**list(sel.param_grid)[0])
+
+    edges = sel.fit_transform(X=X, y=y, covariates=covariates).return_selected_edges()
+    # edges shape: [n_features, 2, n_runs]
+    assert bool(edges[0, Networks.positive, 0]), f"{statistic}: feature 0 should be positive"
+    assert bool(edges[1, Networks.negative, 0]), f"{statistic}: feature 1 should be negative"
+    assert not bool(edges[0, Networks.negative, 0]), f"{statistic}: feature 0 should not be negative"
+    assert not bool(edges[1, Networks.positive, 0]), f"{statistic}: feature 1 should not be positive"

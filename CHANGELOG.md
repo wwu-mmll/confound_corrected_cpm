@@ -13,6 +13,10 @@ documentation.
 - **`pip install cccpm` now works**: `torch` is declared as a dependency. Previous
   releases imported `torch` everywhere but never required it, so a fresh install
   failed at import time.
+- **`point_biserial_partial` edge selection was broken** and silently selected no
+  edges (it residualized the binary target into continuous values, then compared it
+  against the `0`/`1` groups). Partial point-biserial is now computed as Pearson on
+  the residuals, so confound-controlled edge selection works for classification.
 - Unified all `device` defaults to `"cpu"` (`LinearCPM` and the `scoring` helpers
   previously defaulted to `"cuda"`), so direct use never crashes on machines
   without a GPU. The pipeline still uses the GPU when requested.

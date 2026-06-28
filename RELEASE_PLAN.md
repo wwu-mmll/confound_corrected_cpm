@@ -44,6 +44,13 @@ You don't trust the tests; turn 115 green checks into real confidence.
       validates that `n_features` is a valid upper-triangular connectome size
       (`infer_n_nodes`) and raises a clear error suggesting the nearest valid sizes,
       instead of crashing deep in edge stability. Covered by new tests.
+- [x] Added end-to-end edge-selection tests across all 6 statistics (pearson,
+      spearman, their partials, point_biserial, point_biserial_partial). This caught
+      a **real bug**: `point_biserial_partial` was completely broken — it residualized
+      the binary target into continuous values and then matched it against `==0/==1`
+      groups, so it selected **zero edges for every feature** (silent). Fixed by
+      computing partial point-biserial as Pearson-on-residuals. Confound-controlled
+      classification edge selection now works.
 - [ ] Classification path: expand beyond current tests (probabilities, AUC, class
       imbalance, StratifiedKFold edge cases).
 - [ ] Determinism: `CPMAnalysis.__init__` calls global `np.random.seed(42)` /

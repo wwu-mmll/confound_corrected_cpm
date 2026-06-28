@@ -198,14 +198,31 @@ def point_biserial_correlation(X, Y_perms, confounds=None):
     """
     n_samples = X.size(0)
 
-    # Handle partial correlation (residualize first)
+    # Handle partial correlation. Point-biserial is Pearson with a binary
+    # variable, so the partial version is the Pearson correlation of the
+    # residuals after regressing out the confounds. We must NOT use the
+    # binary group-mean formula below here, because residualizing makes Y
+    # continuous (it would no longer equal exactly 0/1, yielding empty groups
+    # and r == 0 for every feature).
     if confounds is not None:
         confounds = torch.as_tensor(confounds, device=X.device, dtype=X.dtype)
-        X = get_residuals(X, confounds)
-        Y_perms = get_residuals(Y_perms, confounds)
         k_confounds = confounds.size(1)
-    else:
-        k_confounds = 0
+        X_res = get_residuals(X, confounds)
+        Y_res = get_residuals(Y_perms, confounds)
+
+        X_norm = (X_res - X_res.mean(0, keepdim=True)) / (X_res.std(0, keepdim=True) + 1e-8)
+        Y_norm = (Y_res - Y_res.mean(0, keepdim=True)) / (Y_res.std(0, keepdim=True) + 1e-8)
+        r_matrix = torch.matmul(X_norm.t(), Y_norm) / (n_samples - 1)  # (N_features, N_perms)
+        r_matrix = torch.clamp(r_matrix, -0.999999, 0.999999)
+
+        df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=X.dtype)
+        t_stats = r_matrix * torch.sqrt(df / (1 - r_matrix ** 2))
+        z = t_stats / torch.sqrt(df / (df + 1))
+        val = -torch.abs(z) / 1.41421356
+        p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
+        return r_matrix, p_matrix
+
+    k_confounds = 0
 
     # Y_perms shape: (N_samples, N_perms)
     # Create masks for binary groups (0 and 1)
