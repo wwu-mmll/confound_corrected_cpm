@@ -41,8 +41,11 @@ You don't trust the tests; turn 115 green checks into real confidence.
 - [ ] Determinism: `CPMAnalysis.__init__` calls global `np.random.seed(42)` /
       `torch.manual_seed(42)` — this mutates the user's global RNG as a side effect.
       Decide on a local RNG / `random_state` param instead.
-- [ ] Device default mismatch: `LinearCPM.__init__` defaults `device='cuda'` while
-      `CPMAnalysis` defaults `'cpu'`. Make consistent; verify CPU/MPS/CUDA all work.
+- [x] Device default mismatch: `LinearCPM` and the `scoring.py` helpers defaulted to
+      `device='cuda'` while `CPMAnalysis` and the nonlinear models default to `'cpu'`.
+      Unified all defaults to `'cpu'` so direct use never crashes on CPU-only machines
+      (the pipeline still passes `device` explicitly). Added a test.
+- [ ] Still verify MPS (Apple) / CUDA paths actually run end-to-end on real hardware.
 - [ ] Run the full suite on macOS (arm64), Linux, Windows locally or in CI.
 
 ## Phase 2 — Code structure / modularization

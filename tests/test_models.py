@@ -35,6 +35,13 @@ def simple_data():
     return X, y, covariates, edges
 
 
+def test_linear_cpm_defaults_to_cpu(simple_data):
+    """LinearCPM must default to CPU so it works on machines without CUDA."""
+    _, _, _, edges = simple_data
+    model = LinearCPM(edges=edges)
+    assert torch.device(model.device) == torch.device("cpu")
+
+
 # ============================================================
 # TestModelInterface — parametrized over all 4 model classes
 # ============================================================

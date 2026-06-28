@@ -22,12 +22,12 @@ class LinearCPM:
     """
     name = "LinearCPM"
 
-    def __init__(self, edges, device='cuda', task_type=TaskType.regression):
+    def __init__(self, edges, device='cpu', task_type=TaskType.regression):
         """
         Args:
             edges: Boolean masks tensor with shape [N_features, 2, N_runs].
                    Dimension 1 corresponds to [Positive, Negative].
-            device: 'cuda' or 'cpu'
+            device: 'cpu' or 'cuda'
             task_type: TaskType.regression or TaskType.classification
         """
         self.device = torch.device(device)

@@ -5,7 +5,7 @@ from cccpm.constants import Networks, Models, Metrics, TaskType
 
 class FastCPMMetrics:
 
-    def __init__(self, device='cuda'):
+    def __init__(self, device='cpu'):
         self.device = device
 
     def score(self, y_true, y_pred):
@@ -83,7 +83,7 @@ class FastCPMClassificationMetrics:
     efficiently across all models, networks, and runs simultaneously.
     """
 
-    def __init__(self, device='cuda'):
+    def __init__(self, device='cpu'):
         self.device = device
 
     def score(self, y_true, y_pred_proba):
@@ -204,12 +204,12 @@ class FastCPMClassificationMetrics:
         return auc
 
 
-def score_regression_models(y_true, y_pred, device='cuda', **kwargs):
+def score_regression_models(y_true, y_pred, device='cpu', **kwargs):
     evaluator = FastCPMMetrics(device=device)
     return evaluator.score(y_true, y_pred)
 
 
-def score_classification_models(y_true, y_pred_proba, device='cuda', **kwargs):
+def score_classification_models(y_true, y_pred_proba, device='cpu', **kwargs):
     """
     Score classification models using predicted probabilities.
 
@@ -225,7 +225,7 @@ def score_classification_models(y_true, y_pred_proba, device='cuda', **kwargs):
     return evaluator.score(y_true, y_pred_proba)
 
 
-def score_models(y_true, y_pred, task_type, device='cuda', **kwargs):
+def score_models(y_true, y_pred, task_type, device='cpu', **kwargs):
     """
     Score models based on task type (regression or classification).
 
