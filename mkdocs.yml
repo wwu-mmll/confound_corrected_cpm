@@ -45,6 +45,7 @@ nav:
 - Home: 'index.md'
 - Installation: 'installation.md'
 - Getting Started: 'getting_started.md'
+- How CCCPM Works: 'methods.md'
 - Interpreting Results: 'interpreting_results.md'
 - Examples:
     - Regression: 'examples/regression.md'

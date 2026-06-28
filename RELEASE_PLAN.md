@@ -112,10 +112,11 @@ Outdated and incomplete. Make it the on-ramp for researchers.
       Rosetta issue). Enabled `pymdownx.tabbed`; `mkdocs build --strict` passes.
 - [ ] Rewrite `getting_started.md`: replace `CPMRegression` → `CPMAnalysis`, fix
       imports and the `edge_statistic` list/string bug, verify every snippet runs.
-- [ ] New: conceptual docs explaining the method — edge selection, confound control
-      (partial correlation vs residualization), nested CV, stable edges, permutation
-      testing, the four model variants (connectome/covariates/full/residuals),
-      network strengths, and how to interpret outputs.
+- [x] New conceptual page `methods.md` ("How CCCPM Works") — the CPM idea, edge
+      selection (incl. the statistic table), confound control (partial vs
+      residualization), model variants, nested CV, edge stability, and permutation
+      testing, with a recommended confound-aware workflow. Added to nav.
+- [x] Fixed stale `cpm_python` badges in `index.md`.
 
 ### Paired regression + classification examples (first-class deliverable)
 Every concept gets a runnable script in `examples/` **and** a matching docs tutorial,
