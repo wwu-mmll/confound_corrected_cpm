@@ -165,3 +165,5 @@ examples/simulated_data
 tests/tmp
 
 poetry.lock
+
+*.DS_Store
