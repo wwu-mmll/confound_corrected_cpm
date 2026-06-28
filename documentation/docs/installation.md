@@ -1,6 +1,6 @@
 # Installation Guide
 
-Follow these steps to install the ccCPM Python package directly from GitHub.
+Follow these steps to install the CCCPM Python package via pip.
 
 ## Prerequisites
 
@@ -8,36 +8,8 @@ Follow these steps to install the ccCPM Python package directly from GitHub.
 - `pip` (Python's package manager)
 
 ## Installation Steps
-
-Clone the GitHub repository:
-
-```bash
-git clone https://github.com/mmll/cpm_python.git
-```
-
-Navigate to the repository directory:
+CCCPM is available on PyPI. To install, run these commands in your terminal:
 
 ```bash
-cd cpm_python
+pip install cccpm
 ```
-
-Install the package:
-
-```bash
-pip install .
-```
-
-To install in development mode, use:
-
-```bash
-pip install -e .
-```
-
-Verify the installation:
-
-```python
-import cpm
-print(cpm.__version__)
-```
-
-You should see the package version printed without errors.

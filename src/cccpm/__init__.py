@@ -1,0 +1,1 @@
+from cccpm.cpm_analysis import CPMRegression

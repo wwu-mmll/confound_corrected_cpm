@@ -1,4 +1,4 @@
-[![GitHub Workflow Status](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/python-test.yml/badge.svg)](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/python-test.yml)
+[![GitHub Workflow Status](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/test.yml/badge.svg)](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/test.yml)
 [![Coverage Status](https://coveralls.io/repos/github/wwu-mmll/confound_corrected_cpm/badge.svg)](https://coveralls.io/github/wwu-mmll/confound_corrected_cpm)
 [![Github Contributors](https://img.shields.io/github/contributors-anon/wwu-mmll/cpm_python?color=blue)](https://github.com/wwu-mmll/cpm_python/graphs/contributors)
 [![Github Commits](https://img.shields.io/github/commit-activity/y/wwu-mmll/cpm_python)](https://github.com/wwu-mmll/cpm_python/commits/main)
@@ -44,8 +44,8 @@ pip install .
 Here's a quick overview of how to run a CPM analysis:
 
 ```python
-from cpm.cpm_analysis import CPMRegression
-from cpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from src.cccpm.cpm_analysis import CPMRegression
+from src.cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from sklearn.model_selection import KFold
 
 # Configure edge selection

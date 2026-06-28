@@ -1,3 +1,3 @@
 # Edge Selection
 
-::: cpm.edge_selection
+::: cccpm.edge_selection
