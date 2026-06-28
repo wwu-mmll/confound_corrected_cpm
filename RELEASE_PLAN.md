@@ -101,8 +101,12 @@ You explicitly care that users on Mac/Linux/Windows + various Python versions su
 - [ ] Optional speed-up: add Poetry/pip caching (best paired with committing the lock).
 - [ ] `poetry.lock` is currently **gitignored** — decide whether to commit it (helps
       CI reproducibility) and verify it installs reproducibly on all OSes.
-- [ ] Add a clean-environment install smoke test to CI (build wheel, install in a
-      fresh venv, import, run a tiny example) — catches the missing-torch class of bug.
+- [x] Ran a clean-environment install smoke test locally (build wheel -> fresh venv ->
+      install -> import -> tiny run). **Caught another missing-dependency bug**:
+      `seaborn` (and directly-imported `scipy`, `matplotlib`, `statsmodels`) were not
+      declared, so `import cccpm` failed on a clean install. All four are now declared;
+      re-verified the wheel installs and runs end-to-end in a fresh venv.
+- [ ] Add this smoke test to CI as an automated job (so it can't regress).
 
 ## Phase 4 — Documentation overhaul
 Outdated and incomplete. Make it the on-ramp for researchers.

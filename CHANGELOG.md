@@ -13,6 +13,10 @@ documentation.
 - **`pip install cccpm` now works**: `torch` is declared as a dependency. Previous
   releases imported `torch` everywhere but never required it, so a fresh install
   failed at import time.
+- **Declared previously-undeclared runtime dependencies** (`scipy`, `seaborn`,
+  `matplotlib`, `statsmodels`). They were imported directly but only present
+  transitively, so a clean `pip install cccpm` could fail at import (e.g.
+  `ModuleNotFoundError: No module named 'seaborn'`).
 - **`point_biserial_partial` edge selection was broken** and silently selected no
   edges (it residualized the binary target into continuous values, then compared it
   against the `0`/`1` groups). Partial point-biserial is now computed as Pearson on
