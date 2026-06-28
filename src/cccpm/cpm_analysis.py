@@ -46,7 +46,8 @@ class CPMAnalysis:
                  calculate_residuals: bool = False,
                  n_permutations: int = 0,
                  atlas_labels: str = None,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 random_state: int = 42):
         """
         Initialize the CPMAnalysis object.
 
@@ -90,6 +91,9 @@ class CPMAnalysis:
         device: str, default='cpu'
             Compute device: ``'cpu'``, or ``'cuda'``/``'gpu'`` to use an available
             GPU (falls back to CPU with a warning if CUDA is unavailable).
+        random_state: int, default=42
+            Seed for permutation generation. Uses a local RNG and does not modify
+            the global NumPy/torch random state.
         """
         self.results_directory = results_directory
 
@@ -97,8 +101,9 @@ class CPMAnalysis:
         if isinstance(task_type, str):
             task_type = TaskType(task_type)
         self.task_type = task_type  # Will be validated/auto-detected in run()
-        np.random.seed(42)
-        torch.manual_seed(42)
+        # Use a local seed for permutation generation instead of mutating the
+        # global NumPy/torch RNG (which would silently affect the user's other code).
+        self.random_state = random_state
         os.makedirs(self.results_directory, exist_ok=True)
         os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
         os.makedirs(os.path.join(self.results_directory, "permutation"), exist_ok=True)
@@ -258,8 +263,12 @@ class CPMAnalysis:
         y_tensor = torch.as_tensor(y, dtype=torch.float32)
         y_matrix = y_tensor.unsqueeze(0).expand(self.n_permutations, -1)
 
-        # 2. Create random noise and get sorting indices (random permutation per row)
-        noise = torch.rand_like(y_matrix)
+        # 2. Create random noise and get sorting indices (random permutation per row).
+        # Use a local generator seeded from random_state so results are reproducible
+        # without touching the global torch RNG.
+        generator = torch.Generator(device=y_matrix.device).manual_seed(self.random_state)
+        noise = torch.rand(y_matrix.shape, generator=generator,
+                           dtype=y_matrix.dtype, device=y_matrix.device)
         indices = noise.argsort(dim=1)
 
         # 3. Apply these indices to permute each row

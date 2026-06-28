@@ -54,9 +54,11 @@ You don't trust the tests; turn 115 green checks into real confidence.
       classification edge selection now works.
 - [ ] Classification path: expand beyond current tests (probabilities, AUC, class
       imbalance, StratifiedKFold edge cases).
-- [ ] Determinism: `CPMAnalysis.__init__` calls global `np.random.seed(42)` /
-      `torch.manual_seed(42)` — this mutates the user's global RNG as a side effect.
-      Decide on a local RNG / `random_state` param instead.
+- [x] Determinism: `CPMAnalysis.__init__` no longer mutates the global NumPy/torch
+      RNG. Added a `random_state` parameter; permutations now use a local
+      `torch.Generator`. Verified the nonlinear models already set their own
+      `random_state`, so nothing regressed. Tests assert global RNG is untouched and
+      permutations are reproducible across instances (and vary with `random_state`).
 - [x] Device default mismatch: `LinearCPM` and the `scoring.py` helpers defaulted to
       `device='cuda'` while `CPMAnalysis` and the nonlinear models default to `'cpu'`.
       Unified all defaults to `'cpu'` so direct use never crashes on CPU-only machines
@@ -71,7 +73,7 @@ Mostly in good shape (reporting + models are already split). Targeted cleanups:
       `UnivariateEdgeSelection`, `PThreshold`, `TaskType`, models, and `__version__`.
 - [x] Update stale `CLAUDE.md` key-modules table (`pytorch_model.py` ->
       `models/linear_model.py`, added nonlinear models row).
-- [ ] Remove the global RNG side effect (ties to Phase 1 determinism).
+- [x] Removed the global RNG side effect (done with Phase 1 determinism).
 - [~] Clean `examples/`: cruft (`tmp/`, `.ipynb_checkpoints/`, `.DS_Store`) is already
       untracked/gitignored. The two mediator examples genuinely differ and
       `example_simulated_classification.py` is now partly redundant with the

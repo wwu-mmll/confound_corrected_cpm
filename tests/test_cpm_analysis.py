@@ -7,11 +7,24 @@ Full pipeline correctness (regression + classification) is tested in test_ground
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 from sklearn.model_selection import KFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
 from cccpm.utils import check_data
+
+
+def _make_cpm(results_directory, **kwargs):
+    edge_selection = UnivariateEdgeSelection(
+        edge_statistic="pearson",
+        edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
+    )
+    return CPMAnalysis(
+        results_directory=str(results_directory),
+        edge_selection=edge_selection,
+        **kwargs,
+    )
 
 
 # --- Input handling ---
@@ -90,6 +103,37 @@ def test_pipeline_is_reproducible(tmp_path, simulated_data):
     edges_a = np.load(tmp_path / "run_a" / "stability_edges.npy")
     edges_b = np.load(tmp_path / "run_b" / "stability_edges.npy")
     np.testing.assert_array_equal(edges_a, edges_b)
+
+
+# --- RNG hygiene ---
+
+def test_construction_does_not_touch_global_rng(tmp_path):
+    """Constructing CPMAnalysis must not mutate the user's global NumPy/torch RNG."""
+    np.random.seed(123)
+    torch.manual_seed(123)
+    np_state = np.random.get_state()
+    torch_state = torch.get_rng_state()
+
+    _make_cpm(tmp_path / "rng")
+
+    np_after = np.random.get_state()
+    assert np_state[0] == np_after[0]
+    assert np.array_equal(np_state[1], np_after[1])
+    assert np_state[2] == np_after[2]
+    assert torch.equal(torch_state, torch.get_rng_state())
+
+
+def test_permutations_reproducible_across_instances(tmp_path):
+    """Same random_state -> identical permutations, without relying on global RNG."""
+    y = np.arange(30)
+    perm_a = _make_cpm(tmp_path / "a", n_permutations=5)._create_permuted_y(y)
+    perm_b = _make_cpm(tmp_path / "b", n_permutations=5)._create_permuted_y(y)
+    np.testing.assert_array_equal(perm_a, perm_b)
+
+    # A different random_state should give a different permutation
+    perm_c = _make_cpm(tmp_path / "c", n_permutations=5,
+                       random_state=7)._create_permuted_y(y)
+    assert not np.array_equal(perm_a, perm_c)
 
 
 # --- Permutation generation ---

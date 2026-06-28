@@ -39,6 +39,10 @@ documentation.
 - Project files: `LICENSE` (MIT), `CITATION.cff`, and `CONTRIBUTING.md`.
 
 ### Changed
+- `CPMAnalysis` no longer reseeds the global NumPy/torch RNG on construction. It
+  now takes a `random_state` parameter (default 42) and uses a local generator for
+  permutations, so creating a `CPMAnalysis` no longer affects other code in your
+  script. Results remain reproducible.
 - Require Python `>=3.10,<3.15` and `torch>=2.2`.
 - Added packaging metadata (keywords, classifiers, project URLs).
 
