@@ -11,14 +11,14 @@ Status legend: [ ] todo · [~] in progress · [x] done
 ## Phase 0 — Stop the bleeding (the published package is broken)
 Highest priority. A fresh `pip install cccpm` currently fails (no torch).
 
-- [ ] Add `torch` to declared dependencies (done locally in pyproject; must ship).
-- [ ] Decide torch version floor + platform strategy (see Phase 3). At minimum pin `torch>=2.2`.
-- [ ] Reconcile version numbers: repo says 0.1.1, PyPI is 0.2.1. Bump to a clean
-      next version (proposed **0.3.0**) and make repo the source of truth.
-- [ ] Add a real `LICENSE` file (MIT) at repo root.
-- [ ] Constrain `requires_python` to `>=3.10,<3.15` on PyPI metadata (done locally).
+- [x] Add `torch` to declared dependencies (shipped in pyproject, `torch>=2.2`).
+- [x] Decide torch version floor (`torch>=2.2`); platform strategy still open (Phase 3).
+- [x] Reconcile version numbers: bumped 0.1.1 -> **0.3.0** (repo is now source of truth).
+- [x] Add a real `LICENSE` file (MIT) at repo root.
+- [x] Constrain `requires_python` to `>=3.10,<3.15`.
 - [ ] Publish a fixed release to **TestPyPI** first (tag `vX.Y.Z-test`), install it
       clean on all 3 OSes, confirm `import cccpm` + run an example, THEN publish to PyPI.
+      *(deferred — Nils will trigger deployment after merge to main; do NOT do this.)*
 
 ## Phase 1 — Trust the results (testing & correctness)
 You don't trust the tests; turn 115 green checks into real confidence.
@@ -44,11 +44,10 @@ You don't trust the tests; turn 115 green checks into real confidence.
 ## Phase 2 — Code structure / modularization
 Mostly in good shape (reporting + models are already split). Targeted cleanups:
 
-- [ ] Improve top-level public API in `src/cccpm/__init__.py`: also export
-      `UnivariateEdgeSelection`, `PThreshold`, `TaskType` so users don't dig into
-      submodules. Add `__version__`.
-- [ ] Update stale `CLAUDE.md`: it references `pytorch_model.py` (now
-      `models/linear_model.py`) and other drifted details.
+- [x] Improve top-level public API in `src/cccpm/__init__.py`: now exports
+      `UnivariateEdgeSelection`, `PThreshold`, `TaskType`, models, and `__version__`.
+- [x] Update stale `CLAUDE.md` key-modules table (`pytorch_model.py` ->
+      `models/linear_model.py`, added nonlinear models row).
 - [ ] Remove the global RNG side effect (ties to Phase 1 determinism).
 - [ ] Clean `examples/`: dedupe `mediator_sim_example.py` vs
       `mediator_simulation_example.py`, drop `tmp/`, `.ipynb_checkpoints/`, `.DS_Store`
@@ -77,9 +76,10 @@ You explicitly care that users on Mac/Linux/Windows + various Python versions su
 ## Phase 4 — Documentation overhaul
 Outdated and incomplete. Make it the on-ramp for researchers.
 
-- [ ] Fix README: correct install (clone URL, dir, or `pip install cccpm`), correct
-      quick-start (`from cccpm import CPMAnalysis`, string `edge_statistic`), fix badges
-      to the `confound_corrected_cpm` repo.
+- [x] Fix README: corrected install, quick-start (`from cccpm import CPMAnalysis`,
+      string `edge_statistic`), and repo badges.
+- [x] Fix `getting_started.md`: `CPMRegression` -> `CPMAnalysis`, imports, the
+      `edge_statistic` list/string bug, and the `estimate` -> `run` method name.
 - [ ] Rewrite `installation.md`: per-OS instructions, Python version notes, torch/GPU
       guidance, troubleshooting (the arm64/Rosetta + torch wheel issue we hit).
 - [ ] Rewrite `getting_started.md`: replace `CPMRegression` → `CPMAnalysis`, fix
