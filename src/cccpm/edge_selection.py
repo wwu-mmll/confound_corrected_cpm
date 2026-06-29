@@ -224,41 +224,21 @@ def point_biserial_correlation(X, Y_perms, confounds=None):
 
     k_confounds = 0
 
-    # Y_perms shape: (N_samples, N_perms)
-    # Create masks for binary groups (0 and 1)
-    mask_1 = (Y_perms == 1).unsqueeze(1)  # (N_samples, 1, N_perms)
-    mask_0 = (Y_perms == 0).unsqueeze(1)  # (N_samples, 1, N_perms)
-
-    # Expand X for broadcasting: (N_samples, N_features) -> (N_samples, N_features, 1)
-    X_expanded = X.unsqueeze(2)
-
-    # Calculate group statistics
-    # Sum and count for each group
-    n1 = mask_1.sum(dim=0)  # (1, N_perms)
-    n0 = mask_0.sum(dim=0)  # (1, N_perms)
-
-    # Mean for each group and feature
-    sum_1 = (X_expanded * mask_1).sum(dim=0)  # (N_features, N_perms)
-    sum_0 = (X_expanded * mask_0).sum(dim=0)  # (N_features, N_perms)
-
-    M1 = sum_1 / (n1 + 1e-8)  # (N_features, N_perms)
-    M0 = sum_0 / (n0 + 1e-8)  # (N_features, N_perms)
-
-    # Standard deviation (pooled)
-    # Var = E[X^2] - E[X]^2
-    X_squared = X_expanded ** 2
-    sum_sq_1 = (X_squared * mask_1).sum(dim=0)
-    sum_sq_0 = (X_squared * mask_0).sum(dim=0)
-
-    # Pooled variance
-    ss_1 = sum_sq_1 - (sum_1 ** 2) / (n1 + 1e-8)
-    ss_0 = sum_sq_0 - (sum_0 ** 2) / (n0 + 1e-8)
-    pooled_var = (ss_1 + ss_0) / (n1 + n0 - 2 + 1e-8)
-    s = torch.sqrt(pooled_var)
-
-    # Point-biserial correlation formula:
-    # r_pb = (M1 - M0) / s * sqrt(n0 * n1 / (n0 + n1)^2)
-    r_matrix = (M1 - M0) / (s + 1e-8) * torch.sqrt(n0 * n1 / ((n0 + n1) ** 2 + 1e-8))
+    # Point-biserial correlation is *exactly* the Pearson correlation between the
+    # continuous feature and the binary (0/1) target, so we compute it that way.
+    #
+    # The previous implementation used the group-mean formula
+    #   r_pb = (M1 - M0) / s_pooled * sqrt(n0*n1/(n0+n1)^2)
+    # with ``s_pooled`` = the *pooled within-group* standard deviation. That is
+    # wrong: the correct denominator is the *total* standard deviation of X
+    # (which also contains the between-group variance). Using the within-group SD
+    # systematically inflates |r| — with imbalanced groups and strong separation
+    # it drove r to the clamp (1.0) where scipy.stats.pointbiserialr gives ~0.78.
+    # Computing Pearson on standardized X and Y reproduces scipy to ~1e-6.
+    Y_perms = Y_perms.to(X.dtype)
+    X_norm = (X - X.mean(0, keepdim=True)) / (X.std(0, keepdim=True) + 1e-8)
+    Y_norm = (Y_perms - Y_perms.mean(0, keepdim=True)) / (Y_perms.std(0, keepdim=True) + 1e-8)
+    r_matrix = torch.matmul(X_norm.t(), Y_norm) / (n_samples - 1)  # (N_features, N_perms)
 
     # Clamp to valid correlation range
     r_matrix = torch.clamp(r_matrix, -0.999999, 0.999999)

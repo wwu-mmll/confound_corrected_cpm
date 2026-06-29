@@ -1,12 +1,14 @@
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 import pingouin as pg
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr, spearmanr, pointbiserialr
 from cccpm.edge_selection import (
     pearson_correlation_with_pvalues,
     spearman_correlation_with_pvalues,
     semi_partial_correlation_pearson,
+    point_biserial_correlation,
     UnivariateEdgeSelection,
     PThreshold,
 )
@@ -84,6 +86,33 @@ def test_semi_partial_correlation_pearson(simulated_data):
 
     np.testing.assert_almost_equal(partial_corr, pcorr_pingouin, decimal=10)
     np.testing.assert_almost_equal(p_values, pval_pingouin, decimal=10)
+
+
+@pytest.mark.parametrize("seed,n,n1", [
+    (1, 80, 20),    # imbalanced groups
+    (2, 60, 30),    # balanced
+    (3, 200, 40),   # larger, imbalanced
+    (4, 40, 8),     # small n, strong imbalance
+])
+def test_point_biserial_matches_scipy(seed, n, n1):
+    """The point-biserial correlation must equal scipy.stats.pointbiserialr.
+
+    Regression test for a bug where the group-mean formula used the *pooled
+    within-group* SD as the denominator (instead of the total SD of X), which
+    inflated |r| — with imbalanced groups and strong separation it drove r to
+    the clamp (1.0) where scipy reports ~0.78.
+    """
+    rng = np.random.RandomState(seed)
+    y = np.array([1] * n1 + [0] * (n - n1)).astype(np.float64)
+    rng.shuffle(y)
+    # features with varying (incl. strong) association with the binary target
+    X = (y[:, None] * rng.uniform(0, 3, 6) + rng.randn(n, 6)).astype(np.float64)
+
+    r, _ = point_biserial_correlation(torch.as_tensor(X), torch.as_tensor(y).reshape(-1, 1))
+    r = r.numpy().ravel()
+
+    scipy_r = np.array([pointbiserialr(y, X[:, i])[0] for i in range(X.shape[1])])
+    np.testing.assert_allclose(r, scipy_r, atol=1e-6)
 
 
 @pytest.mark.parametrize("statistic,binary_target", [

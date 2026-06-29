@@ -53,9 +53,25 @@ You don't trust the tests; turn 115 green checks into real confidence.
       negligible at N>=100). Nils wants to keep a torch/GPU-friendly path, so we will NOT
       route through scipy yet — decide later between (a) keep the current approximation,
       (b) a more accurate on-GPU approximation, or (c) exact via scipy on CPU.
-- [ ] Remaining numerical spot-checks: partial correlation (semi vs full — the function
-      is named `semi_partial_*` but is validated against pingouin's full `partial_corr`),
-      FDR correction, residualization.
+- Remaining numerical spot-checks: partial correlation (semi vs full), point-biserial,
+  FDR correction, residualization. Broken out:
+  - [x] **Point-biserial base formula bug (statistical validity):** the non-partial
+        `point_biserial_correlation` used the **pooled within-group SD** as the
+        denominator of `(M1-M0)/s * sqrt(n0 n1/(n0+n1)^2)` instead of the **total SD
+        of X**. This inflates |r|; with imbalanced groups + strong separation it drove
+        r to the clamp (1.0) where `scipy.stats.pointbiserialr` gives ~0.78. Replaced
+        with Pearson-on-standardized X/Y (point-biserial *is* Pearson against a 0/1
+        target) — now matches scipy to ~1e-8. Added a parametrized regression test.
+  - [ ] **Partial vs semi-partial — DECISION PENDING (Open decisions #7).** Confirmed
+        the `semi_partial_*` functions and the `*_partial` production path compute a
+        **full partial correlation** (both X and Y residualized on the confounds), and
+        are correctly validated against pingouin's full `partial_corr`. Nils wants a
+        **semi-partial** (residualize the confounds out of the connectome X only, not
+        the target). To be documented in code; NOT changed unilaterally — discuss together.
+  - [ ] **FDR / multiple-comparison correction — DISCUSSION PENDING (Open decisions #8).**
+        Whether/which correction to apply by default is an open methods question.
+  - [ ] **Residualization (`get_residuals`):** validate OLS residualization against
+        numpy `lstsq` / statsmodels OLS for both data orientations; add tests.
 - [x] **Input validation gap (found while writing examples):** `check_data()` now
       validates that `n_features` is a valid upper-triangular connectome size
       (`infer_n_nodes`) and raises a clear error suggesting the nearest valid sizes,
