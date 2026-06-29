@@ -39,8 +39,21 @@ You don't trust the tests; turn 115 green checks into real confidence.
       selected edges (platform-robust; no brittle hard-coded baselines).
 - [ ] Validate against an external reference (Shen et al. CPM / existing MATLAB
       results) on at least one dataset so numbers are defensible in a paper.
-- [ ] Numerical correctness spot-checks: partial correlation, FDR correction,
-      permutation p-value definition (off-by-one / +1 convention), residualization.
+- [x] **Permutation p-value convention bug (statistical validity):** metric
+      p-values (`_calculate_group_p_value`) and edge-FDR p-values
+      (`calculate_p_values_edges_fdr`) used `(count+1)/n` instead of the correct
+      `(count+1)/(n+1)` (Phipson & Smyth 2010). The old form could yield p-values
+      **> 1** (when every permutation beat the observed value) and is anti-conservative.
+      Fixed both; added a guard test. (The edge max-value method was already correct.)
+- [ ] **Edge-selection p-value approximation (statistical validity):** the production
+      path (`correlations_and_pvalues`, `point_biserial_correlation`) computes p-values
+      with a normal approximation to the t-distribution. Verified vs scipy: it is
+      **anti-conservative at small N** (~13% too small at N=20, ~6% at N=30, negligible
+      at N>=100). The exact t-distribution can't be done on-device (`torch.special.betainc`
+      absent), so route through scipy `t.sf` on CPU. *Next iteration.*
+- [ ] Remaining numerical spot-checks: partial correlation (semi vs full — the function
+      is named `semi_partial_*` but is validated against pingouin's full `partial_corr`),
+      FDR correction, residualization.
 - [x] **Input validation gap (found while writing examples):** `check_data()` now
       validates that `n_features` is a valid upper-triangular connectome size
       (`infer_n_nodes`) and raises a clear error suggesting the nearest valid sizes,

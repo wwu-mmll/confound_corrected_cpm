@@ -446,7 +446,10 @@ class PermutationManager:
                 # Higher is better: score, accuracy, balanced_accuracy, f1_score, roc_auc, etc.
                 condition_count = (true_group[column].values[0] < perms_group[column].astype(float)).sum()
 
-            result_dict[column] = (condition_count + 1) / (len(perms_group[column]))
+            # Standard permutation p-value (Phipson & Smyth, 2010): the +1 in both
+            # numerator and denominator counts the observed statistic itself and
+            # guarantees a valid p-value in (0, 1].
+            result_dict[column] = (condition_count + 1) / (len(perms_group[column]) + 1)
 
         return pd.Series(result_dict)
 
@@ -561,9 +564,10 @@ class PermutationManager:
         permutation_stability_flattenened = matrix_to_vector_numpy(permutation_stability, dim=0)
         true_stability_flattenened = matrix_to_vector_numpy(true_stability, dim=0)
 
-        # Compute empirical p-values for each edge
+        # Compute empirical p-values for each edge. Use the standard
+        # (count + 1) / (n_permutations + 1) form so p-values are valid in (0, 1].
         condition_count = (true_stability_flattenened < permutation_stability_flattenened).sum(axis=-1)
-        p_vals = (condition_count + 1) / n_permutations
+        p_vals = (condition_count + 1) / (n_permutations + 1)
 
         # Apply Benjamini-Yekutieli correction
         p_vals_corrected = np.full_like(p_vals, np.nan)

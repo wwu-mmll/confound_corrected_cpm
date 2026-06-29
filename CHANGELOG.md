@@ -21,6 +21,10 @@ documentation.
   edges (it residualized the binary target into continuous values, then compared it
   against the `0`/`1` groups). Partial point-biserial is now computed as Pearson on
   the residuals, so confound-controlled edge selection works for classification.
+- **Permutation p-values used an invalid denominator.** Metric and edge-FDR
+  permutation p-values were computed as `(count + 1) / n_permutations`, which is
+  anti-conservative and could even exceed 1. They now use the standard
+  `(count + 1) / (n_permutations + 1)` (Phipson & Smyth, 2010).
 - Unified all `device` defaults to `"cpu"` (`LinearCPM` and the `scoring` helpers
   previously defaulted to `"cuda"`), so direct use never crashes on machines
   without a GPU. The pipeline still uses the GPU when requested.

@@ -222,24 +222,24 @@ class TestLoadCVResults:
 
 class TestPermutationManager:
     def test_calculate_group_p_value_higher_is_better(self):
-        """For metrics where higher is better, p = (count_true < perm + 1) / n_perms."""
+        """For metrics where higher is better, p = (count(true < perm) + 1) / (n_perms + 1)."""
         true = pd.DataFrame({'pearson_score': [0.5]})
         perms = pd.DataFrame({'pearson_score': [0.3, 0.6, 0.4, 0.7]})
 
         p = PermutationManager._calculate_group_p_value(true, perms)
 
-        # true (0.5) < perm: 0.6, 0.7 → 2 out of 4. p = (2+1)/4 = 0.75
-        assert p['pearson_score'] == pytest.approx(3 / 4)
+        # true (0.5) < perm: 0.6, 0.7 → 2 out of 4. p = (2+1)/(4+1) = 0.6
+        assert p['pearson_score'] == pytest.approx(3 / 5)
 
     def test_calculate_group_p_value_lower_is_better(self):
-        """For error metrics (lower is better), p = (count_true > perm + 1) / n_perms."""
+        """For error metrics (lower is better), p = (count(true > perm) + 1) / (n_perms + 1)."""
         true = pd.DataFrame({'mean_squared_error': [1.5]})
         perms = pd.DataFrame({'mean_squared_error': [1.4, 1.6, 1.5, 1.7]})
 
         p = PermutationManager._calculate_group_p_value(true, perms)
 
-        # true (1.5) > perm: 1.4 → 1 out of 4. p = (1+1)/4 = 0.5
-        assert p['mean_squared_error'] == pytest.approx(2 / 4)
+        # true (1.5) > perm: 1.4 → 1 out of 4. p = (1+1)/(4+1) = 0.4
+        assert p['mean_squared_error'] == pytest.approx(2 / 5)
 
     def test_calculate_group_p_value_mixed_metrics(self):
         """Test with both higher-is-better and lower-is-better metrics."""
@@ -251,10 +251,21 @@ class TestPermutationManager:
 
         p = PermutationManager._calculate_group_p_value(true, perms)
 
-        # pearson: true 0.2 < perm → 0.3, 0.25 = 2 of 3. p = (2+1)/3
-        assert p['pearson_score'] == pytest.approx(3 / 3)
-        # mse: true 1.5 > perm → 1.4 = 1 of 3. p = (1+1)/3
-        assert p['mean_squared_error'] == pytest.approx(2 / 3)
+        # pearson: true 0.2 < perm → 0.3, 0.25 = 2 of 3. p = (2+1)/(3+1) = 0.75
+        assert p['pearson_score'] == pytest.approx(3 / 4)
+        # mse: true 1.5 > perm → 1.4 = 1 of 3. p = (1+1)/(3+1) = 0.5
+        assert p['mean_squared_error'] == pytest.approx(2 / 4)
+
+    def test_calculate_group_p_value_never_exceeds_one(self):
+        """A valid p-value must be in (0, 1] even when every permutation beats the true value."""
+        true = pd.DataFrame({'pearson_score': [0.0]})
+        perms = pd.DataFrame({'pearson_score': [0.5, 0.6, 0.7]})  # all beat true
+
+        p = PermutationManager._calculate_group_p_value(true, perms)
+
+        # (3 + 1) / (3 + 1) = 1.0 — must not exceed 1
+        assert p['pearson_score'] == pytest.approx(1.0)
+        assert 0 < p['pearson_score'] <= 1
 
     def test_calculate_p_values_groups(self):
         """Test grouped p-value calculation across model/network combinations."""
