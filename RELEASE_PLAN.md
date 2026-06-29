@@ -45,12 +45,14 @@ You don't trust the tests; turn 115 green checks into real confidence.
       `(count+1)/(n+1)` (Phipson & Smyth 2010). The old form could yield p-values
       **> 1** (when every permutation beat the observed value) and is anti-conservative.
       Fixed both; added a guard test. (The edge max-value method was already correct.)
-- [ ] **Edge-selection p-value approximation (statistical validity):** the production
-      path (`correlations_and_pvalues`, `point_biserial_correlation`) computes p-values
-      with a normal approximation to the t-distribution. Verified vs scipy: it is
-      **anti-conservative at small N** (~13% too small at N=20, ~6% at N=30, negligible
-      at N>=100). The exact t-distribution can't be done on-device (`torch.special.betainc`
-      absent), so route through scipy `t.sf` on CPU. *Next iteration.*
+- [~] **Edge-selection p-value approximation (statistical validity) — DECISION PENDING
+      (see Open decisions #6).** The production path (`correlations_and_pvalues`,
+      `point_biserial_correlation`) computes p-values with a normal approximation to the
+      t-distribution (lines ~219-222, 268-273, 345-348 in `edge_selection.py`). Verified
+      vs scipy: **anti-conservative at small N** (~13% too low at N=20, ~6% at N=30,
+      negligible at N>=100). Nils wants to keep a torch/GPU-friendly path, so we will NOT
+      route through scipy yet — decide later between (a) keep the current approximation,
+      (b) a more accurate on-GPU approximation, or (c) exact via scipy on CPU.
 - [ ] Remaining numerical spot-checks: partial correlation (semi vs full — the function
       is named `semi_partial_*` but is validated against pingouin's full `partial_corr`),
       FDR correction, residualization.
@@ -208,3 +210,20 @@ You'll own the visual decisions; I can support structure + iteration speed.
 3. **Python version ceiling**: support up to 3.13 now, or also 3.14?
 4. **PEP 621 migration** for pyproject, or stay on Poetry's `[tool.poetry]` table?
 5. **Reference dataset** for ground-truth validation — do we have one to validate against?
+6. **Edge-selection p-value computation** — the production correlation/point-biserial
+   p-values use a normal approximation to the t-distribution (kept for torch/CUDA GPU
+   acceleration). It is anti-conservative at small N (~13% too low at N=20, negligible
+   at N>=100). Options to weigh together:
+   - (a) **Keep the normal approximation** — fully GPU/CUDA, but slightly anti-conservative
+     at small N (lets in marginally more edges). Simplest.
+   - (b) **More accurate on-GPU approximation** of the t-tail (e.g. a continued-fraction /
+     regularized-incomplete-beta implementation in torch) — stays on GPU, much closer to
+     exact. More code to write and validate.
+     Note: `torch.special.betainc` is NOT available in torch 2.12, so this needs a
+     hand-rolled implementation.
+   - (c) **Exact via scipy `t.sf` on CPU** — exactly matches the standalone
+     `*_with_pvalues` functions already tested to 1e-10, but adds a GPU->CPU roundtrip
+     in edge selection. The p-values feed only a threshold comparison (not a hot loop),
+     so the cost is small in practice.
+   Recommendation to discuss: (b) if we want to stay GPU-pure with correct stats, else
+   (c) scoped to just the p-value step (r is still computed on GPU).
