@@ -1,153 +1,143 @@
 """
 HTML Report Generator for Confound-Corrected CPM Analysis.
 
-This module provides the main HTMLReporter class that orchestrates the generation
-of comprehensive HTML reports for CPM analysis results.
+Builds a self-contained single-page HTML report using a Jinja2 template.
+The public interface (HTMLReporter / generate_html_report) is unchanged.
 """
 
+from __future__ import annotations
+
+import datetime
 import os
 from pathlib import Path
-import matplotlib.pyplot as plt
-import arakawa as ar
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+import jinja2
+
+import cccpm
 from cccpm.reporting.data_loader import ReportDataLoader
-from cccpm.reporting.page_generators import (
-    InfoPageGenerator,
-    DataDescriptionPageGenerator,
-    DataInsightsPageGenerator,
-    HyperparametersPageGenerator,
-    MainResultsPageGenerator2,
-    NetworkStrengthsPageGenerator,
-    BrainPlotsPageGenerator,
-    EdgeTablePageGenerator
+from cccpm.reporting.reporting_utils import embed_image_base64
+from cccpm.reporting.section_builders import (
+    build_brain_plots_context,
+    build_data_context,
+    build_network_strengths_context,
+    build_overview_context,
+    build_performance_context,
+    build_stable_edges_context,
 )
 
 
 class HTMLReporter:
     """
-    Main class for generating HTML reports from CPM analysis results.
+    Generate a self-contained HTML report from CPM analysis results.
 
-    This class orchestrates the entire report generation process by:
-    1. Loading all necessary data via ReportDataLoader
-    2. Creating individual report pages via specialized page generators
-    3. Assembling pages into a complete HTML report
+    The report is a single scrolling page with a sticky sidebar; it embeds
+    all figures as base64 data URIs so it is fully portable and works offline.
 
-    Attributes:
-        results_directory: Path to the directory containing CPM results
-        plots_dir: Path to the plots subdirectory
-        data_loader: Instance of ReportDataLoader for loading data
-        X_names: List of feature names
-        y_name: Name of the target variable
-        covariates_names: List of covariate names
-        atlas_labels: DataFrame with atlas region labels (optional)
+    Args:
+        results_directory: Path to the directory containing CPM results.
+        atlas_labels: Optional path to a CSV file with atlas region labels
+            (enables brain plots and labelled edge tables).
     """
 
-    def __init__(self, results_directory: str, atlas_labels: str = None):
-        """
-        Initialize the HTML reporter.
-
-        Args:
-            results_directory: Path to directory containing CPM analysis results
-            atlas_labels: Path to CSV file with atlas region labels (optional)
-        """
+    def __init__(self, results_directory: str, atlas_labels: str | None = None):
         self.results_directory = results_directory
         self.plots_dir = os.path.join(results_directory, "plots")
         os.makedirs(self.plots_dir, exist_ok=True)
 
-        # Initialize data loader
         self.data_loader = ReportDataLoader(results_directory, atlas_labels)
-
-        # Load variable names
-        self.X_names, self.y_name, self.covariates_names = \
+        self.X_names, self.y_name, self.covariates_names = (
             self.data_loader.load_variable_names()
-
-        # Store atlas labels reference
+        )
         self.atlas_labels = self.data_loader.atlas_labels
-
-        # Load task type
         self.task_type = self.data_loader.load_task_type()
-
-        # Load all data needed for report generation
         self._load_data()
 
-    def _load_data(self):
-        """Load all required data for report generation."""
+    def _load_data(self) -> None:
         self.df, self.df_mean = self.data_loader.load_cv_results()
         self.df_predictions = self.data_loader.load_predictions()
         self.df_p_values = self.data_loader.load_p_values()
         self.df_permutations = self.data_loader.load_permutations()
         self.df_network_strengths = self.data_loader.load_network_strengths()
 
-    def generate_html_report(self):
-        """
-        Generate the complete HTML report.
-
-        This method orchestrates the generation of all report pages and
-        assembles them into a single HTML file saved in the results directory.
-        """
-        # Load additional data needed for specific pages
+    def generate_html_report(self) -> None:
+        """Render the HTML report and write it to ``results_directory/report.html``."""
         summary_df, scatter_path, _ = self.data_loader.load_data_insights()
-        edge_stability, edge_stability_significance = self.data_loader.load_edge_stability()
+        edge_stability, edge_stability_sig = self.data_loader.load_edge_stability()
 
-        # Generate all report pages using specialized generators
-        report_blocks = [
-            InfoPageGenerator(self.results_directory, self.plots_dir).generate(),
+        # ── Build template context ──────────────────────────────────────────
+        ctx: dict = {
+            "y_name": self.y_name,
+            "logo_img": self._logo_html(),
+        }
 
-            DataInsightsPageGenerator(self.results_directory, self.plots_dir).generate(
-                summary_df, scatter_path
-            ),
+        ctx.update(build_overview_context(
+            results_directory=self.results_directory,
+            version=cccpm.__version__,
+            run_date=datetime.date.today().isoformat(),
+        ))
 
-            DataDescriptionPageGenerator(self.results_directory, self.plots_dir).generate(
-                self.df_predictions, self.atlas_labels
-            ),
+        ctx.update(build_data_context(summary_df, scatter_path))
 
-            MainResultsPageGenerator2(self.results_directory, self.plots_dir).generate(
-                self.df, self.df_mean, self.df_p_values, self.df_predictions, self.y_name,
-                self.task_type
-            ),
+        ctx.update(build_performance_context(
+            df_full=self.df,
+            df_mean=self.df_mean,
+            df_p_values=self.df_p_values,
+            df_predictions=self.df_predictions,
+            y_name=self.y_name,
+            task_type=self.task_type,
+            plots_dir=self.plots_dir,
+        ))
 
-            HyperparametersPageGenerator(self.results_directory, self.plots_dir).generate(
-                self.df
-            ),
+        ctx.update(build_network_strengths_context(
+            df_network_strengths=self.df_network_strengths,
+            y_name=self.y_name,
+            plots_dir=self.plots_dir,
+        ))
 
-            NetworkStrengthsPageGenerator(self.results_directory, self.plots_dir).generate(
-                self.df_network_strengths, self.y_name
-            ),
+        ctx.update(build_brain_plots_context(
+            results_directory=self.results_directory,
+            atlas_labels=self.atlas_labels,
+        ))
 
-            BrainPlotsPageGenerator(self.results_directory, self.plots_dir).generate(
-                self.atlas_labels
-            ),
+        ctx.update(build_stable_edges_context(
+            edge_stability=edge_stability,
+            edge_stability_significance=edge_stability_sig,
+            atlas_labels=self.atlas_labels,
+        ))
 
-            EdgeTablePageGenerator(self.results_directory, self.plots_dir).generate(
-                edge_stability, edge_stability_significance, self.atlas_labels
-            )
-        ]
+        # ── Render ─────────────────────────────────────────────────────────
+        html = self._render(ctx)
 
-        # Create tabbed interface
-        main_tabs = ar.Select(blocks=report_blocks)
+        out_path = os.path.join(self.results_directory, "report.html")
+        Path(out_path).write_text(html, encoding="utf-8")
 
-        # Add logo
-        script_dir = Path(__file__).parent
-        image_path = (script_dir / 'assets/CCCPM.png').resolve()
+        plt.close("all")
 
-        main_page = ar.Group(
-            ar.Media(file=image_path, name="Logo"),
-            main_tabs,
-            widths=[1, 10],
-            columns=2
+    # ── Private helpers ────────────────────────────────────────────────────
+
+    def _logo_html(self) -> str:
+        logo_path = Path(__file__).parent / "assets" / "CCCPM.png"
+        if logo_path.exists():
+            return embed_image_base64(str(logo_path))
+        return ""
+
+    def _render(self, ctx: dict) -> str:
+        template_dir = Path(__file__).parent / "templates"
+        env = jinja2.Environment(
+            loader=jinja2.FileSystemLoader(str(template_dir)),
+            autoescape=jinja2.select_autoescape(["html"]),
         )
+        # Disable autoescape for HTML fragment variables (figures, tables)
+        env.autoescape = False
 
-        # Generate and save report
-        report = ar.Report(blocks=[main_page])
-        report.save(
-            os.path.join(self.results_directory, 'report.html'),
-            open=False,
-            formatting=ar.Formatting(width=ar.Width.FULL, accent_color="orange")
-        )
+        template = env.get_template("report.html.j2")
 
-        # Clean up matplotlib figures
-        plt.close('all')
+        # Inline the stylesheet
+        css_path = template_dir / "styles.css"
+        ctx["styles"] = css_path.read_text(encoding="utf-8")
 
-if __name__=="__main__":
-    reporter = HTMLReporter(results_directory='/spm-data/vault-data3/mmll/projects/cpm_python/results_new/hcp_SSAGA_TB_Yrs_Smoked_spearman_partial_p=0.01')
-    reporter.generate_html_report()
+        return template.render(**ctx)
