@@ -42,16 +42,20 @@ def test_report_generates_without_atlas(results_dir):
     for needle in (
         'id="overview"',
         "Model Comparison",
-        'id="predictions"',
+        'id="network-strengths"',
         'id="brain-plots"',
         'id="stable-edges"',
         "Data &amp; Methods",
     ):
         assert needle in html, f"missing section/marker: {needle}"
 
-    # Hero verdict + stat chips
+    # Hero verdict, stat chips, and the row of summary scatters
     assert "The connectome model predicted" in html
     assert "stat-chip" in html
+    assert "scatter-row" in html
+    assert "Connectome — positive network" in html
+    assert "Connectome — negative network" in html
+    assert "Covariates only" in html
 
     # Self-contained vector figures, no leftover arakawa
     assert "<svg" in html

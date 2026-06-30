@@ -97,7 +97,6 @@ class HTMLReporter:
             df_full=self.df,
             df_mean=self.df_mean,
             df_p_values=self.df_p_values,
-            df_predictions=self.df_predictions,
             y_name=self.y_name,
             task_type=self.task_type,
             plots_dir=self.plots_dir,

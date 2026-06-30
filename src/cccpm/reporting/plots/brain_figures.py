@@ -244,7 +244,9 @@ def node_degree_plot(
     ax.set_yticks(y)
     ax.set_yticklabels(labels[order], fontsize=5)
     ax.set_xlabel("number of stable edges")
-    ax.legend(fontsize=6, frameon=False, loc="lower right")
+    # Legend above the plot so it never covers bars.
+    ax.legend(fontsize=6, frameon=False, ncol=2,
+              loc="lower right", bbox_to_anchor=(1.0, 1.0))
     sns_despine(ax)
     fig.tight_layout(pad=0.3)
     return save_figure(fig, os.path.join(results_folder, name))

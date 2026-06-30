@@ -31,16 +31,19 @@ def scatter_plot_main(
     network: str = "both",
     annotate_value: float | None = None,
     annotate_label: str = "r",
+    annotate_p: str | None = None,
+    name: str = "hero_scatter",
 ) -> str:
     """
-    Single prominent predicted-vs-observed panel for the hero section.
+    Single square predicted-vs-observed panel for the summary section.
 
-    Regression: scatter + identity line + annotated effect size.
+    Regression: scatter + identity line + annotated effect size (and p).
     Classification: predicted probability stripped by true class + 0.5 line.
 
     If *annotate_value* is given it is shown verbatim (e.g. the cross-validated
     mean r reported in the hero verdict, so the two agree); otherwise the pooled
-    correlation across all plotted points is computed and shown.
+    correlation across all plotted points is computed and shown. The data area is
+    forced square (equal x/y) via ``set_box_aspect``.
     """
     apply_nature_style()
 
@@ -73,22 +76,28 @@ def scatter_plot_main(
             max(sub["y_true"].max(), sub["y_pred"].max()),
         ]
         ax.plot(lims, lims, color="gray", linewidth=0.5, linestyle="--", zorder=0)
-        # Annotate the effect size — prefer the cross-validated value passed in
-        # (matches the hero verdict) over the pooled-points correlation.
-        if annotate_value is not None:
-            label = f"{annotate_label} = {annotate_value:.2f}"
-        else:
-            label = f"{annotate_label} = {sub['y_true'].corr(sub['y_pred']):.2f}"
-        ax.annotate(
-            label, xy=(0.05, 0.92), xycoords="axes fraction",
-            fontsize=8, fontweight="bold", color=color,
-        )
         ax.set_xlabel(y_name)
         ax.set_ylabel(f"predicted {y_name}")
 
-    sns.despine(ax=ax, trim=True)
+    # Effect-size annotation (r, with p underneath when provided).
+    if annotate_value is not None:
+        eff = f"{annotate_label} = {annotate_value:.2f}"
+    elif task_type != "classification":
+        eff = f"{annotate_label} = {sub['y_true'].corr(sub['y_pred']):.2f}"
+    else:
+        eff = ""
+    if eff:
+        ax.annotate(eff, xy=(0.05, 0.93), xycoords="axes fraction",
+                    fontsize=8, fontweight="bold", color=color)
+    if annotate_p:
+        ax.annotate(annotate_p, xy=(0.05, 0.84), xycoords="axes fraction",
+                    fontsize=7, color=color)
+
+    # Force a square data area so x and y get equal space.
+    ax.set_box_aspect(1)
+    sns.despine(ax=ax)
     fig.tight_layout(pad=0.4)
-    return save_figure(fig, os.path.join(results_folder, "hero_scatter"))
+    return save_figure(fig, os.path.join(results_folder, name))
 
 
 def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:

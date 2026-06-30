@@ -33,11 +33,8 @@ from cccpm.reporting.table_builders import (
     create_hyperparameter_table,
 )
 from cccpm.reporting.plots.plots import (
-    classification_scatter_plot,
     histograms_network_strengths,
     performance_grid,
-    scatter_plot,
-    scatter_plot_covariates_model,
     scatter_plot_main,
     scatter_plot_network_strengths,
 )
@@ -206,24 +203,49 @@ def build_hero_context(
     if n_perm:
         chips.append(("Permutations", n_perm))
 
-    # Hero figure — annotate with the same cross-validated r as the verdict
-    # so the two never disagree (the pooled-points r would differ).
-    hero_scatter = ""
-    try:
-        hero_scatter = _svg_to_html(
-            scatter_plot_main(
-                df_predictions, plots_dir, y_name, task_type=task_type,
-                annotate_value=value if task_type != "classification" else None,
-                annotate_label="mean CV r",
-            )
-        )
-    except Exception:
-        pass
+    # Summary scatters — connectome on each network (both/positive/negative)
+    # plus the covariates-only model, all the same square size and style, each
+    # annotated with its cross-validated effect size and permutation p.
+    def _value_p(model: str, network: str):
+        v = None
+        try:
+            v = float(df_mean.loc[(model, network), (metric, "mean")])
+        except Exception:
+            v = None
+        p = None
+        if df_p_values is not None:
+            try:
+                rrow = df_p_values[
+                    (df_p_values["model"] == model) & (df_p_values["network"] == network)
+                ]
+                if not rrow.empty and metric in rrow.columns:
+                    p = float(rrow[metric].iloc[0])
+            except Exception:
+                p = None
+        return v, p
 
-    # KPI parts for the hero (big headline number).
-    kpi_value = f"{value:.2f}" if value is not None else ""
-    kpi_label = "mean CV r" if task_type != "classification" else "AUC"
-    kpi_p = _format_p(pval) if pval is not None else ""
+    def _scatter(model: str, network: str, fname: str, caption: str):
+        v, p = _value_p(model, network)
+        try:
+            path = scatter_plot_main(
+                df_predictions, plots_dir, y_name, task_type=task_type,
+                model=model, network=network,
+                annotate_value=v if task_type != "classification" else None,
+                annotate_label=metric_label,
+                annotate_p=_format_p(p) if p is not None else None,
+                name=fname,
+            )
+            return {"html": _svg_to_html(path), "caption": caption}
+        except Exception:
+            return None
+
+    hero_scatters = [
+        _scatter("connectome", "both", "scatter_both", "Connectome — both networks"),
+        _scatter("connectome", "positive", "scatter_positive", "Connectome — positive network"),
+        _scatter("connectome", "negative", "scatter_negative", "Connectome — negative network"),
+        _scatter("covariates", "both", "scatter_covariates", "Covariates only"),
+    ]
+    hero_scatters = [s for s in hero_scatters if s is not None]
 
     return {
         "version": version,
@@ -231,10 +253,7 @@ def build_hero_context(
         "task_type": task_type,
         "headline": headline,
         "stat_chips": chips,
-        "hero_scatter": hero_scatter,
-        "kpi_value": kpi_value,
-        "kpi_label": kpi_label,
-        "kpi_p": kpi_p,
+        "hero_scatters": hero_scatters,
         "config_items": _config_items(results_directory),
     }
 
@@ -248,11 +267,12 @@ def build_data_context(
     scatter_matrix_path: str,
     results_directory: str = "",
 ) -> dict:
-    """Build context for the Data & Methods appendix."""
-    summary_table_html = ""
-    if summary_df is not None:
-        summary_table_html = summary_df.to_html(classes="data-table", border=0)
+    """
+    Build context for the Data & Methods appendix.
 
+    The numeric data summary is intentionally omitted — the same facts (samples,
+    nodes, edges, covariates) are already the stat chips at the top of the report.
+    """
     scatter_html = ""
     if os.path.exists(scatter_matrix_path):
         scatter_html = embed_image_base64(scatter_matrix_path)
@@ -266,7 +286,6 @@ def build_data_context(
             target_dist_html = embed_image_base64(target_path)
 
     return {
-        "summary_table": summary_table_html,
         "scatter_matrix": scatter_html,
         "target_distribution": target_dist_html,
     }
@@ -280,12 +299,11 @@ def build_performance_context(
     df_full: pd.DataFrame,
     df_mean: pd.DataFrame,
     df_p_values: Optional[pd.DataFrame],
-    df_predictions: pd.DataFrame,
     y_name: str,
     task_type: str,
     plots_dir: str,
 ) -> dict:
-    """Build context for the Model Comparison + Predictions sections."""
+    """Build context for the Model Comparison section (faceted figure + table)."""
     # APA results table (mean[sd] + permutation p)
     results_table_html = ""
     if df_p_values is not None:
@@ -310,29 +328,9 @@ def build_performance_context(
     except Exception:
         pass
 
-    # Predicted-vs-observed scatters
-    scatter_pred_html = ""
-    scatter_cov_html = ""
-    try:
-        if task_type == "classification":
-            fig_path = classification_scatter_plot(df_predictions, plots_dir, y_name)
-        else:
-            fig_path = scatter_plot(df_predictions, plots_dir, y_name)
-        scatter_pred_html = _svg_to_html(fig_path)
-    except Exception:
-        pass
-
-    try:
-        fig_path = scatter_plot_covariates_model(df_predictions, plots_dir, y_name)
-        scatter_cov_html = _svg_to_html(fig_path)
-    except Exception:
-        pass
-
     return {
         "results_table": results_table_html,
         "performance_grid": perf_grid_html,
-        "scatter_predictions": scatter_pred_html,
-        "scatter_covariates": scatter_cov_html,
     }
 
 
