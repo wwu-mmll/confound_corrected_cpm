@@ -100,7 +100,9 @@ class HTMLReporter:
 
         ctx.update(build_brain_plots_context(
             results_directory=self.results_directory,
+            plots_dir=self.plots_dir,
             atlas_labels=self.atlas_labels,
+            edge_stability=edge_stability,
         ))
 
         ctx.update(build_stable_edges_context(

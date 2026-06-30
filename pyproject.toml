@@ -53,6 +53,7 @@ nilearn = "*"
 matplotlib = "*"
 seaborn = "*"
 jinja2 = "*"
+pycirclize = "*"
 tqdm = "*"
 pygam = "*"
 

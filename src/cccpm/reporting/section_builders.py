@@ -211,41 +211,84 @@ def build_network_strengths_context(
 
 def build_brain_plots_context(
     results_directory: str,
+    plots_dir: str,
     atlas_labels: Optional[pd.DataFrame],
+    edge_stability: Optional[np.ndarray] = None,
 ) -> dict:
-    """Build context for the Brain Plots section."""
-    if atlas_labels is None:
-        return {"has_atlas": False, "brain_positive": "", "brain_negative": ""}
+    """
+    Build context for the Brain & Edges section.
 
-    from cccpm.reporting.plots.cpm_chord_plot import plot_netplotbrain
+    Connectivity matrix and node-degree work without an atlas. The
+    network-summary matrix and chord diagram need a ``network`` column. The
+    glass-brain render additionally needs node coordinates (x, y, z) and the
+    ``sig_stability_*`` edge files.
+    """
+    from cccpm.reporting.plots import brain_figures as bf
+    from cccpm.reporting.plots.connectome_utils import signed_stability_matrix
 
-    brain_positive = ""
-    brain_negative = ""
-    try:
-        pos_path, _ = plot_netplotbrain(
-            results_folder=results_directory,
-            selected_metric="sig_stability_positive_edges",
-            atlas_labels=atlas_labels,
-        )
-        brain_positive = _png_to_html(pos_path)
-    except Exception:
-        pass
-
-    try:
-        neg_path, _ = plot_netplotbrain(
-            results_folder=results_directory,
-            selected_metric="sig_stability_negative_edges",
-            atlas_labels=atlas_labels,
-        )
-        brain_negative = _png_to_html(neg_path)
-    except Exception:
-        pass
-
-    return {
-        "has_atlas": True,
-        "brain_positive": brain_positive,
-        "brain_negative": brain_negative,
+    ctx = {
+        "has_atlas": atlas_labels is not None,
+        "has_network_labels": atlas_labels is not None and "network" in atlas_labels.columns,
+        "brain_positive": "",
+        "brain_negative": "",
+        "conn_matrix": "",
+        "network_summary": "",
+        "chord": "",
+        "node_degree": "",
     }
+
+    # ── Matrix-based figures (built from the stability matrices) ──
+    if edge_stability is not None:
+        try:
+            signed = signed_stability_matrix(edge_stability)
+        except Exception:
+            signed = None
+
+        if signed is not None:
+            try:
+                ctx["conn_matrix"] = _svg_to_html(
+                    bf.connectivity_matrix(signed, plots_dir, atlas=atlas_labels)
+                )
+            except Exception:
+                pass
+            try:
+                ctx["node_degree"] = _svg_to_html(
+                    bf.node_degree_plot(signed, plots_dir, atlas=atlas_labels)
+                )
+            except Exception:
+                pass
+            if ctx["has_network_labels"]:
+                try:
+                    p = bf.network_summary_matrix(signed, atlas_labels, plots_dir)
+                    if p:
+                        ctx["network_summary"] = _svg_to_html(p)
+                except Exception:
+                    pass
+                try:
+                    p = bf.chord_diagram(signed, atlas_labels, plots_dir)
+                    if p:
+                        ctx["chord"] = _svg_to_html(p)
+                except Exception:
+                    pass
+
+    # ── Glass-brain renders (netplotbrain; need atlas + sig_stability files) ──
+    if atlas_labels is not None:
+        from cccpm.reporting.plots.cpm_chord_plot import plot_netplotbrain
+        for metric, key in [
+            ("sig_stability_positive_edges", "brain_positive"),
+            ("sig_stability_negative_edges", "brain_negative"),
+        ]:
+            try:
+                path, _ = plot_netplotbrain(
+                    results_folder=results_directory,
+                    selected_metric=metric,
+                    atlas_labels=atlas_labels,
+                )
+                ctx[key] = _png_to_html(path)
+            except Exception:
+                pass
+
+    return ctx
 
 
 # ---------------------------------------------------------------------------

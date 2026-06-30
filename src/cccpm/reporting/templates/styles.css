@@ -222,6 +222,23 @@ figcaption, .caption {
   flex: 1 1 300px;
 }
 
+/* Uniform card grid — figures laid out in equal-width cells instead of a
+   single stacked column, so the report reads compactly. */
+.figure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  margin: 20px 0;
+}
+
+.figure-grid > .figure-wrap {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 0;
+}
+
 /* ── Missing asset placeholder ── */
 
 .missing-asset {

@@ -154,36 +154,66 @@
       </div>
     </section>
 
-    <!-- ── 5. Brain Plots ── -->
+    <!-- ── 5. Brain & Edges ── -->
     <section class="report-section" id="brain-plots">
-      <h2>Brain Plots</h2>
-
-      {% if not has_atlas %}
-      <div class="missing-asset">
-        Atlas labels were not provided. Pass <code>atlas_labels</code> to
-        <code>HTMLReporter</code> to enable brain visualisations.
-      </div>
-      {% else %}
+      <h2>Brain &amp; Edges</h2>
       <p style="margin-bottom:16px;font-size:13px;color:#555">
-        Edges that were significantly stable (p&lt;0.05 via permutation testing)
-        across outer CV folds, shown on a brain surface rendering.
-        <em>Positive edges</em> are associated with higher target values;
-        <em>negative edges</em> with lower values.
+        Where the predictive edges are in the brain. Throughout, <em>positive</em>
+        edges (red) are associated with higher target values and <em>negative</em>
+        edges (blue) with lower values. Strength here is edge <em>stability</em> —
+        the fraction of outer CV folds in which an edge was selected.
       </p>
-      <div class="figure-row">
+
+      <div class="figure-grid">
+        {% if conn_matrix %}
+        <div class="figure-wrap">
+          {{ conn_matrix }}
+          <p class="caption">Connectivity matrix of stable edges (node × node).</p>
+        </div>
+        {% endif %}
+        {% if node_degree %}
+        <div class="figure-wrap">
+          {{ node_degree }}
+          <p class="caption">Hub nodes — number of stable edges per node.</p>
+        </div>
+        {% endif %}
+        {% if network_summary %}
+        <div class="figure-wrap">
+          {{ network_summary }}
+          <p class="caption">Edges aggregated by canonical brain network.</p>
+        </div>
+        {% endif %}
+        {% if chord %}
+        <div class="figure-wrap">
+          {{ chord }}
+          <p class="caption">Chord diagram of between-network connectivity.</p>
+        </div>
+        {% endif %}
         {% if brain_positive %}
         <div class="figure-wrap">
           {{ brain_positive }}
-          <p class="caption">Significantly stable positive edges.</p>
+          <p class="caption">Glass brain — significantly stable positive edges.</p>
         </div>
         {% endif %}
         {% if brain_negative %}
         <div class="figure-wrap">
           {{ brain_negative }}
-          <p class="caption">Significantly stable negative edges.</p>
+          <p class="caption">Glass brain — significantly stable negative edges.</p>
         </div>
         {% endif %}
       </div>
+
+      {% if not conn_matrix and not node_degree %}
+      <div class="missing-asset">
+        No edge-stability data found to build brain figures. Run the analysis with
+        edge stability enabled to populate this section.
+      </div>
+      {% elif not has_network_labels %}
+      <p class="caption">
+        Network-summary and chord diagrams need a <code>network</code> column in your
+        atlas; the glass brain additionally needs node coordinates
+        (<code>x, y, z</code>). Pass <code>atlas_labels</code> to enable them.
+      </p>
       {% endif %}
     </section>
 
