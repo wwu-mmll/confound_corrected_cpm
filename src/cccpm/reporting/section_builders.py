@@ -142,10 +142,10 @@ def build_performance_context(
     metric_cols = [c for c in df_full.columns if c not in ("fold", "model", "network", "params", "run")]
     for metric in metric_cols:
         try:
-            png_path = boxplot_models(
+            fig_path = boxplot_models(
                 df_full, metric, plots_dir, models=["connectome", "covariates", "full", "residuals"]
             )
-            boxplots.append((metric.replace("_", " "), _png_to_html(png_path)))
+            boxplots.append((metric.replace("_", " "), _svg_to_html(fig_path)))
         except Exception:
             pass
 
@@ -154,16 +154,16 @@ def build_performance_context(
     scatter_cov_html = ""
     try:
         if task_type == "classification":
-            png = classification_scatter_plot(df_predictions, plots_dir, y_name)
+            fig_path = classification_scatter_plot(df_predictions, plots_dir, y_name)
         else:
-            png = scatter_plot(df_predictions, plots_dir, y_name)
-        scatter_pred_html = _png_to_html(png)
+            fig_path = scatter_plot(df_predictions, plots_dir, y_name)
+        scatter_pred_html = _svg_to_html(fig_path)
     except Exception:
         pass
 
     try:
-        png = scatter_plot_covariates_model(df_predictions, plots_dir, y_name)
-        scatter_cov_html = _png_to_html(png)
+        fig_path = scatter_plot_covariates_model(df_predictions, plots_dir, y_name)
+        scatter_cov_html = _svg_to_html(fig_path)
     except Exception:
         pass
 
@@ -188,14 +188,14 @@ def build_network_strengths_context(
     ns_scatter_html = ""
     ns_hist_html = ""
     try:
-        png = scatter_plot_network_strengths(df_network_strengths, plots_dir, y_name)
-        ns_scatter_html = _png_to_html(png)
+        fig_path = scatter_plot_network_strengths(df_network_strengths, plots_dir, y_name)
+        ns_scatter_html = _svg_to_html(fig_path)
     except Exception:
         pass
 
     try:
-        png = histograms_network_strengths(df_network_strengths, plots_dir, y_name)
-        ns_hist_html = _png_to_html(png)
+        fig_path = histograms_network_strengths(df_network_strengths, plots_dir, y_name)
+        ns_hist_html = _svg_to_html(fig_path)
     except Exception:
         pass
 
