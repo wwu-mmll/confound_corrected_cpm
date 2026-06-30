@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CCCPM Report — {{ y_name }}</title>
+  <style>
+{{ styles }}
+  </style>
+</head>
+<body>
+
+<div id="layout">
+
+  <!-- ── Sidebar ── -->
+  <aside id="sidebar">
+    <div class="nav-logo">
+      {{ logo_img }}
+    </div>
+    <div class="nav-title">Report sections</div>
+    <nav>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#data">Data</a></li>
+        <li><a href="#performance">Predictive Performance</a></li>
+        <li><a href="#network-strengths">Network Strengths</a></li>
+        <li><a href="#brain-plots">Brain Plots</a></li>
+        <li><a href="#stable-edges">Stable Edges</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- ── Main content ── -->
+  <main id="content">
+
+    <!-- ── 1. Overview ── -->
+    <section class="report-section" id="overview">
+      <h2>Overview</h2>
+
+      <div class="card">
+        <p>
+          <strong>Confound-Corrected Connectome-Based Predictive Modelling (CCCPM)</strong>
+          is a Python package for performing connectome-based predictive modeling.
+          It provides robust methods for building predictive models from structural or
+          functional connectome data, emphasising replicability and interpretability.
+        </p>
+        <p style="margin-top:10px">
+          <strong>Version:</strong> {{ version }} &nbsp;·&nbsp;
+          <strong>Run date:</strong> {{ run_date }} &nbsp;·&nbsp;
+          <a href="https://github.com/wwu-mmll/confound_corrected_cpm" target="_blank">GitHub</a>
+        </p>
+      </div>
+
+      {% if headline %}
+      <div class="headline-callout">{{ headline }}</div>
+      {% endif %}
+
+      <h3>Analysis Configuration</h3>
+      <div class="card-grid">
+        {% for key, value in config_items %}
+        <div class="config-item">
+          <div class="key">{{ key }}</div>
+          <div class="value">{{ value if value else "—" }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- ── 2. Data ── -->
+    <section class="report-section" id="data">
+      <h2>Data</h2>
+
+      {% if summary_table %}
+      <h3>Summary Statistics</h3>
+      <div class="table-scroll card">{{ summary_table }}</div>
+      {% endif %}
+
+      {% if scatter_matrix %}
+      <h3>Scatter Matrix — Covariates &amp; Target</h3>
+      <div class="figure-wrap">
+        {{ scatter_matrix }}
+        <p class="caption">Scatter matrix of the target variable and all covariates.</p>
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- ── 3. Predictive Performance ── -->
+    <section class="report-section" id="performance">
+      <h2>Predictive Performance</h2>
+
+      {% if results_table %}
+      <h3>Results Table</h3>
+      <p style="margin-bottom:12px;font-size:13px;color:#555">
+        Mean [SD] across outer CV folds. Permutation p-values: * p&lt;0.05, ** p&lt;0.01.
+        Models: <em>connectome</em> (connectivity only), <em>covariates</em> (confounds only),
+        <em>full</em> (connectome + confounds), <em>residuals</em> (residualised connectome),
+        <em>increment</em> (full minus covariates — the unique contribution of connectivity).
+        Networks: <em>positive</em> / <em>negative</em> / <em>both</em>.
+      </p>
+      <div class="table-scroll card">{{ results_table }}</div>
+      {% endif %}
+
+      {% if boxplots %}
+      <h3>Performance by Metric</h3>
+      {% for label, fig_html in boxplots %}
+      <div class="figure-wrap">
+        {{ fig_html }}
+        <p class="caption">{{ label }}</p>
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      {% if scatter_predictions or scatter_covariates %}
+      <h3>Predicted vs True</h3>
+      <div class="figure-row">
+        {% if scatter_predictions %}
+        <div class="figure-wrap">
+          {{ scatter_predictions }}
+          <p class="caption">Connectome model: true vs predicted {{ y_name }}.</p>
+        </div>
+        {% endif %}
+        {% if scatter_covariates %}
+        <div class="figure-wrap">
+          {{ scatter_covariates }}
+          <p class="caption">Covariates model: true vs predicted {{ y_name }}.</p>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- ── 4. Network Strengths ── -->
+    <section class="report-section" id="network-strengths">
+      <h2>Network Strengths</h2>
+      <p style="margin-bottom:16px;font-size:13px;color:#555">
+        Network strength is the sum of all selected edge weights for each participant,
+        separately for the positive and negative networks. A strong correlation with the
+        target variable indicates that the selected edges carry predictive information.
+      </p>
+
+      <div class="figure-row">
+        {% if ns_scatter %}
+        <div class="figure-wrap">
+          {{ ns_scatter }}
+          <p class="caption">Network strength vs {{ y_name }}.</p>
+        </div>
+        {% endif %}
+        {% if ns_hist %}
+        <div class="figure-wrap">
+          {{ ns_hist }}
+          <p class="caption">Distribution of network strength scores.</p>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <!-- ── 5. Brain Plots ── -->
+    <section class="report-section" id="brain-plots">
+      <h2>Brain Plots</h2>
+
+      {% if not has_atlas %}
+      <div class="missing-asset">
+        Atlas labels were not provided. Pass <code>atlas_labels</code> to
+        <code>HTMLReporter</code> to enable brain visualisations.
+      </div>
+      {% else %}
+      <p style="margin-bottom:16px;font-size:13px;color:#555">
+        Edges that were significantly stable (p&lt;0.05 via permutation testing)
+        across outer CV folds, shown on a brain surface rendering.
+        <em>Positive edges</em> are associated with higher target values;
+        <em>negative edges</em> with lower values.
+      </p>
+      <div class="figure-row">
+        {% if brain_positive %}
+        <div class="figure-wrap">
+          {{ brain_positive }}
+          <p class="caption">Significantly stable positive edges.</p>
+        </div>
+        {% endif %}
+        {% if brain_negative %}
+        <div class="figure-wrap">
+          {{ brain_negative }}
+          <p class="caption">Significantly stable negative edges.</p>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- ── 6. Stable Edges ── -->
+    <section class="report-section" id="stable-edges">
+      <h2>Stable Edges</h2>
+
+      {% if not has_edge_data %}
+      <div class="missing-asset">
+        No edge stability data found. Run the analysis with
+        <code>n_permutations &gt; 0</code> and <code>select_stable_edges=True</code>
+        to generate this table.
+      </div>
+      {% else %}
+      <p style="margin-bottom:16px;font-size:13px;color:#555">
+        Edges sorted by permutation p-value (ascending). Stability is the proportion
+        of outer folds in which the edge was selected.
+      </p>
+      <div class="figure-row">
+        {% if edge_table_positive %}
+        <div style="flex:1 1 400px">
+          <h3>Positive Network</h3>
+          <div class="table-scroll">{{ edge_table_positive }}</div>
+        </div>
+        {% endif %}
+        {% if edge_table_negative %}
+        <div style="flex:1 1 400px">
+          <h3>Negative Network</h3>
+          <div class="table-scroll">{{ edge_table_negative }}</div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+
+    <footer>
+      Generated by <a href="https://github.com/wwu-mmll/confound_corrected_cpm">CCCPM</a>
+      v{{ version }} on {{ run_date }}
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  // Highlight the active nav link based on scroll position
+  (function () {
+    const sections = document.querySelectorAll('.report-section');
+    const links = document.querySelectorAll('nav a');
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          links.forEach(l => l.classList.remove('active'));
+          const active = document.querySelector(`nav a[href="#${entry.target.id}"]`);
+          if (active) active.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    sections.forEach(s => observer.observe(s));
+  })();
+</script>
+
+</body>
+</html>
