@@ -253,16 +253,36 @@ custom Jinja2 + CSS report (self-contained, offline), then a full visual redesig
       `interpreting_results.md`).
 - [~] Accessibility / print-friendliness: `@media print` stylesheet in place (hides
       sidebar, page-breaks sections); a full a11y audit is still deferred.
+- [x] **Second design pass + Nils' review fixes (shipped in 0.3.1):** dropped the dark KPI
+      block and the headline gradient (flat accent panel); three square connectome scatters
+      (positive/negative/both) + covariates in the Summary, each annotated with r AND p
+      (`set_box_aspect` makes them square); removed the now-redundant Predictions section;
+      explanations are always-visible (`.info`, no dropdown); darker text tokens; full-width
+      section intros; version+date pinned at the bottom of the left nav; config rendered as a
+      table (not cards); removed the redundant appendix Data Summary; capped Stable-Edges
+      tables (top 50/network, scrollable) — was ~30k px tall; design-token stylesheet; masthead.
+      glass brain now renders from the stability matrices; hero r matches the scatter r.
+      Docs updated (`interpreting_results.md` new section layout; embedded example report
+      regenerated with atlas). **Note:** `wwu-mmll/brainplots` could not be attached via
+      `add_repo` (workspace access-policy 404; repo is public/reachable over SSH).
 - [ ] **Later (deferred, discussed w/ Nils):** move the brain figures into the
       `wwu-mmll/brainplots` toolbox and make it a PyPI package; then have CCCPM depend on
       it (likely an optional `cccpm[plots]` extra). Not done now — code lives in CCCPM.
 
 ## Phase 6 — Release
-- [ ] Final version bump + CHANGELOG entry.
-- [ ] Tag `-test` → TestPyPI → clean-install verification on 3 OSes.
-- [ ] Tag real version → PyPI (publish.yml OIDC trusted publisher already configured).
-- [ ] Post-release: install from PyPI on a clean machine, run an example, confirm docs
-      site deployed.
+- [x] **0.3.0 RELEASED 2026-06-30** (install-reliability pass; see 0.3.0 CHANGELOG).
+- [x] **0.3.1 RELEASED 2026-06-30** (HTML report redesign). Bumped pyproject 0.3.0→0.3.1 +
+      CHANGELOG; merged `html-report-redesign`→`develop`→`main` (all three branches in sync at
+      the same commit); pushed `main` (docs deploy) and tag `v0.3.1` (→ PyPI via publish.yml
+      OIDC). Verified the wheel BEFORE tagging: `jinja2`+`pycirclize` declared, `arakawa`
+      gone, and the Jinja `templates/*.j2` + `styles.css` + assets are included in the wheel
+      (so `generate_html_report()` works on a clean install). 182 tests green; `mkdocs build
+      --strict` passes. **CI not verified from the session (no `gh` CLI):** at push time the
+      Actions runs (Publish to PyPI on `v0.3.1`, Build and Deploy Docs on `main`, Run Tests,
+      Package Smoke) were all queued/in-progress — **Nils: confirm they went green, that
+      0.3.1 is on PyPI, and the docs site redeployed.**
+- [ ] Next time, consider a `v0.3.x-test` → TestPyPI dry-run before the real tag (skipped
+      again here since 0.3.0 already validated the publish path).
 
 ---
 
