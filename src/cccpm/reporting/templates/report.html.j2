@@ -42,6 +42,24 @@
       <div class="headline-callout">{{ headline }}</div>
       {% endif %}
 
+      <details class="info">
+        <summary>What am I looking at?</summary>
+        <p>
+          This is the headline cross-validated result for the main <em>connectome</em>
+          model on the <em>both</em> network. The effect size (Pearson <em>r</em> for
+          regression, AUC for classification) is computed on held-out test folds and
+          <strong>averaged across folds</strong> — the conventional CPM headline number.
+          The <em>p</em>-value comes from permutation testing (re-running the whole pipeline
+          on shuffled targets).
+        </p>
+        <p>
+          The scatter shows every out-of-sample prediction pooled across folds. Its
+          annotated value is the same averaged-across-folds <em>r</em> as the verdict, so a
+          single regression line on the pooled cloud may look slightly tighter or looser
+          than that number suggests.
+        </p>
+      </details>
+
       <div class="hero">
         <div class="hero-left">
           {% if stat_chips %}
@@ -80,6 +98,25 @@
         <em>beyond</em> the confounds.
       </p>
 
+      <details class="info">
+        <summary>What am I looking at?</summary>
+        <p>Each model answers a different question:</p>
+        <ul>
+          <li><strong>connectome</strong> — how well does brain connectivity alone predict?</li>
+          <li><strong>covariates</strong> — the baseline from nuisance variables (age, sex, motion…).</li>
+          <li><strong>full</strong> — connectome + covariates combined (best prediction).</li>
+          <li><strong>residuals</strong> — connectome after removing covariate effects from the target.</li>
+          <li><strong>increment</strong> — the <em>added</em> value of the connectome over covariates
+            (full − covariates). A significant increment is your evidence the connectome carries
+            information the confounds do not.</li>
+        </ul>
+        <p>
+          Colours are the network the edges came from: red = positive, blue = negative,
+          grey = both. Boxes span the outer CV folds; the table gives mean [SD] with
+          permutation <em>p</em>-values (* p&lt;0.05, ** p&lt;0.01).
+        </p>
+      </details>
+
       {% if performance_grid %}
       <div class="figure-wrap">
         {{ performance_grid }}
@@ -110,6 +147,15 @@
         Predicted versus observed {{ y_name }}, by network. The covariates-only model is
         shown for comparison — a connectome model should predict beyond it.
       </p>
+      <details class="info">
+        <summary>What am I looking at?</summary>
+        <p>
+          Every point is one participant's held-out prediction. Points are pooled across all
+          outer CV folds. A model that predicts well lines up along the diagonal. Compare the
+          connectome panels against the covariates-only model: the connectome should add
+          predictive structure beyond the nuisance baseline.
+        </p>
+      </details>
       <div class="figure-grid">
         {% if scatter_predictions %}
         <div class="figure-wrap">
@@ -134,6 +180,16 @@
         separately for the positive and negative networks. A strong correlation with the
         target variable indicates that the selected edges carry predictive information.
       </p>
+      <details class="info">
+        <summary>What am I looking at?</summary>
+        <p>
+          For each participant, CCCPM sums the connectivity of all selected positive edges
+          (and, separately, the negative edges). These two scalar "network strength" values
+          are the actual features the connectome model uses. The scatter shows how strength
+          tracks the target; the histograms show the distribution of strength across
+          participants.
+        </p>
+      </details>
 
       <div class="figure-row">
         {% if ns_scatter %}
@@ -160,6 +216,20 @@
         edges (blue) with lower values. Strength here is edge <em>stability</em> —
         the fraction of outer CV folds in which an edge was selected.
       </p>
+      <details class="info">
+        <summary>What am I looking at?</summary>
+        <ul>
+          <li><strong>Connectivity matrix</strong> — node × node grid of stable edges; red/blue
+            mark the positive/negative networks. Ordered by brain network when an atlas is given.</li>
+          <li><strong>Hub nodes</strong> — the nodes participating in the most stable edges.</li>
+          <li><strong>Network-summary matrix</strong> — the same edges collapsed to canonical
+            networks (needs a <code>network</code> column in the atlas).</li>
+          <li><strong>Chord diagram</strong> — between-network connectivity as a ring; arc width is
+            the aggregated stability.</li>
+          <li><strong>Glass brain</strong> — the significantly stable edges drawn on a brain
+            (needs node coordinates <code>x, y, z</code>).</li>
+        </ul>
+      </details>
 
       <div class="figure-grid">
         {% if conn_matrix %}
@@ -189,13 +259,13 @@
         {% if brain_positive %}
         <div class="figure-wrap">
           {{ brain_positive }}
-          <p class="caption">Glass brain — significantly stable positive edges.</p>
+          <p class="caption">Glass brain — stable positive edges.</p>
         </div>
         {% endif %}
         {% if brain_negative %}
         <div class="figure-wrap">
           {{ brain_negative }}
-          <p class="caption">Glass brain — significantly stable negative edges.</p>
+          <p class="caption">Glass brain — stable negative edges.</p>
         </div>
         {% endif %}
       </div>
@@ -229,6 +299,15 @@
         Edges sorted by permutation p-value (ascending). Stability is the proportion
         of outer folds in which the edge was selected.
       </p>
+      <details class="info">
+        <summary>What am I looking at?</summary>
+        <p>
+          The individual connections (region A — region B) that most reliably drive the
+          prediction. <em>Stability</em> is how often an edge was selected across folds;
+          <em>significance</em> is the permutation p-value for that stability. These are the
+          edges you would report and interpret anatomically.
+        </p>
+      </details>
       <div class="figure-row">
         {% if edge_table_positive %}
         <div style="flex:1 1 400px">

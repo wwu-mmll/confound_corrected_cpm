@@ -88,6 +88,45 @@ def signed_stability_matrix(edge_stability: np.ndarray) -> np.ndarray:
     return pos - neg
 
 
+def significant_edge_matrices(
+    edge_stability: np.ndarray,
+    edge_significance: np.ndarray | None = None,
+    *,
+    alpha: float = 0.05,
+    fallback_to_stable: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Build binary positive/negative node×node matrices of the edges to highlight
+    on the glass brain.
+
+    An edge is kept if it was selected (stability > 0) and, when significance is
+    available, its stability p-value is below *alpha*. If significance filtering
+    leaves a network empty but stable edges exist, fall back to all stable edges
+    (so the figure still renders — e.g. with few permutations the p-values can
+    sit just above the threshold). Returns ``(positive_matrix, negative_matrix)``.
+    """
+    stab = np.asarray(edge_stability, dtype=float)
+    while stab.ndim > 3:
+        stab = stab[..., 0]  # drop trailing run dim(s) -> [n, n, 2]
+
+    sig = None
+    if edge_significance is not None:
+        sig = np.asarray(edge_significance, dtype=float)
+        while sig.ndim > 3:
+            sig = sig[..., 0]
+
+    out = []
+    for layer in (0, 1):
+        stable = stab[:, :, layer] > 1e-9
+        keep = stable
+        if sig is not None:
+            keep = stable & (sig[:, :, layer] < alpha)
+            if fallback_to_stable and not keep.any() and stable.any():
+                keep = stable
+        out.append(np.where(keep, 1.0, 0.0))
+    return out[0], out[1]
+
+
 def aggregate_matrix_by_group(
     matrix: np.ndarray,
     groups: list[str],

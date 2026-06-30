@@ -73,7 +73,10 @@ def connectivity_matrix(
 
     vmax = np.abs(mat).max() or 1.0
     fig, ax = plt.subplots(figsize=SQUARE)
-    im = ax.imshow(mat, cmap=DIVERGING_CMAP, vmin=-vmax, vmax=vmax, interpolation="nearest")
+    # rasterize the cell grid so the SVG stays small for large atlases
+    # (200-1000 ROIs) while axes/labels remain crisp vectors.
+    im = ax.imshow(mat, cmap=DIVERGING_CMAP, vmin=-vmax, vmax=vmax,
+                   interpolation="nearest", rasterized=True)
 
     if boundaries:
         for b in boundaries[:-1]:
@@ -121,7 +124,8 @@ def network_summary_matrix(
 
     vmax = np.abs(region_df.values).max() or 1.0
     fig, ax = plt.subplots(figsize=SQUARE)
-    im = ax.imshow(region_df.values, cmap=DIVERGING_CMAP, vmin=-vmax, vmax=vmax)
+    im = ax.imshow(region_df.values, cmap=DIVERGING_CMAP, vmin=-vmax, vmax=vmax,
+                   rasterized=True)
 
     ax.set_xticks(range(len(region_df.columns)))
     ax.set_xticklabels(region_df.columns, rotation=90, fontsize=6)
@@ -250,3 +254,65 @@ def sns_despine(ax) -> None:
     """Local despine to avoid importing seaborn just for this."""
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
+
+
+# ── 5. Glass brain (netplotbrain) ──────────────────────────────────────────────
+
+def glass_brain(
+    matrix: np.ndarray,
+    atlas: pd.DataFrame,
+    results_folder: str,
+    *,
+    edge_color: str = POS,
+    name: str = "glass_brain",
+) -> str | None:
+    """
+    Anatomical glass-brain rendering of a set of edges via netplotbrain.
+
+    *matrix* is a node×node matrix whose non-zero off-diagonal entries are the
+    edges to draw. The atlas must provide node coordinates (``x``, ``y``, ``z``).
+    Returns the PNG path, or ``None`` if there is nothing to draw / no coordinates
+    / netplotbrain is unavailable.
+
+    This supersedes the file-based ``cpm_chord_plot.plot_netplotbrain`` (which
+    expected ``sig_stability_*`` .npy files the pipeline no longer writes): the
+    edges are passed in directly so it works from the stability matrices.
+    """
+    if atlas is None or not {"x", "y", "z"}.issubset(atlas.columns):
+        return None
+    mat = np.asarray(matrix, dtype=float)
+    if mat.shape[0] != len(atlas):
+        return None
+
+    rows, cols = np.triu_indices(mat.shape[0], k=1)
+    mask = np.abs(mat[rows, cols]) > 1e-9
+    i_idx, j_idx, weights = rows[mask], cols[mask], mat[rows, cols][mask]
+    if len(i_idx) == 0:
+        return None
+
+    try:
+        import netplotbrain
+    except Exception:
+        return None
+
+    edges_df = pd.DataFrame({"i": i_idx, "j": j_idx, "weights": weights})
+    try:
+        fig, _ = netplotbrain.plot(
+            template="MNI152NLin2009cAsym",
+            template_style="glass",
+            nodes=atlas,
+            edges=edges_df,
+            view=["LSR"],
+            highlight_edges=True,
+            highlight_nodes=None,
+            node_type="circles",
+            edge_color=edge_color,
+            node_color="#332f2c",
+        )
+    except Exception:
+        return None
+
+    out = os.path.join(results_folder, f"{name}.png")
+    fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return out

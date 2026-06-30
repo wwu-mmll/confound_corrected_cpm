@@ -206,11 +206,16 @@ def build_hero_context(
     if n_perm:
         chips.append(("Permutations", n_perm))
 
-    # Hero figure.
+    # Hero figure — annotate with the same cross-validated r as the verdict
+    # so the two never disagree (the pooled-points r would differ).
     hero_scatter = ""
     try:
         hero_scatter = _svg_to_html(
-            scatter_plot_main(df_predictions, plots_dir, y_name, task_type=task_type)
+            scatter_plot_main(
+                df_predictions, plots_dir, y_name, task_type=task_type,
+                annotate_value=value if task_type != "classification" else None,
+                annotate_label="mean CV r",
+            )
         )
     except Exception:
         pass
@@ -394,17 +399,21 @@ def build_brain_plots_context(
     plots_dir: str,
     atlas_labels: Optional[pd.DataFrame],
     edge_stability: Optional[np.ndarray] = None,
+    edge_significance: Optional[np.ndarray] = None,
 ) -> dict:
     """
     Build context for the Brain & Edges section.
 
     Connectivity matrix and node-degree work without an atlas. The
     network-summary matrix and chord diagram need a ``network`` column. The
-    glass-brain render additionally needs node coordinates (x, y, z) and the
-    ``sig_stability_*`` edge files.
+    glass-brain render additionally needs node coordinates (x, y, z).
     """
     from cccpm.reporting.plots import brain_figures as bf
-    from cccpm.reporting.plots.connectome_utils import signed_stability_matrix
+    from cccpm.reporting.plots.connectome_utils import (
+        signed_stability_matrix,
+        significant_edge_matrices,
+    )
+    from cccpm.reporting.plots.figure_style import NEG, POS
 
     ctx = {
         "has_atlas": atlas_labels is not None,
@@ -451,20 +460,25 @@ def build_brain_plots_context(
                 except Exception:
                     pass
 
-    # ── Glass-brain renders (netplotbrain; need atlas + sig_stability files) ──
-    if atlas_labels is not None:
-        from cccpm.reporting.plots.cpm_chord_plot import plot_netplotbrain
-        for metric, key in [
-            ("sig_stability_positive_edges", "brain_positive"),
-            ("sig_stability_negative_edges", "brain_negative"),
+    # ── Glass-brain renders (netplotbrain; need atlas with x/y/z) ──
+    # Built directly from the significant-edge matrices, not from the
+    # `sig_stability_*` .npy files (which the pipeline no longer writes).
+    if atlas_labels is not None and edge_stability is not None:
+        try:
+            pos_mat, neg_mat = significant_edge_matrices(edge_stability, edge_significance)
+        except Exception:
+            pos_mat = neg_mat = None
+        for mat, color, fname, key in [
+            (pos_mat, POS, "netplotbrain_positive", "brain_positive"),
+            (neg_mat, NEG, "netplotbrain_negative", "brain_negative"),
         ]:
+            if mat is None:
+                continue
             try:
-                path, _ = plot_netplotbrain(
-                    results_folder=results_directory,
-                    selected_metric=metric,
-                    atlas_labels=atlas_labels,
-                )
-                ctx[key] = _png_to_html(path)
+                path = bf.glass_brain(mat, atlas_labels, plots_dir,
+                                      edge_color=color, name=fname)
+                if path:
+                    ctx[key] = _png_to_html(path)
             except Exception:
                 pass
 

@@ -29,12 +29,18 @@ def scatter_plot_main(
     task_type: str = "regression",
     model: str = "connectome",
     network: str = "both",
+    annotate_value: float | None = None,
+    annotate_label: str = "r",
 ) -> str:
     """
     Single prominent predicted-vs-observed panel for the hero section.
 
-    Regression: scatter + identity line + annotated Pearson r.
+    Regression: scatter + identity line + annotated effect size.
     Classification: predicted probability stripped by true class + 0.5 line.
+
+    If *annotate_value* is given it is shown verbatim (e.g. the cross-validated
+    mean r reported in the hero verdict, so the two agree); otherwise the pooled
+    correlation across all plotted points is computed and shown.
     """
     apply_nature_style()
 
@@ -67,10 +73,14 @@ def scatter_plot_main(
             max(sub["y_true"].max(), sub["y_pred"].max()),
         ]
         ax.plot(lims, lims, color="gray", linewidth=0.5, linestyle="--", zorder=0)
-        # Annotate Pearson r (pooled across folds)
-        r = sub["y_true"].corr(sub["y_pred"])
+        # Annotate the effect size — prefer the cross-validated value passed in
+        # (matches the hero verdict) over the pooled-points correlation.
+        if annotate_value is not None:
+            label = f"{annotate_label} = {annotate_value:.2f}"
+        else:
+            label = f"{annotate_label} = {sub['y_true'].corr(sub['y_pred']):.2f}"
         ax.annotate(
-            f"r = {r:.2f}", xy=(0.05, 0.92), xycoords="axes fraction",
+            label, xy=(0.05, 0.92), xycoords="axes fraction",
             fontsize=8, fontweight="bold", color=color,
         )
         ax.set_xlabel(y_name)

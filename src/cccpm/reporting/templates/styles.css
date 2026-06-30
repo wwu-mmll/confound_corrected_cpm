@@ -292,6 +292,43 @@ figcaption, .caption {
   margin: 0;
 }
 
+/* ── Explanatory info blocks ── */
+
+details.info {
+  background: #f7f9fb;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin: 0 0 20px;
+  font-size: 13px;
+}
+
+details.info > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+  list-style: none;
+  user-select: none;
+}
+
+details.info > summary::before {
+  content: "ⓘ ";
+}
+
+details.info[open] > summary {
+  margin-bottom: 8px;
+}
+
+details.info p,
+details.info ul {
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+details.info ul {
+  padding-left: 18px;
+}
+
 /* ── Missing asset placeholder ── */
 
 .missing-asset {

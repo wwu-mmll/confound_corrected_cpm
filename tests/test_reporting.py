@@ -57,16 +57,17 @@ def test_report_generates_without_atlas(results_dir):
     assert "<svg" in html
     assert "arakawa" not in html
 
-    # Atlas-free graceful degradation: matrix + hubs render, chord does not
-    assert "Connectivity matrix" in html
-    assert "Hub nodes" in html
-    assert "Chord diagram" not in html
+    # Atlas-free graceful degradation: matrix + hubs render, chord does not.
+    # (Check the figure captions, not the explanatory text which names every figure.)
+    assert "Connectivity matrix of stable edges" in html
+    assert "Hub nodes —" in html
+    assert "Chord diagram of between-network connectivity" not in html
 
 
 def test_report_generates_with_atlas(results_dir):
     html = _generate(results_dir, atlas=str(ATLAS_CSV))
 
     # Atlas-dependent figures now appear
-    assert "Connectivity matrix" in html
+    assert "Connectivity matrix of stable edges" in html
     assert "aggregated by canonical brain network" in html
-    assert "Chord diagram" in html
+    assert "Chord diagram of between-network connectivity" in html

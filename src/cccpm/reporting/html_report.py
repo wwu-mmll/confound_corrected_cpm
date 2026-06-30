@@ -114,6 +114,7 @@ class HTMLReporter:
             plots_dir=self.plots_dir,
             atlas_labels=self.atlas_labels,
             edge_stability=edge_stability,
+            edge_significance=edge_stability_sig,
         ))
 
         ctx.update(build_stable_edges_context(
