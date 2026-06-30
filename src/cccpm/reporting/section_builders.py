@@ -220,12 +220,21 @@ def build_hero_context(
     except Exception:
         pass
 
+    # KPI parts for the hero (big headline number).
+    kpi_value = f"{value:.2f}" if value is not None else ""
+    kpi_label = "mean CV r" if task_type != "classification" else "AUC"
+    kpi_p = _format_p(pval) if pval is not None else ""
+
     return {
         "version": version,
         "run_date": run_date,
+        "task_type": task_type,
         "headline": headline,
         "stat_chips": chips,
         "hero_scatter": hero_scatter,
+        "kpi_value": kpi_value,
+        "kpi_label": kpi_label,
+        "kpi_p": kpi_p,
         "config_items": _config_items(results_directory),
     }
 
@@ -493,32 +502,40 @@ def build_stable_edges_context(
     edge_stability: Optional[np.ndarray],
     edge_stability_significance: Optional[np.ndarray],
     atlas_labels: Optional[pd.DataFrame],
+    max_rows: int = 50,
 ) -> dict:
-    """Build context for the Stable Edges section."""
-    if edge_stability is None or edge_stability_significance is None:
-        return {"has_edge_data": False, "edge_table_positive": "", "edge_table_negative": ""}
+    """
+    Build context for the Stable Edges section.
 
-    edge_table_positive = ""
-    edge_table_negative = ""
+    Tables are capped at *max_rows* edges per network (already sorted by
+    significance) — without a stable-edge threshold a run can produce hundreds
+    of edges, which would make the report metres long. A note reports the total.
+    """
+    if edge_stability is None or edge_stability_significance is None:
+        return {
+            "has_edge_data": False,
+            "edge_table_positive": "", "edge_table_negative": "",
+            "edge_count_positive": 0, "edge_count_negative": 0,
+        }
+
+    ctx = {
+        "has_edge_data": True,
+        "edge_table_positive": "", "edge_table_negative": "",
+        "edge_count_positive": 0, "edge_count_negative": 0,
+        "edge_max_rows": max_rows,
+    }
     try:
-        for i, (network, attr) in enumerate(
-            [("positive", "edge_table_positive"), ("negative", "edge_table_negative")]
-        ):
+        for i, network in enumerate(["positive", "negative"]):
             edges = {
                 "stability": edge_stability[:, :, i, :].squeeze(),
                 "stability_significance": edge_stability_significance[:, :, i],
             }
             df = create_edge_stability_table(edges, atlas_labels)
-            html = df.to_html(classes="data-table", border=0)
-            if network == "positive":
-                edge_table_positive = html
-            else:
-                edge_table_negative = html
+            total = len(df)
+            html = df.head(max_rows).to_html(classes="data-table", border=0)
+            ctx[f"edge_table_{network}"] = html
+            ctx[f"edge_count_{network}"] = total
     except Exception:
         pass
 
-    return {
-        "has_edge_data": True,
-        "edge_table_positive": edge_table_positive,
-        "edge_table_negative": edge_table_negative,
-    }
+    return ctx

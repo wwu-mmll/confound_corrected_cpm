@@ -34,6 +34,18 @@
   <!-- ── Main content ── -->
   <main id="content">
 
+    <!-- ── Masthead ── -->
+    <header class="masthead">
+      <h1>CCCPM Report</h1>
+      <div class="subtitle">
+        {{ "Classifying" if task_type == "classification" else "Predicting" }}
+        <strong>{{ y_name }}</strong> from connectome data
+      </div>
+      <div class="meta">v{{ version }} · generated {{ run_date }} ·
+        <a href="https://github.com/wwu-mmll/confound_corrected_cpm" target="_blank">wwu-mmll/confound_corrected_cpm</a>
+      </div>
+    </header>
+
     <!-- ── 1. Hero / Summary ── -->
     <section class="report-section" id="overview">
       <h2>Summary</h2>
@@ -62,14 +74,13 @@
 
       <div class="hero">
         <div class="hero-left">
-          {% if stat_chips %}
-          <div class="stat-chips">
-            {% for label, value in stat_chips %}
-            <div class="stat-chip">
-              <div class="stat-value">{{ value }}</div>
-              <div class="stat-label">{{ label }}</div>
+          {% if kpi_value %}
+          <div class="kpi">
+            <div class="kpi-value">{{ kpi_value }}</div>
+            <div class="kpi-meta">
+              <div class="kpi-label">{{ kpi_label }}</div>
+              {% if kpi_p %}<div class="kpi-p">{{ kpi_p }}</div>{% endif %}
             </div>
-            {% endfor %}
           </div>
           {% endif %}
           <p class="hero-note">
@@ -86,12 +97,23 @@
         </div>
         {% endif %}
       </div>
+
+      {% if stat_chips %}
+      <div class="stat-chips">
+        {% for label, value in stat_chips %}
+        <div class="stat-chip">
+          <div class="stat-value">{{ value }}</div>
+          <div class="stat-label">{{ label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
     </section>
 
     <!-- ── 2. Model Comparison ── -->
     <section class="report-section" id="performance">
       <h2>Model Comparison</h2>
-      <p style="margin-bottom:16px;font-size:13px;color:#555">
+      <p class="section-intro">
         How the model variants compare across metrics and networks. The
         <em>increment</em> model — the full model minus the covariates-only model — is the
         key confound-control result: it isolates the predictive value the connectome adds
@@ -129,7 +151,7 @@
 
       {% if results_table %}
       <h3>Results Table</h3>
-      <p style="margin-bottom:12px;font-size:13px;color:#555">
+      <p class="section-intro">
         Mean [SD] across outer CV folds. Permutation p-values: * p&lt;0.05, ** p&lt;0.01.
         Models: <em>connectome</em> (connectivity only), <em>covariates</em> (confounds only),
         <em>full</em> (connectome + confounds), <em>residuals</em> (residualised connectome),
@@ -143,7 +165,7 @@
     <!-- ── 3. Predictions ── -->
     <section class="report-section" id="predictions">
       <h2>Predictions</h2>
-      <p style="margin-bottom:16px;font-size:13px;color:#555">
+      <p class="section-intro">
         Predicted versus observed {{ y_name }}, by network. The covariates-only model is
         shown for comparison — a connectome model should predict beyond it.
       </p>
@@ -175,7 +197,7 @@
     <!-- ── 4. Network Strengths ── -->
     <section class="report-section" id="network-strengths">
       <h2>Network Strengths</h2>
-      <p style="margin-bottom:16px;font-size:13px;color:#555">
+      <p class="section-intro">
         Network strength is the sum of all selected edge weights for each participant,
         separately for the positive and negative networks. A strong correlation with the
         target variable indicates that the selected edges carry predictive information.
@@ -210,7 +232,7 @@
     <!-- ── 5. Brain & Edges ── -->
     <section class="report-section" id="brain-plots">
       <h2>Brain &amp; Edges</h2>
-      <p style="margin-bottom:16px;font-size:13px;color:#555">
+      <p class="section-intro">
         Where the predictive edges are in the brain. Throughout, <em>positive</em>
         edges (red) are associated with higher target values and <em>negative</em>
         edges (blue) with lower values. Strength here is edge <em>stability</em> —
@@ -295,7 +317,7 @@
         to generate this table.
       </div>
       {% else %}
-      <p style="margin-bottom:16px;font-size:13px;color:#555">
+      <p class="section-intro">
         Edges sorted by permutation p-value (ascending). Stability is the proportion
         of outer folds in which the edge was selected.
       </p>
@@ -312,13 +334,19 @@
         {% if edge_table_positive %}
         <div style="flex:1 1 400px">
           <h3>Positive Network</h3>
-          <div class="table-scroll">{{ edge_table_positive }}</div>
+          {% if edge_count_positive > edge_max_rows %}
+          <p class="caption">Showing the top {{ edge_max_rows }} of {{ edge_count_positive }} edges (by significance).</p>
+          {% endif %}
+          <div class="table-scroll table-tall">{{ edge_table_positive }}</div>
         </div>
         {% endif %}
         {% if edge_table_negative %}
         <div style="flex:1 1 400px">
           <h3>Negative Network</h3>
-          <div class="table-scroll">{{ edge_table_negative }}</div>
+          {% if edge_count_negative > edge_max_rows %}
+          <p class="caption">Showing the top {{ edge_max_rows }} of {{ edge_count_negative }} edges (by significance).</p>
+          {% endif %}
+          <div class="table-scroll table-tall">{{ edge_table_negative }}</div>
         </div>
         {% endif %}
       </div>
