@@ -158,8 +158,61 @@ nav ul li a.active {
   border-radius: 4px;
   padding: 14px 18px;
   margin-bottom: 20px;
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* ── Hero ── */
+
+.hero {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.hero-left {
+  flex: 1 1 320px;
+  min-width: 280px;
+}
+
+.hero-figure {
+  flex: 0 1 360px;
+  max-width: 400px;
+}
+
+.hero-note {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.stat-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.stat-chip {
+  background: var(--accent-light);
+  border-radius: 6px;
+  padding: 12px 14px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 /* ── Tables ── */

@@ -23,8 +23,9 @@ from cccpm.reporting.reporting_utils import embed_image_base64
 from cccpm.reporting.section_builders import (
     build_brain_plots_context,
     build_data_context,
+    build_hero_context,
+    build_hyperparameters_context,
     build_network_strengths_context,
-    build_overview_context,
     build_performance_context,
     build_stable_edges_context,
 )
@@ -74,13 +75,23 @@ class HTMLReporter:
             "logo_img": self._logo_html(),
         }
 
-        ctx.update(build_overview_context(
+        ctx.update(build_hero_context(
+            df_mean=self.df_mean,
+            df_p_values=self.df_p_values,
+            df_predictions=self.df_predictions,
+            summary_df=summary_df,
+            edge_stability=edge_stability,
             results_directory=self.results_directory,
+            plots_dir=self.plots_dir,
+            y_name=self.y_name,
+            task_type=self.task_type,
             version=cccpm.__version__,
             run_date=datetime.date.today().isoformat(),
         ))
 
-        ctx.update(build_data_context(summary_df, scatter_path))
+        ctx.update(build_data_context(summary_df, scatter_path, self.results_directory))
+
+        ctx.update(build_hyperparameters_context(self.df))
 
         ctx.update(build_performance_context(
             df_full=self.df,

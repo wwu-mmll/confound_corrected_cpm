@@ -20,12 +20,13 @@
     <div class="nav-title">Report sections</div>
     <nav>
       <ul>
-        <li><a href="#overview">Overview</a></li>
-        <li><a href="#data">Data</a></li>
-        <li><a href="#performance">Predictive Performance</a></li>
+        <li><a href="#overview">Summary</a></li>
+        <li><a href="#performance">Model Comparison</a></li>
+        <li><a href="#predictions">Predictions</a></li>
         <li><a href="#network-strengths">Network Strengths</a></li>
-        <li><a href="#brain-plots">Brain Plots</a></li>
+        <li><a href="#brain-plots">Brain &amp; Edges</a></li>
         <li><a href="#stable-edges">Stable Edges</a></li>
+        <li><a href="#appendix">Data &amp; Methods</a></li>
       </ul>
     </nav>
   </aside>
@@ -33,60 +34,61 @@
   <!-- ── Main content ── -->
   <main id="content">
 
-    <!-- ── 1. Overview ── -->
+    <!-- ── 1. Hero / Summary ── -->
     <section class="report-section" id="overview">
-      <h2>Overview</h2>
-
-      <div class="card">
-        <p>
-          <strong>Confound-Corrected Connectome-Based Predictive Modelling (CCCPM)</strong>
-          is a Python package for performing connectome-based predictive modeling.
-          It provides robust methods for building predictive models from structural or
-          functional connectome data, emphasising replicability and interpretability.
-        </p>
-        <p style="margin-top:10px">
-          <strong>Version:</strong> {{ version }} &nbsp;·&nbsp;
-          <strong>Run date:</strong> {{ run_date }} &nbsp;·&nbsp;
-          <a href="https://github.com/wwu-mmll/confound_corrected_cpm" target="_blank">GitHub</a>
-        </p>
-      </div>
+      <h2>Summary</h2>
 
       {% if headline %}
       <div class="headline-callout">{{ headline }}</div>
       {% endif %}
 
-      <h3>Analysis Configuration</h3>
-      <div class="card-grid">
-        {% for key, value in config_items %}
-        <div class="config-item">
-          <div class="key">{{ key }}</div>
-          <div class="value">{{ value if value else "—" }}</div>
+      <div class="hero">
+        <div class="hero-left">
+          {% if stat_chips %}
+          <div class="stat-chips">
+            {% for label, value in stat_chips %}
+            <div class="stat-chip">
+              <div class="stat-value">{{ value }}</div>
+              <div class="stat-label">{{ label }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <p class="hero-note">
+            <strong>CCCPM</strong> builds cross-validated predictive models from connectome
+            data with explicit confound control. The headline figure shows the main
+            connectome model's predictions; the sections below break the result down by
+            model variant, network, and brain location.
+          </p>
         </div>
-        {% endfor %}
+        {% if hero_scatter %}
+        <div class="hero-figure figure-wrap">
+          {{ hero_scatter }}
+          <p class="caption">Predicted vs observed {{ y_name }} (connectome model).</p>
+        </div>
+        {% endif %}
       </div>
     </section>
 
-    <!-- ── 2. Data ── -->
-    <section class="report-section" id="data">
-      <h2>Data</h2>
-
-      {% if summary_table %}
-      <h3>Summary Statistics</h3>
-      <div class="table-scroll card">{{ summary_table }}</div>
-      {% endif %}
-
-      {% if scatter_matrix %}
-      <h3>Scatter Matrix — Covariates &amp; Target</h3>
-      <div class="figure-wrap">
-        {{ scatter_matrix }}
-        <p class="caption">Scatter matrix of the target variable and all covariates.</p>
-      </div>
-      {% endif %}
-    </section>
-
-    <!-- ── 3. Predictive Performance ── -->
+    <!-- ── 2. Model Comparison ── -->
     <section class="report-section" id="performance">
-      <h2>Predictive Performance</h2>
+      <h2>Model Comparison</h2>
+      <p style="margin-bottom:16px;font-size:13px;color:#555">
+        How the model variants compare across metrics and networks. The
+        <em>increment</em> model — the full model minus the covariates-only model — is the
+        key confound-control result: it isolates the predictive value the connectome adds
+        <em>beyond</em> the confounds.
+      </p>
+
+      {% if performance_grid %}
+      <div class="figure-wrap">
+        {{ performance_grid }}
+        <p class="caption">
+          Performance by model (rows), metric (columns) and network (colour: red positive,
+          blue negative, grey both). Boxes span outer CV folds.
+        </p>
+      </div>
+      {% endif %}
 
       {% if results_table %}
       <h3>Results Table</h3>
@@ -94,39 +96,34 @@
         Mean [SD] across outer CV folds. Permutation p-values: * p&lt;0.05, ** p&lt;0.01.
         Models: <em>connectome</em> (connectivity only), <em>covariates</em> (confounds only),
         <em>full</em> (connectome + confounds), <em>residuals</em> (residualised connectome),
-        <em>increment</em> (full minus covariates — the unique contribution of connectivity).
+        <em>increment</em> (full minus covariates).
         Networks: <em>positive</em> / <em>negative</em> / <em>both</em>.
       </p>
       <div class="table-scroll card">{{ results_table }}</div>
       {% endif %}
+    </section>
 
-      {% if boxplots %}
-      <h3>Performance by Metric</h3>
-      {% for label, fig_html in boxplots %}
-      <div class="figure-wrap">
-        {{ fig_html }}
-        <p class="caption">{{ label }}</p>
-      </div>
-      {% endfor %}
-      {% endif %}
-
-      {% if scatter_predictions or scatter_covariates %}
-      <h3>Predicted vs True</h3>
-      <div class="figure-row">
+    <!-- ── 3. Predictions ── -->
+    <section class="report-section" id="predictions">
+      <h2>Predictions</h2>
+      <p style="margin-bottom:16px;font-size:13px;color:#555">
+        Predicted versus observed {{ y_name }}, by network. The covariates-only model is
+        shown for comparison — a connectome model should predict beyond it.
+      </p>
+      <div class="figure-grid">
         {% if scatter_predictions %}
         <div class="figure-wrap">
           {{ scatter_predictions }}
-          <p class="caption">Connectome model: true vs predicted {{ y_name }}.</p>
+          <p class="caption">Connectome model, by network.</p>
         </div>
         {% endif %}
         {% if scatter_covariates %}
         <div class="figure-wrap">
           {{ scatter_covariates }}
-          <p class="caption">Covariates model: true vs predicted {{ y_name }}.</p>
+          <p class="caption">Covariates-only model.</p>
         </div>
         {% endif %}
       </div>
-      {% endif %}
     </section>
 
     <!-- ── 4. Network Strengths ── -->
@@ -246,6 +243,53 @@
         </div>
         {% endif %}
       </div>
+      {% endif %}
+    </section>
+
+    <!-- ── 7. Data & Methods appendix ── -->
+    <section class="report-section" id="appendix">
+      <h2>Data &amp; Methods</h2>
+
+      {% if summary_table %}
+      <h3>Data Summary</h3>
+      <div class="table-scroll card">{{ summary_table }}</div>
+      {% endif %}
+
+      <div class="figure-grid">
+        {% if target_distribution %}
+        <div class="figure-wrap">
+          {{ target_distribution }}
+          <p class="caption">Distribution of the target variable.</p>
+        </div>
+        {% endif %}
+        {% if scatter_matrix %}
+        <div class="figure-wrap">
+          {{ scatter_matrix }}
+          <p class="caption">Scatter matrix of target and covariates.</p>
+        </div>
+        {% endif %}
+      </div>
+
+      <h3>Analysis Configuration</h3>
+      <div class="card-grid">
+        {% for key, value in config_items %}
+        <div class="config-item">
+          <div class="key">{{ key }}</div>
+          <div class="value">{{ value if value else "—" }}</div>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% if has_hyperparameters %}
+      <h3>Hyperparameters</h3>
+      {% if hyper_table %}
+      <h4 style="font-size:13px;margin:12px 0 6px">Parameters used in each fold</h4>
+      <div class="table-scroll card">{{ hyper_table }}</div>
+      {% endif %}
+      {% if hyper_summary %}
+      <h4 style="font-size:13px;margin:12px 0 6px">Summary across folds</h4>
+      <div class="table-scroll card">{{ hyper_summary }}</div>
+      {% endif %}
       {% endif %}
     </section>
 

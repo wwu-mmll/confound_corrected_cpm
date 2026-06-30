@@ -23,19 +23,22 @@ from cccpm.reporting.reporting_utils import (
     embed_image_base64,
     embed_svg,
     format_results_table,
+    parse_config_block,
     styler_to_html,
 )
 from cccpm.reporting.table_builders import (
     combine_results_with_pvalues,
     create_edge_stability_table,
+    create_hyperparameter_summary,
     create_hyperparameter_table,
 )
 from cccpm.reporting.plots.plots import (
-    boxplot_models,
     classification_scatter_plot,
     histograms_network_strengths,
+    performance_grid,
     scatter_plot,
     scatter_plot_covariates_model,
+    scatter_plot_main,
     scatter_plot_network_strengths,
 )
 
@@ -62,31 +65,163 @@ def _svg_to_html(svg_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1. Overview section
+# Config / headline helpers
 # ---------------------------------------------------------------------------
 
-def build_overview_context(
+def _config_items(results_directory: str) -> list[tuple[str, str]]:
+    log_path = os.path.join(results_directory, "cpm_log.txt")
+    if os.path.exists(log_path):
+        return parse_config_block(log_path)
+    return []
+
+
+def _config_dict(results_directory: str) -> dict[str, str]:
+    return {k: v for k, v in _config_items(results_directory)}
+
+
+def _format_p(p: float) -> str:
+    """APA-style p-value string."""
+    if p is None or pd.isna(p):
+        return "p = n/a"
+    if p < 0.001:
+        return "p < .001"
+    return f"p = {p:.3f}".replace("0.", ".")
+
+
+def _summary_value(summary_df: Optional[pd.DataFrame], label: str) -> Optional[str]:
+    if summary_df is None or label not in summary_df.index:
+        return None
+    try:
+        return str(summary_df.loc[label].iloc[0])
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 1. Hero / executive summary
+# ---------------------------------------------------------------------------
+
+def build_hero_context(
+    df_mean: pd.DataFrame,
+    df_p_values: Optional[pd.DataFrame],
+    df_predictions: pd.DataFrame,
+    summary_df: Optional[pd.DataFrame],
+    edge_stability,
     results_directory: str,
+    plots_dir: str,
+    y_name: str,
+    task_type: str,
     version: str,
     run_date: str,
 ) -> dict:
     """
-    Build the context variables for the Overview section.
-
-    Returns a dict with keys: version, run_date, config_items, headline.
+    Build the hero: a one-sentence verdict, key-stat chips, and the prominent
+    predicted-vs-observed scatter for the headline (connectome, both) model.
     """
-    from cccpm.reporting.reporting_utils import parse_config_block
+    import re
 
-    log_path = os.path.join(results_directory, "cpm_log.txt")
-    config_items: list[tuple[str, str]] = []
-    if os.path.exists(log_path):
-        config_items = parse_config_block(log_path)
+    cfg = _config_dict(results_directory)
+    raw = "\n".join(f"{k}: {v}" for k, v in _config_items(results_directory))
+
+    # Headline metric per task type, with graceful fallback.
+    if task_type == "classification":
+        metric, metric_label = "roc_auc", "AUC"
+    else:
+        metric, metric_label = "pearson_score", "r"
+
+    value = None
+    try:
+        if (metric, "mean") in df_mean.columns and ("connectome", "both") in df_mean.index:
+            value = float(df_mean.loc[("connectome", "both"), (metric, "mean")])
+    except Exception:
+        value = None
+
+    pval = None
+    if df_p_values is not None:
+        try:
+            row = df_p_values[
+                (df_p_values["model"] == "connectome") & (df_p_values["network"] == "both")
+            ]
+            if not row.empty and metric in row.columns:
+                pval = float(row[metric].iloc[0])
+        except Exception:
+            pval = None
+
+    # CV folds + permutations from the config block.
+    n_folds = None
+    m = re.search(r"n_splits\s*=\s*(\d+)", raw)
+    if m:
+        n_folds = m.group(1)
+    n_perm = cfg.get("Number of Permutations")
+
+    verb = "classified" if task_type == "classification" else "predicted"
+    if value is not None:
+        cv_part = f"{n_folds}-fold CV" if n_folds else "cross-validation"
+        perm_part = f", {n_perm} permutations" if n_perm else ""
+        p_part = f", {_format_p(pval)}" if pval is not None else ""
+        headline = (
+            f"The connectome model {verb} {y_name}: "
+            f"{metric_label} = {value:.2f}{p_part} ({cv_part}{perm_part})."
+        )
+    else:
+        headline = ""
+
+    # Stat chips.
+    n_features = _summary_value(summary_df, "Number of features (connectivity values)")
+    n_nodes = None
+    if n_features is not None:
+        try:
+            from cccpm.utils import infer_n_nodes
+            n_nodes = infer_n_nodes(int(float(n_features)))
+        except Exception:
+            n_nodes = None
+    n_edges = None
+    if edge_stability is not None:
+        try:
+            from cccpm.reporting.plots.connectome_utils import signed_stability_matrix
+            sm = signed_stability_matrix(edge_stability)
+            n_edges = int((np.abs(sm) > 1e-9).sum() // 2)
+        except Exception:
+            n_edges = None
+    p_thresh = None
+    m = re.search(r"threshold\s*=\s*\[([^\]]+)\]", raw)
+    if m:
+        p_thresh = m.group(1).strip()
+
+    chips: list[tuple[str, str]] = []
+    n_samples = _summary_value(summary_df, "Number of samples")
+    if n_samples:
+        chips.append(("Samples", n_samples))
+    if n_nodes:
+        chips.append(("Nodes", str(n_nodes)))
+    if n_features:
+        chips.append(("Edges (total)", str(int(float(n_features)))))
+    if n_edges is not None:
+        chips.append(("Stable edges", str(n_edges)))
+    ncov = _summary_value(summary_df, "Number of covariates")
+    if ncov:
+        chips.append(("Covariates", ncov))
+    if p_thresh:
+        chips.append(("Edge p-threshold", p_thresh))
+    if n_perm:
+        chips.append(("Permutations", n_perm))
+
+    # Hero figure.
+    hero_scatter = ""
+    try:
+        hero_scatter = _svg_to_html(
+            scatter_plot_main(df_predictions, plots_dir, y_name, task_type=task_type)
+        )
+    except Exception:
+        pass
 
     return {
         "version": version,
         "run_date": run_date,
-        "config_items": config_items,
-        "headline": "",
+        "headline": headline,
+        "stat_chips": chips,
+        "hero_scatter": hero_scatter,
+        "config_items": _config_items(results_directory),
     }
 
 
@@ -97,8 +232,9 @@ def build_overview_context(
 def build_data_context(
     summary_df: Optional[pd.DataFrame],
     scatter_matrix_path: str,
+    results_directory: str = "",
 ) -> dict:
-    """Build context for the Data section."""
+    """Build context for the Data & Methods appendix."""
     summary_table_html = ""
     if summary_df is not None:
         summary_table_html = summary_df.to_html(classes="data-table", border=0)
@@ -107,9 +243,18 @@ def build_data_context(
     if os.path.exists(scatter_matrix_path):
         scatter_html = embed_image_base64(scatter_matrix_path)
 
+    target_dist_html = ""
+    if results_directory:
+        target_path = os.path.join(
+            results_directory, "data_insights", "target_distribution.png"
+        )
+        if os.path.exists(target_path):
+            target_dist_html = embed_image_base64(target_path)
+
     return {
         "summary_table": summary_table_html,
         "scatter_matrix": scatter_html,
+        "target_distribution": target_dist_html,
     }
 
 
@@ -126,8 +271,8 @@ def build_performance_context(
     task_type: str,
     plots_dir: str,
 ) -> dict:
-    """Build context for the Predictive Performance section."""
-    # Results table
+    """Build context for the Model Comparison + Predictions sections."""
+    # APA results table (mean[sd] + permutation p)
     results_table_html = ""
     if df_p_values is not None:
         try:
@@ -137,19 +282,21 @@ def build_performance_context(
         except Exception:
             pass
 
-    # Boxplots (one per metric)
-    boxplots: list[tuple[str, str]] = []
-    metric_cols = [c for c in df_full.columns if c not in ("fold", "model", "network", "params", "run")]
-    for metric in metric_cols:
-        try:
-            fig_path = boxplot_models(
-                df_full, metric, plots_dir, models=["connectome", "covariates", "full", "residuals"]
-            )
-            boxplots.append((metric.replace("_", " "), _svg_to_html(fig_path)))
-        except Exception:
-            pass
+    # One faceted small-multiples figure (replaces 4 stacked boxplots)
+    if task_type == "classification":
+        metrics = ["accuracy", "balanced_accuracy", "f1_score", "roc_auc"]
+    else:
+        metrics = ["pearson_score", "explained_variance_score",
+                   "mean_squared_error", "mean_absolute_error"]
+    metrics = [m for m in metrics if m in df_full.columns]
 
-    # Prediction scatter
+    perf_grid_html = ""
+    try:
+        perf_grid_html = _svg_to_html(performance_grid(df_full, metrics, plots_dir))
+    except Exception:
+        pass
+
+    # Predicted-vs-observed scatters
     scatter_pred_html = ""
     scatter_cov_html = ""
     try:
@@ -169,9 +316,42 @@ def build_performance_context(
 
     return {
         "results_table": results_table_html,
-        "boxplots": boxplots,
+        "performance_grid": perf_grid_html,
         "scatter_predictions": scatter_pred_html,
         "scatter_covariates": scatter_cov_html,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Hyperparameters (appendix)
+# ---------------------------------------------------------------------------
+
+def build_hyperparameters_context(df_full: pd.DataFrame) -> dict:
+    """Restore the hyperparameters tables (per-fold + summary) for the appendix."""
+    if "params" not in df_full.columns:
+        return {"has_hyperparameters": False, "hyper_table": "", "hyper_summary": ""}
+
+    hyper_table_html = ""
+    hyper_summary_html = ""
+    try:
+        hyper_df = create_hyperparameter_table(df_full)
+        if not hyper_df.empty:
+            hyper_table_html = hyper_df.to_html(classes="data-table", border=0, index=False)
+    except Exception:
+        pass
+
+    try:
+        if isinstance(df_full["params"].iloc[0], dict):
+            summary = create_hyperparameter_summary(df_full)
+            if not summary.empty:
+                hyper_summary_html = summary.to_html(classes="data-table", border=0)
+    except Exception:
+        pass
+
+    return {
+        "has_hyperparameters": bool(hyper_table_html or hyper_summary_html),
+        "hyper_table": hyper_table_html,
+        "hyper_summary": hyper_summary_html,
     }
 
 
