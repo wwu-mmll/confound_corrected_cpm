@@ -111,7 +111,21 @@ You don't trust the tests; turn 115 green checks into real confidence.
       Unified all defaults to `'cpu'` so direct use never crashes on CPU-only machines
       (the pipeline still passes `device` explicitly). Added a test.
 - [ ] Still verify MPS (Apple) / CUDA paths actually run end-to-end on real hardware.
-- [ ] Run the full suite on macOS (arm64), Linux, Windows locally or in CI.
+- [~] Run the full suite on macOS (arm64), Linux, Windows in CI. **Done via the matrix.**
+      Two CI bugs fixed: (1) `example_simulated_data.py` had `cpm.run()` commented out
+      while `generate_html_report()` ran → crashed on a clean checkout (passed locally
+      only due to leftover `examples/tmp/` artifacts); fixed + switched to `device='cpu'`.
+      (2) Windows runners hit `_tkinter.TclError` because matplotlib defaulted to the Tk
+      GUI backend (broken Tcl/Tk on the runner); set `matplotlib.use("Agg")` in
+      `tests/conftest.py`. macOS/Linux green; Windows re-running.
+- [ ] **DEFERRED — matplotlib global backend (Windows robustness).** The library imports
+      `matplotlib.pyplot` in several modules, so a real Windows user with broken/absent
+      Tcl/Tk can hit `_tkinter.TclError` during `cpm.run()`/report generation. Workaround
+      documented in `installation.md` (set `MPLBACKEND=Agg`). Proper fix (deferred,
+      discussed w/ Nils): rewrite the report plotting to the object-oriented `Figure()`
+      API instead of `plt.figure()`, so it renders to disk via Agg regardless of the
+      user's backend WITHOUT a global `matplotlib.use("Agg")` (which would clobber a
+      Jupyter user's inline backend on `import cccpm`).
 
 ## Phase 2 — Code structure / modularization
 Mostly in good shape (reporting + models are already split). Targeted cleanups:
