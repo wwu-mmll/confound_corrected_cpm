@@ -1,3 +1,10 @@
+# Force a non-interactive matplotlib backend before anything imports pyplot.
+# The library only ever saves plots to disk, so tests never need a GUI backend;
+# this avoids _tkinter.TclError on CI runners with a broken/absent Tcl/Tk
+# (e.g. Windows hosted runners). Must run before the cccpm imports below.
+import matplotlib
+matplotlib.use("Agg")
+
 import pytest
 import numpy as np
 import pandas as pd
