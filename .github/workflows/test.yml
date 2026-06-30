@@ -8,29 +8,38 @@ on:
 
 jobs:
   test:
-    name: Run Tests with Coverage
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Don't cancel the whole matrix when one combination fails — we want to
+      # see exactly which OS / Python versions have problems.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: ${{ matrix.python-version }}
 
       - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
+        # pipx is preinstalled on all GitHub-hosted runners (Linux/macOS/Windows)
+        run: pipx install poetry
 
       - name: Install Dependencies
-        run: |
-          poetry install
+        run: poetry install
 
       - name: Run Tests with Coverage
-        run: |
-          poetry run pytest --cov=cccpm --cov-report=xml --cov-report=term
+        run: poetry run pytest --cov=cccpm --cov-report=xml --cov-report=term
+
       - name: Upload coverage to Coveralls
+        # Upload coverage from a single representative job to avoid duplicates.
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         uses: coverallsapp/github-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}

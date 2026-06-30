@@ -12,7 +12,9 @@ SRC_DIR = REPO_ROOT / "src"  # <--- Define the src path
 
 # 2. Define the examples to be tested
 EXAMPLE_SCRIPTS = [
-    "example_simulated_data.py"
+    "example_simulated_data.py",
+    "regression_quickstart.py",
+    "classification_quickstart.py",
 ]
 
 

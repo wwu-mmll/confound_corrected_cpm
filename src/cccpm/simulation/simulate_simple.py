@@ -35,3 +35,27 @@ def simulate_confounded_data_chyzhyk(link_type='direct_link',
         z = 0.5 * y_rand + z_rand
         X = x_rand + y_rand.reshape(-1, 1) + z.reshape(-1, 1)
     return X, y, z.reshape(-1, 1)
+
+
+def simulate_confounded_binary_data_chyzhyk(link_type='direct_link',
+                                            n_samples=100, n_features=100):
+    """
+    Simulate confounded data with a binary target variable.
+
+    Uses the same generative process as simulate_confounded_data_chyzhyk
+    but binarises the continuous target y at its median.
+
+    :param link_type: str,
+        Type of the links between target and confound. Options: "no_link",
+        "direct_link", "weak_link"
+    :param n_samples: int,
+        number of samples
+    :param n_features: int,
+        number of features
+    :return: X, y_binary, covariates
+    """
+    X, y, covariates = simulate_confounded_data_chyzhyk(
+        link_type=link_type, n_samples=n_samples, n_features=n_features
+    )
+    y_binary = (y > np.median(y)).astype(float)
+    return X, y_binary, covariates

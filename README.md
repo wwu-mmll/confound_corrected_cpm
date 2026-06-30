@@ -1,7 +1,7 @@
 [![GitHub Workflow Status](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/test.yml/badge.svg)](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/test.yml)
 [![Coverage Status](https://coveralls.io/repos/github/wwu-mmll/confound_corrected_cpm/badge.svg)](https://coveralls.io/github/wwu-mmll/confound_corrected_cpm)
-[![Github Contributors](https://img.shields.io/github/contributors-anon/wwu-mmll/cpm_python?color=blue)](https://github.com/wwu-mmll/cpm_python/graphs/contributors)
-[![Github Commits](https://img.shields.io/github/commit-activity/y/wwu-mmll/cpm_python)](https://github.com/wwu-mmll/cpm_python/commits/main)
+[![Github Contributors](https://img.shields.io/github/contributors-anon/wwu-mmll/confound_corrected_cpm?color=blue)](https://github.com/wwu-mmll/confound_corrected_cpm/graphs/contributors)
+[![Github Commits](https://img.shields.io/github/commit-activity/y/wwu-mmll/confound_corrected_cpm)](https://github.com/wwu-mmll/confound_corrected_cpm/commits/main)
 
 # Confound-Corrected Connectome-Based Predictive Modelling in Python
 **Confound-Corrected Connectome-Based Predictive Modelling** is a Python package for performing connectome-based predictive modeling (CPM). This toolbox is designed for researchers in neuroscience and psychiatry, providing robust methods for building predictive models based on structural or functional connectome data. It emphasizes replicability, interpretability, and flexibility, making it a valuable tool for analyzing brain connectivity and its relationship to behavior or clinical outcomes.
@@ -32,28 +32,40 @@ For detailed instructions on installation, usage, and advanced configurations, v
 
 ## Installation
 
-Install the package from GitHub:
+Install the latest release from PyPI:
 
 ```bash
 pip install cccpm
 ```
 
+Or install the development version from GitHub:
+
+```bash
+git clone https://github.com/wwu-mmll/confound_corrected_cpm.git
+cd confound_corrected_cpm
+pip install .
+```
+
+CCCPM requires Python 3.10–3.14 and uses [PyTorch](https://pytorch.org/) for
+computation (CPU by default; CUDA/MPS used automatically when available). See the
+[installation guide](https://wwu-mmll.github.io/confound_corrected_cpm/installation/)
+for platform-specific notes.
+
 ## Quick Example
 Here's a quick overview of how to run a CPM analysis:
 
 ```python
-from cccpm.cpm_analysis import CPMRegression
-from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
 from sklearn.model_selection import KFold
 
 # Configure edge selection
 univariate_edge_selection = UnivariateEdgeSelection(
-    edge_statistic=["pearson"],
+    edge_statistic="pearson",
     edge_selection=[PThreshold(threshold=[0.05], correction=["fdr_by"])]
 )
 
-# Create the CPMRegression object
-cpm = CPMRegression(
+# Create the CPM analysis object
+cpm = CPMAnalysis(
     results_directory="results/",
     cv=KFold(n_splits=10, shuffle=True, random_state=42),
     edge_selection=univariate_edge_selection,
@@ -61,10 +73,10 @@ cpm = CPMRegression(
 )
 
 # Run the analysis
-X = ...  # Connectome data
-y = ...  # Target variable
-covariates = ...  # Covariates
-cpm.run(X, y, covariates)
+X = ...           # Connectome data, shape (n_samples, n_features)
+y = ...           # Target variable, shape (n_samples,)
+covariates = ...  # Covariates to control for, shape (n_samples, n_covariates)
+cpm.run(X=X, y=y, covariates=covariates)
 ```
 
 ## Contributing

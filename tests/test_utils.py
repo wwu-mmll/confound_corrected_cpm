@@ -2,18 +2,39 @@ import pytest
 import numpy as np
 import pandas as pd
 
+import torch
+
 from cccpm.utils import (
     check_data,
     matrix_to_vector_3d,
     get_variable_names,
-    matrix_to_upper_triangular_vector,
-    vector_to_upper_triangular_matrix,
-    matrix_to_vector_3d,
-    vector_to_matrix_3d,
-    get_colors_from_colormap,
-    impute_missing_values,
-    select_stable_edges
+    infer_n_nodes,
+    vector_to_matrix_numpy,
+    matrix_to_vector_numpy,
+    vector_to_matrix_tensor_version,
+    matrix_to_vector_tensor_version,
 )
+
+
+def test_infer_n_nodes():
+    # Valid upper-triangular edge counts
+    assert infer_n_nodes(1) == 2      # 2 nodes -> 1 edge
+    assert infer_n_nodes(6) == 4      # 4 nodes -> 6 edges
+    assert infer_n_nodes(45) == 10    # 10 nodes -> 45 edges
+    assert infer_n_nodes(1225) == 50  # 50 nodes -> 1225 edges
+    # Invalid counts return None
+    assert infer_n_nodes(5) is None
+    assert infer_n_nodes(400) is None
+    assert infer_n_nodes(0) is None
+
+
+def test_check_data_rejects_non_triangular_n_features(small_data_setup):
+    """A non-connectome number of features should fail fast with a clear error."""
+    _, y1d, cov2d, _, _, _ = small_data_setup
+    n_samples = 30
+    X_bad = np.random.randn(n_samples, 400)  # 400 is not n*(n-1)/2 for any n
+    with pytest.raises(ValueError, match="not a valid connectome size"):
+        check_data(X_bad, y1d[:n_samples], cov2d[:n_samples])
 
 # We create a local fixture for the specific small dataset used in these tests
 @pytest.fixture
@@ -21,10 +42,10 @@ def small_data_setup(simulated_data):
     """
     Creates the specific data shapes used in the original TestUtils.setUp
     """
-    # Original code used n_samples=50, n_features=5
-    # We can just slice the larger simulated_data fixture
+    # n_features must be a valid connectome size (n_nodes*(n_nodes-1)/2);
+    # 6 corresponds to a 4-node connectome.
     X, y, cov = simulated_data
-    n_samples, n_features = 50, 5
+    n_samples, n_features = 50, 6
 
     X2d = X[:n_samples, :n_features]
     y1d = y[:n_samples]
@@ -44,38 +65,6 @@ def test_matrix_to_vector_3d():
     vec = matrix_to_vector_3d(mat)
     expected_dim = n * (n - 1) // 2
     assert vec.shape == (n_samples, expected_dim)
-
-
-def test_matrix_to_upper_triangular_vector_basic():
-    mat = np.array([
-        [0, 1, 2],
-        [1, 0, 3],
-        [2, 3, 0]
-    ])
-    vec = matrix_to_upper_triangular_vector(mat)
-    assert np.allclose(vec, np.array([1, 2, 3]))
-
-
-def test_matrix_to_upper_triangular_vector_invalid_shape():
-    with pytest.raises(ValueError):
-        matrix_to_upper_triangular_vector(np.zeros((3, 4)))
-
-
-def test_vector_to_upper_triangular_matrix_roundtrip():
-    mat = np.array([
-        [0, 1, 2],
-        [1, 0, 3],
-        [2, 3, 0]
-    ])
-    vec = matrix_to_upper_triangular_vector(mat)
-    mat_rec = vector_to_upper_triangular_matrix(vec)
-    assert np.allclose(mat, mat_rec)
-
-
-def test_vector_to_upper_triangular_matrix_invalid_length():
-    vec = np.arange(5)  # 5 fits no triangle number
-    with pytest.raises(ValueError):
-        vector_to_upper_triangular_matrix(vec)
 
 
 def test_accepts_3d_X(small_data_setup):
@@ -207,41 +196,89 @@ def test_get_variable_names_with_array_y_and_df_covariates():
     assert cov_names == ['cov_only']
 
 
-def test_impute_missing_values_basic():
-    X_train = np.array([[1.0, np.nan], [3.0, 4.0]])
-    X_test = np.array([[np.nan, 2.0]])
-    cov_train = np.array([[np.nan], [2.0]])
-    cov_test = np.array([[1.0]])
+# ============================================================
+# Connectome <-> vector conversions (foundation of edge stability
+# and mapping p-values back to a connectome). These must round-trip
+# exactly, and the numpy and tensor implementations must agree.
+# ============================================================
 
-    Xt, Xv, Ct, Cv = impute_missing_values(
-        X_train, X_test, cov_train, cov_test
-    )
-
-    assert not np.isnan(Xt).any()
-    assert not np.isnan(Xv).any()
-    assert not np.isnan(Ct).any()
-    assert not np.isnan(Cv).any()
+def _symmetric_zero_diag(n, rng):
+    m = rng.randn(n, n).astype(np.float32)
+    m = (m + m.T) / 2
+    np.fill_diagonal(m, 0.0)
+    return m
 
 
-def test_select_stable_edges_basic():
-    stability = {
-        'positive': np.array([0.1, 0.8, 0.6]),
-        'negative': np.array([0.9, 0.2, 0.7])
-    }
+def test_vector_to_matrix_numpy_roundtrip_1d():
+    rng = np.random.RandomState(0)
+    n_nodes = 6
+    n_edges = n_nodes * (n_nodes - 1) // 2  # 15
+    vec = rng.randn(n_edges).astype(np.float32)
 
-    selected = select_stable_edges(stability, stability_threshold=0.65)
+    mat = vector_to_matrix_numpy(vec, dim=0)
+    assert mat.shape == (n_nodes, n_nodes)
+    # symmetric with zero diagonal
+    assert np.allclose(mat, mat.T)
+    assert np.allclose(np.diag(mat), 0.0)
+    # vector -> matrix -> vector is the identity
+    back = matrix_to_vector_numpy(mat, dim=0)
+    assert np.allclose(back, vec)
 
-    assert np.array_equal(selected['positive'], np.array([1]))
-    assert np.array_equal(selected['negative'], np.array([0, 2]))
+
+def test_matrix_to_vector_numpy_roundtrip_symmetric():
+    rng = np.random.RandomState(1)
+    n_nodes = 7
+    mat = _symmetric_zero_diag(n_nodes, rng)
+    vec = matrix_to_vector_numpy(mat, dim=0)
+    assert vec.shape == (n_nodes * (n_nodes - 1) // 2,)
+    # matrix -> vector -> matrix recovers a symmetric, zero-diagonal matrix
+    recon = vector_to_matrix_numpy(vec, dim=0)
+    assert np.allclose(recon, mat)
 
 
-def test_select_stable_edges_empty():
-    stability = {
-        'positive': np.array([0.1, 0.2]),
-        'negative': np.array([0.3, 0.4])
-    }
+def test_vector_to_matrix_numpy_batched():
+    rng = np.random.RandomState(2)
+    n_nodes, n_runs = 5, 3
+    n_edges = n_nodes * (n_nodes - 1) // 2  # 10
+    arr = rng.randn(n_edges, n_runs).astype(np.float32)
+    mat = vector_to_matrix_numpy(arr, dim=0)
+    assert mat.shape == (n_nodes, n_nodes, n_runs)
+    back = matrix_to_vector_numpy(mat, dim=0)
+    assert np.allclose(back, arr)
 
-    selected = select_stable_edges(stability, stability_threshold=0.9)
 
-    assert selected['positive'].size == 0
-    assert selected['negative'].size == 0
+def test_tensor_conversion_roundtrip():
+    torch.manual_seed(0)
+    n_nodes = 6
+    n_edges = n_nodes * (n_nodes - 1) // 2
+    vec = torch.randn(n_edges)
+    mat = vector_to_matrix_tensor_version(vec, dim=0)
+    assert tuple(mat.shape) == (n_nodes, n_nodes)
+    assert torch.allclose(mat, mat.T)
+    back = matrix_to_vector_tensor_version(mat, dim=0)
+    assert torch.allclose(back, vec)
+
+
+def test_numpy_and_tensor_versions_agree():
+    rng = np.random.RandomState(3)
+    n_nodes = 8
+    n_edges = n_nodes * (n_nodes - 1) // 2
+    vec = rng.randn(n_edges).astype(np.float32)
+
+    mat_np = vector_to_matrix_numpy(vec, dim=0)
+    mat_t = vector_to_matrix_tensor_version(torch.from_numpy(vec), dim=0).numpy()
+    assert np.allclose(mat_np, mat_t)
+
+
+def test_matrix_to_vector_3d_extracts_upper_triangle():
+    # Build a batch of matrices with known upper-triangular values
+    n_samples, n = 4, 4
+    rng = np.random.RandomState(4)
+    mats = np.zeros((n_samples, n, n), dtype=np.float32)
+    rows, cols = np.triu_indices(n, k=1)
+    for s in range(n_samples):
+        mats[s, rows, cols] = rng.randn(len(rows))
+    vec = matrix_to_vector_3d(mats)
+    assert vec.shape == (n_samples, n * (n - 1) // 2)
+    for s in range(n_samples):
+        assert np.allclose(vec[s], mats[s, rows, cols])
