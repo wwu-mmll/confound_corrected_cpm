@@ -1,3 +1,3 @@
-# Fold
+# Inner Fold
 
-::: cccpm.fold
+::: cccpm.inner_fold

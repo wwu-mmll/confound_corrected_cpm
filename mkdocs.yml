@@ -34,6 +34,8 @@ markdown_extensions:
   - pymdownx.snippets:
       base_path: ["."]
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
   - codehilite
   - admonition
   - pymdownx.details
@@ -43,13 +45,17 @@ nav:
 - Home: 'index.md'
 - Installation: 'installation.md'
 - Getting Started: 'getting_started.md'
+- How CCCPM Works: 'methods.md'
+- Interpreting Results: 'interpreting_results.md'
 - Examples:
+    - Regression: 'examples/regression.md'
+    - Classification: 'examples/classification.md'
     - Simulated Data: 'examples/simulated_data.md'
 - API:
-    - CPM Regression: api/cpm_regression.md
+    - CPM Analysis: api/cpm_regression.md
     - Edge Selection: api/edge_selection.md
     - Models: api/models.md
-    - Fold: api/fold.md
+    - Inner Fold: api/fold.md
     - Results Manager: api/results_manager.md
 
 extra_css:

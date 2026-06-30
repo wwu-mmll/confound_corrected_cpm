@@ -1,6 +1,8 @@
 import os
+import math
 import numpy as np
 import pandas as pd
+import torch
 
 from sklearn.utils import check_X_y
 from sklearn.impute import SimpleImputer
@@ -15,12 +17,82 @@ import warnings
 import logging
 
 from cccpm.reporting.plots.plots import pairplot_flexible
+from cccpm.constants import TaskType
 
 
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", category=ConstantInputWarning)
 warnings.filterwarnings("ignore", category=NearConstantInputWarning)
+
+
+def detect_task_type(y):
+    """
+    Automatically detect whether the task is regression or classification.
+
+    Args:
+        y: Target variable (array-like)
+
+    Returns:
+        TaskType.regression or TaskType.classification
+
+    Raises:
+        ValueError: If y is not suitable for either regression or binary classification
+    """
+    y_arr = np.asarray(y).ravel()
+
+    # Get unique values
+    unique_vals = np.unique(y_arr[~np.isnan(y_arr)])  # Exclude NaNs
+
+    # Check if binary (exactly 2 unique values)
+    if len(unique_vals) == 2:
+        # Check if values are 0/1 or -1/1
+        if set(unique_vals) == {0, 1} or set(unique_vals) == {-1, 1}:
+            logger.info(f"Detected binary classification task (unique values: {unique_vals})")
+            return TaskType.classification
+        else:
+            # Two unique values but not standard binary encoding
+            logger.warning(
+                f"Target has only 2 unique values {unique_vals} but not in {0,1} or {-1,1} format. "
+                f"Treating as regression. For classification, please encode as 0/1."
+            )
+            return TaskType.regression
+
+    # More than 2 unique values -> regression
+    elif len(unique_vals) > 2:
+        logger.info(f"Detected regression task ({len(unique_vals)} unique values)")
+        return TaskType.regression
+
+    # Less than 2 unique values (constant target)
+    else:
+        raise ValueError(
+            f"Target variable has only {len(unique_vals)} unique value(s): {unique_vals}. "
+            f"Cannot perform prediction with constant target."
+        )
+
+
+def validate_task_type(y, task_type):
+    """
+    Validate that the specified task type matches the target variable.
+
+    Args:
+        y: Target variable (array-like)
+        task_type: Specified TaskType
+
+    Raises:
+        ValueError: If task_type doesn't match the data
+    """
+    detected_task = detect_task_type(y)
+
+    if task_type != detected_task:
+        y_arr = np.asarray(y).ravel()
+        unique_vals = np.unique(y_arr[~np.isnan(y_arr)])
+        raise ValueError(
+            f"Specified task_type='{task_type}' but detected '{detected_task}' "
+            f"from target variable (unique values: {unique_vals}). "
+            f"Please check your data or task_type specification."
+        )
+
 
 def train_test_split(train, test, X, y, covariates):
     return X[train], X[test], y[train], y[test], covariates[train], covariates[test]
@@ -122,6 +194,157 @@ def vector_to_matrix_3d(vector_2d, shape):
 
     return matrix_3d
 
+
+def vector_to_matrix_tensor_version(tensor, dim):
+    """
+    Expands a specific dimension containing vectorised upper-triangular edges
+    into a symmetric square matrix at that same location.
+
+    Args:
+        tensor: Arbitrary shape, e.g. [Networks, Folds, Features, Perms]
+        dim: The index of the dimension to expand (e.g., 2 for Features)
+
+    Returns:
+        Tensor with 'dim' replaced by two dimensions (Nodes, Nodes).
+        Example: [Net, Fold, Feat, Perm] -> [Net, Fold, Nodes, Nodes, Perm]
+    """
+    # 1. Normalize dim to positive index (handles -1, etc.)
+    ndim = tensor.ndim
+    dim = dim % ndim
+
+    # 2. Calculate Number of Nodes
+    # Formula: F = N(N-1)/2  =>  N = (1 + sqrt(1 + 8F)) / 2
+    n_features = tensor.shape[dim]
+    n_nodes = int((1 + (1 + 8 * n_features) ** 0.5) / 2)
+
+    # 3. Move the target dimension to the end for easier broadcasting
+    # shape: [..., Features]
+    temp_tensor = tensor.movedim(dim, -1)
+
+    # 4. Create the Output Placeholder
+    # shape: [..., Nodes, Nodes]
+    out_shape = temp_tensor.shape[:-1] + (n_nodes, n_nodes)
+    out = torch.zeros(out_shape, device=tensor.device, dtype=tensor.dtype)
+
+    # 5. Get Upper Triangle Indices
+    rows, cols = torch.triu_indices(n_nodes, n_nodes, offset=1, device=tensor.device)
+
+    # 6. Assign Values (Vectorized)
+    # The '...' ellipses handle any number of preceding dimensions automatically
+    out[..., rows, cols] = temp_tensor
+
+    # 7. Make Symmetric
+    out[..., cols, rows] = temp_tensor
+
+    # 8. Move the Matrix dimensions back to the original location
+    # We moved 'dim' to the end. Now we have two dims at the end (-2, -1).
+    # We want to put them back at 'dim' and 'dim+1'.
+    return out.movedim((-2, -1), (dim, dim + 1))
+
+
+import torch
+
+
+def matrix_to_vector_tensor_version(tensor, dim):
+    """
+    Collapses two adjacent dimensions (representing a symmetric matrix)
+    into a single dimension containing the upper-triangular edges.
+
+    Args:
+        tensor: Arbitrary shape, e.g. [Net, Fold, Nodes, Nodes, Perm]
+        dim: The index of the first of the two matrix dimensions.
+
+    Returns:
+        Tensor with [dim, dim+1] replaced by a single dimension of size Features.
+        Example: [Net, Fold, Nodes, Nodes, Perm] -> [Net, Fold, Features, Perm]
+    """
+    # 1. Normalize dim to positive index
+    ndim = tensor.ndim
+    dim = dim % ndim
+
+    # 2. Identify Matrix Size (N)
+    n_nodes = tensor.shape[dim]
+    if n_nodes != tensor.shape[dim + 1]:
+        raise ValueError(f"Dimensions at {dim} and {dim + 1} must be square.")
+
+    # 3. Move the target dimensions to the end for indexing
+    # Current: [..., Nodes, Nodes, ...] -> [..., Nodes, Nodes]
+    # We move dim and dim+1 to the last two positions
+    temp_tensor = tensor.movedim((dim, dim + 1), (-2, -1))
+
+    # 4. Get Upper Triangle Indices (matching your offset=1)
+    rows, cols = torch.triu_indices(n_nodes, n_nodes, offset=1, device=tensor.device)
+
+    # 5. Extract Values
+    # Indexing with [..., rows, cols] returns a tensor where the last
+    # two dimensions are flattened into the length of the indices.
+    out = temp_tensor[..., rows, cols]
+
+    # 6. Move the collapsed dimension back to the original 'dim' position
+    # After step 5, the new "Features" dimension is at the very end (-1).
+    return out.movedim(-1, dim)
+
+
+
+def vector_to_matrix_numpy(array, dim):
+    """
+    Expands a dimension containing vectorized upper-triangular edges
+    into a symmetric square matrix.
+    """
+    # 1. Normalize dim
+    ndim = array.ndim
+    dim = dim % ndim
+
+    # 2. Calculate Number of Nodes
+    n_features = array.shape[dim]
+    n_nodes = int((1 + np.sqrt(1 + 8 * n_features)) / 2)
+
+    # 3. Move target dimension to the end
+    temp_array = np.moveaxis(array, dim, -1)
+
+    # 4. Create Output Placeholder
+    out_shape = temp_array.shape[:-1] + (n_nodes, n_nodes)
+    out = np.zeros(out_shape, dtype=array.dtype)
+
+    # 5. Get Upper Triangle Indices (k=1 excludes diagonal)
+    rows, cols = np.triu_indices(n_nodes, k=1)
+
+    # 6. Assign Values
+    # NumPy advanced indexing allows assigning to the last two dims at once
+    out[..., rows, cols] = temp_array
+
+    # 7. Make Symmetric
+    out[..., cols, rows] = temp_array
+
+    # 8. Move the Matrix dimensions back to the original location
+    return np.moveaxis(out, (-2, -1), (dim, dim + 1))
+
+def matrix_to_vector_numpy(array, dim):
+    """
+    Collapses two adjacent dimensions of a NumPy array into a
+    single dimension of upper-triangular elements.
+    """
+    ndim = array.ndim
+    dim = dim % ndim
+
+    n_nodes = array.shape[dim]
+    if n_nodes != array.shape[dim + 1]:
+        raise ValueError(f"Dimensions at {dim} and {dim + 1} must be square.")
+
+    # 1. Move target dimensions to the end
+    temp_array = np.moveaxis(array, (dim, dim + 1), (-2, -1))
+
+    # 2. Get Upper Triangle Indices
+    rows, cols = np.triu_indices(n_nodes, k=1)
+
+    # 3. Extract Values
+    # In NumPy, trailing indices work slightly differently with '...'
+    # We slice the last two dimensions using the coordinate pairs
+    out = temp_array[..., rows, cols]
+
+    # 4. Move the new vector dimension back to the original 'dim'
+    return np.moveaxis(out, -1, dim)
+
 def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     """
     Get a set of distinct colors from a specified colormap.
@@ -136,6 +359,22 @@ def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     cmap = plt.get_cmap(colormap_name)
     colors = [cmap(i / (n_colors - 1)) for i in range(n_colors)]
     return colors
+
+
+def infer_n_nodes(n_features: int):
+    """
+    Return the number of nodes ``n`` for which ``n * (n - 1) / 2 == n_features``,
+    i.e. the connectome size whose upper triangle has exactly ``n_features`` edges.
+
+    Returns ``None`` if ``n_features`` is not a valid upper-triangular edge count.
+    """
+    if n_features is None or n_features < 1:
+        return None
+    discriminant = 1 + 8 * n_features
+    root = math.isqrt(discriminant)
+    if root * root != discriminant or (1 + root) % 2 != 0:
+        return None
+    return (1 + root) // 2
 
 
 def check_data(X, y, covariates, impute_missings: bool = False):
@@ -165,12 +404,37 @@ def check_data(X, y, covariates, impute_missings: bool = False):
         2D array of covariates.
     """
     # Convert to numpy for dimension checks
+    if isinstance(X, torch.Tensor):
+        X = X.detach().cpu().numpy()
+    if isinstance(y, torch.Tensor):
+        y = y.detach().cpu().numpy()
+    if isinstance(covariates, torch.Tensor):
+        covariates = covariates.detach().cpu().numpy()
     X_arr = np.asarray(X)
     # Handle 3D connectivity matrices
     if X_arr.ndim == 3:
         X_arr = matrix_to_vector_3d(X_arr)
     elif X_arr.ndim != 2:
         raise ValueError(f"X must be 2D or 3D, got shape {X_arr.shape}")
+
+    # Connectome features must be the upper triangle of a symmetric node-by-node
+    # matrix, i.e. n_features == n_nodes * (n_nodes - 1) / 2. Otherwise edge
+    # selection/stability cannot map edges back to a connectome and the run would
+    # later fail with a cryptic shape-mismatch error. Fail fast with a clear message.
+    n_features = X_arr.shape[1]
+    if infer_n_nodes(n_features) is None:
+        n_lower = int((1 + (1 + 8 * n_features) ** 0.5) / 2)
+        lower = n_lower * (n_lower - 1) // 2
+        upper = (n_lower + 1) * n_lower // 2
+        raise ValueError(
+            f"X has {n_features} features, which is not a valid connectome size. "
+            f"CCCPM expects the upper-triangular edges of a symmetric node-by-node "
+            f"connectome, i.e. n_features = n_nodes * (n_nodes - 1) / 2. "
+            f"The nearest valid sizes are {lower} ({n_lower} nodes) and "
+            f"{upper} ({n_lower + 1} nodes). Alternatively, pass connectivity "
+            f"matrices of shape (n_samples, n_nodes, n_nodes) and CCCPM will "
+            f"vectorize them for you."
+        )
 
     # Ensure y is 1D vector
     y_arr = np.asarray(y)
@@ -291,6 +555,12 @@ def generate_data_insights(X, y, covariates, results_directory):
                 covariates.columns = ["covariate 1"]
 
     # --- Combine all data to check for missing values ---
+    if isinstance(X, torch.Tensor):
+        X = pd.DataFrame(X.detach().cpu().numpy())
+    if isinstance(y, torch.Tensor):
+        y = pd.Series(y.detach().cpu().numpy(), name="target")
+    if isinstance(covariates, torch.Tensor):
+        covariates = pd.DataFrame(covariates.detach().cpu().numpy())
     full_data = pd.concat([X, y.rename("target"), covariates], axis=1)
     missing_total = full_data.isnull().sum().sum()
 

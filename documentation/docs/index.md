@@ -2,8 +2,8 @@
 # Confound-Corrected Connectome-Based Predictive Modeling (CCCPM)
 [![GitHub Workflow Status](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/test.yml/badge.svg)](https://github.com/wwu-mmll/confound_corrected_cpm/actions/workflows/test.yml)
 [![Coverage Status](https://coveralls.io/repos/github/wwu-mmll/confound_corrected_cpm/badge.svg)](https://coveralls.io/github/wwu-mmll/confound_corrected_cpm)
-[![Github Contributors](https://img.shields.io/github/contributors-anon/wwu-mmll/cpm_python?color=blue)](https://github.com/wwu-mmll/cpm_python/graphs/contributors)
-[![Github Commits](https://img.shields.io/github/commit-activity/y/wwu-mmll/cpm_python)](https://github.com/wwu-mmll/cpm_python/commits/main)
+[![Github Contributors](https://img.shields.io/github/contributors-anon/wwu-mmll/confound_corrected_cpm?color=blue)](https://github.com/wwu-mmll/confound_corrected_cpm/graphs/contributors)
+[![Github Commits](https://img.shields.io/github/commit-activity/y/wwu-mmll/confound_corrected_cpm)](https://github.com/wwu-mmll/confound_corrected_cpm/commits/main)
 
 CCCPM is a newly developed Python toolbox designed specifically for researchers in psychiatry and neuroscience to 
 perform connectome-based predictive modeling. This package offers a comprehensive framework for building predictive 

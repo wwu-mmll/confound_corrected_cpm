@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide will help you get started with running an analysis using the `CPMRegression` class. It provides a step-by-step description of how to set up, configure, and execute an analysis, along with explanations of the inputs and parameters.
+This guide will help you get started with running an analysis using the `CPMAnalysis` class. It provides a step-by-step description of how to set up, configure, and execute an analysis, along with explanations of the inputs and parameters. `CPMAnalysis` supports both **regression** and **binary classification**; the task type is auto-detected from your target variable or can be set explicitly with `task_type`.
 
 ---
 
@@ -19,7 +19,7 @@ Ensure that all inputs have consistent sample sizes (`n_samples`).
 ## Step 2: Configure the Analysis
 
 ### **Cross-Validation**
-The `CPMRegression` class uses an outer cross-validation loop for performance evaluation and an optional inner cross-validation loop for hyperparameter optimization.
+The `CPMAnalysis` class uses an outer cross-validation loop for performance evaluation and an optional inner cross-validation loop for hyperparameter optimization.
 
 - **Outer CV (`cv`)**: Defines the cross-validation strategy (e.g., `KFold`).
 - **Inner CV (`inner_cv`)**: Used for optimizing hyperparameters during edge selection. Can be left as `None` if not needed.
@@ -54,22 +54,21 @@ Choose from the following methods for computing edge statistics:
 Example:
 
 ```python
-from src.cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm import UnivariateEdgeSelection, PThreshold
 
-edge_statistic = 'pearson'
 univariate_edge_selection = UnivariateEdgeSelection(
-    edge_statistic=[edge_statistic],
+    edge_statistic='pearson',
     edge_selection=[PThreshold(threshold=[0.05], correction=['fdr_by'])]
 )
 ```
 
-## Step 3: Set Up the CPMRegression Object
-Create an instance of the CPMRegression class with the required inputs:
+## Step 3: Set Up the CPMAnalysis Object
+Create an instance of the `CPMAnalysis` class with the required inputs:
 
 ```python
-from src.cccpm.cpm_analysis import CPMRegression
+from cccpm import CPMAnalysis
 
-cpm = CPMRegression(
+cpm = CPMAnalysis(
     results_directory="results/",
     cv=outer_cv,
     inner_cv=inner_cv,  # Optional
@@ -91,7 +90,7 @@ cpm = CPMRegression(
 - **n_permutations**: Number of permutations for permutation testing.
 
 ## Step 4: Run the Analysis
-Call the estimate method to perform the analysis:
+Call the `run` method to perform the analysis:
 
 ```python
 X = ...  # Load your connectome data (numpy array or pandas DataFrame)
@@ -118,4 +117,4 @@ After the analysis, you can find the results in the results_directory, including
 You can load and inspect these results for further analysis.
 
 ---
-By following these steps, you can quickly set up and execute a connectome-based predictive modeling analysis using the CPMRegression class. For further customization, refer to the API documentation.
+By following these steps, you can quickly set up and execute a connectome-based predictive modeling analysis using the `CPMAnalysis` class. For further customization, refer to the API documentation.

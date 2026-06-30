@@ -162,9 +162,11 @@ cython_debug/
 
 examples/tmp
 examples/simulated_data
+examples/results
 tests/tmp
 
 poetry.lock
 src/cccpm/simulation/simulation_results
+.claude
 
 *.DS_Store

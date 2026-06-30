@@ -21,10 +21,14 @@ jobs:
         with:
           python-version: "3.11"   # or your preferred version
 
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+
       - name: Install dependencies
         run: |
-          pip install mkdocs mkdocs-material mkdocstrings[python] photonai
+          poetry install --with docs
 
       - name: Build and deploy
         run: |
-          mkdocs gh-deploy --force
+          poetry run mkdocs gh-deploy --force

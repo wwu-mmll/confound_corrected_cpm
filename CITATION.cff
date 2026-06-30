@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use CCCPM in your research, please cite it as below."
+title: "CCCPM: Confound-Corrected Connectome-based Predictive Modeling"
+abstract: >-
+  A Python package for connectome-based predictive modeling (CPM) supporting
+  regression and binary classification, with rigorous confound control, nested
+  cross-validation, edge-stability selection, and permutation-based significance
+  testing.
+type: software
+authors:
+  - family-names: Winter
+    given-names: Nils
+    affiliation: "Machine Learning in Mental Health Lab, University of Münster"
+  - family-names: Howe
+    given-names: Juraj
+    affiliation: "Machine Learning in Mental Health Lab, University of Münster"
+version: 0.3.0
+license: MIT
+repository-code: "https://github.com/wwu-mmll/confound_corrected_cpm"
+url: "https://wwu-mmll.github.io/confound_corrected_cpm/"
+keywords:
+  - connectome
+  - predictive modeling
+  - neuroimaging
+  - CPM
+  - machine learning
+  - psychiatry

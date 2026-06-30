@@ -36,7 +36,8 @@ def apply_nature_style():
 def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     apply_nature_style()
 
-    df = df[df['model'].isin(['connectome', 'residuals', 'full'])]
+    #df = df[df['model'].isin(['connectome', 'residuals', 'full'])]
+    df = df[df['model'].isin(['connectome'])]
 
     def regplot_colored(data, **kwargs):
         color = COLOR_MAP.get(data['network'].iloc[0], "#000000")
@@ -48,7 +49,7 @@ def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
             **kwargs
         )
 
-    g = sns.FacetGrid(df, row="model", col="network", margin_titles=True, height=1.5, aspect=1)
+    g = sns.FacetGrid(df, row="network", col="model", margin_titles=True, height=1.5, aspect=1)
     g.map_dataframe(regplot_colored)
     g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
     g.set_xlabels(y_name)
@@ -270,6 +271,98 @@ def boxplot_model_performance(
     fig.savefig(png_path, dpi=600, bbox_inches="tight")
     fig.savefig(pdf_path, bbox_inches="tight")
     fig.savefig(svg_path, bbox_inches="tight")
+
+    return png_path
+
+
+def boxplot_models(
+    df: pd.DataFrame,
+    metric: str,
+    results_folder: str,
+    models: list[str],
+    filename_suffix: str = ""
+) -> str:
+    """
+    Creates a horizontal boxplot comparing models across network types.
+
+    Parameters:
+        df: Input dataframe.
+        metric: Name of the column to be plotted on the x-axis.
+        results_folder: Output folder path.
+        models: List of model names to include (e.g. ['increment'] or others).
+        filename_suffix: Optional string to append to the output filename.
+    """
+    apply_nature_style()
+
+    df = df[df["model"].isin(models)]
+
+    # Adjust figure size based on model count
+    fig, ax = plt.subplots(figsize=(3, 2))
+
+    sns.boxplot(
+        data=df,
+        y=metric,
+        x="network",
+        orient="v",
+        fliersize=2,
+        linewidth=0.5,
+        width=0.3,
+        ax=ax
+    )
+
+    if metric in ["pearson_score", "spearman_score", "explained_variance_score"]:
+        ax.axhline(y=0, color="black", linewidth=0.5)
+        ax.set_ylim(-0.3, 1)
+
+    ax.set_ylabel(metric.replace("_", " "))
+    ax.set_xlabel("network")
+    sns.despine(ax=ax)
+
+    # Save plot
+    suffix = f"_{filename_suffix}" if filename_suffix else ""
+    png_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.png")
+    pdf_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.pdf")
+    svg_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.svg")
+    fig.tight_layout(pad=0.2)
+    fig.savefig(png_path, dpi=600, bbox_inches="tight")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(svg_path, bbox_inches="tight")
+
+    return png_path
+
+def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
+    """
+    Generate a strip/swarm plot of predicted probabilities by true class for classification.
+    """
+    apply_nature_style()
+
+    df = df[df['model'].isin(['connectome'])]
+
+    def stripplot_colored(data, **kwargs):
+        color = COLOR_MAP.get(data['network'].iloc[0], "#000000")
+        kwargs.pop('color', None)
+        sns.stripplot(
+            data=data,
+            x="y_true", y="y_pred",
+            jitter=0.2, alpha=0.7, size=3, edgecolor="white", linewidth=0.3,
+            color=color,
+            **kwargs
+        )
+        ax = plt.gca()
+        ax.axhline(y=0.5, color="gray", linewidth=0.5, linestyle="--")
+
+    g = sns.FacetGrid(df, row="network", col="model", margin_titles=True, height=1.5, aspect=1)
+    g.map_dataframe(stripplot_colored)
+    g.set_titles(col_template="{col_name}", row_template="{row_name}", size=7)
+    g.set_xlabels(f"true {y_name}")
+    g.set_ylabels("predicted probability")
+    sns.despine(trim=True)
+    g.fig.tight_layout(pad=0.5)
+
+    png_path = os.path.join(results_folder, "predictions_classification.png")
+    pdf_path = os.path.join(results_folder, "predictions_classification.pdf")
+    g.fig.savefig(png_path, dpi=600, bbox_inches="tight")
+    g.fig.savefig(pdf_path, bbox_inches="tight")
 
     return png_path
 

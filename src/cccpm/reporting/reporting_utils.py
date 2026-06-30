@@ -119,6 +119,6 @@ def load_data_from_folder(folder_path, filename):
 def load_results_from_folder(folder_path, filename):
     csv_path = os.path.join(folder_path, filename)
     if os.path.exists(csv_path):
-        return pd.read_csv(csv_path, header=[0, 1], index_col=[0, 1])
+        return pd.read_csv(csv_path, header=[0, 1], index_col=[0, 1, 2])
     else:
         raise RuntimeError(f"No CSV file found at path: {csv_path}")
