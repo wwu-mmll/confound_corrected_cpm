@@ -9,28 +9,95 @@ import matplotlib.gridspec as gridspec
 
 from pandas.api.types import is_numeric_dtype
 
-
-# Shared plotting settings
-COLOR_MAP = {
-    "positive": "#FF5768",
-    "negative": "#6C88C4",
-    "both": "#d6d6d6"
-}
+from cccpm.reporting.plots.figure_style import (
+    COLOR_MAP,
+    PANEL,
+    SQUARE,
+    WIDE,
+    WIDE_TALL,
+    apply_nature_style,
+    save_figure,
+)
 
 MODEL_ORDER = ["covariates", "connectome", "full", "residuals", "increment"]
 
-def apply_nature_style():
-    sns.set_theme(style="white")
-    mpl.rcParams.update({
-        "font.size": 7,
-        "axes.labelsize": 7,
-        "axes.titlesize": 7,
-        "xtick.labelsize": 6,
-        "ytick.labelsize": 6,
-        "lines.linewidth": 0.75,
-        "axes.linewidth": 0.5,
-        "legend.fontsize": 6
-    })
+
+def scatter_plot_main(
+    df: pd.DataFrame,
+    results_folder: str,
+    y_name,
+    task_type: str = "regression",
+    model: str = "connectome",
+    network: str = "both",
+    annotate_value: float | None = None,
+    annotate_label: str = "r",
+    annotate_p: str | None = None,
+    name: str = "hero_scatter",
+) -> str:
+    """
+    Single square predicted-vs-observed panel for the summary section.
+
+    Regression: scatter + identity line + annotated effect size (and p).
+    Classification: predicted probability stripped by true class + 0.5 line.
+
+    If *annotate_value* is given it is shown verbatim (e.g. the cross-validated
+    mean r reported in the hero verdict, so the two agree); otherwise the pooled
+    correlation across all plotted points is computed and shown. The data area is
+    forced square (equal x/y) via ``set_box_aspect``.
+    """
+    apply_nature_style()
+
+    sub = df[(df["model"] == model) & (df["network"] == network)]
+    if sub.empty:
+        sub = df[df["model"] == model]
+
+    color = COLOR_MAP.get(network, "#000000")
+    fig, ax = plt.subplots(figsize=SQUARE)
+
+    if task_type == "classification":
+        sns.stripplot(
+            data=sub, x="y_true", y="y_pred",
+            jitter=0.2, alpha=0.7, size=4, edgecolor="white", linewidth=0.3,
+            color=color, ax=ax,
+        )
+        ax.axhline(y=0.5, color="gray", linewidth=0.5, linestyle="--")
+        ax.set_xlabel(f"true {y_name}")
+        ax.set_ylabel("predicted probability")
+    else:
+        sns.regplot(
+            data=sub, x="y_true", y="y_pred",
+            scatter_kws={"alpha": 0.7, "s": 16, "edgecolor": "white", "color": color},
+            line_kws={"color": color, "linewidth": 1.0},
+            ax=ax,
+        )
+        # Identity line (perfect prediction reference)
+        lims = [
+            min(sub["y_true"].min(), sub["y_pred"].min()),
+            max(sub["y_true"].max(), sub["y_pred"].max()),
+        ]
+        ax.plot(lims, lims, color="gray", linewidth=0.5, linestyle="--", zorder=0)
+        ax.set_xlabel(y_name)
+        ax.set_ylabel(f"predicted {y_name}")
+
+    # Effect-size annotation (r, with p underneath when provided).
+    if annotate_value is not None:
+        eff = f"{annotate_label} = {annotate_value:.2f}"
+    elif task_type != "classification":
+        eff = f"{annotate_label} = {sub['y_true'].corr(sub['y_pred']):.2f}"
+    else:
+        eff = ""
+    if eff:
+        ax.annotate(eff, xy=(0.05, 0.93), xycoords="axes fraction",
+                    fontsize=8, fontweight="bold", color=color)
+    if annotate_p:
+        ax.annotate(annotate_p, xy=(0.05, 0.84), xycoords="axes fraction",
+                    fontsize=7, color=color)
+
+    # Force a square data area so x and y get equal space.
+    ax.set_box_aspect(1)
+    sns.despine(ax=ax)
+    fig.tight_layout(pad=0.4)
+    return save_figure(fig, os.path.join(results_folder, name))
 
 
 def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
@@ -57,12 +124,7 @@ def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
-    png_path = os.path.join(results_folder, "predictions.png")
-    pdf_path = os.path.join(results_folder, "predictions.pdf")
-    g.fig.savefig(png_path, dpi=600, bbox_inches="tight")
-    g.fig.savefig(pdf_path, bbox_inches="tight")
-
-    return png_path
+    return save_figure(g.fig, os.path.join(results_folder, "predictions"))
 
 
 def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name) -> str:
@@ -93,14 +155,9 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name)
     ax.set_xlabel(y_name)
     ax.set_ylabel(f"predicted {y_name}")
     ax.set_title('covariates')
-    png_path = os.path.join(results_folder, "scatter_covariates.png")
-    pdf_path = os.path.join(results_folder, "scatter_covariates.pdf")
     plt.tight_layout(pad=0.5)
-    # This makes the figure 10x10 inches
-    fig.savefig(png_path, dpi=600)
-    fig.savefig(pdf_path)
 
-    return png_path
+    return save_figure(fig, os.path.join(results_folder, "scatter_covariates"))
 
 
 def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
@@ -149,13 +206,7 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) 
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
-    # Save
-    png_path = os.path.join(results_folder, "histograms_network_strengths.png")
-    pdf_path = os.path.join(results_folder, "histograms_network_strengths.pdf")
-    g.fig.savefig(png_path, dpi=600, bbox_inches="tight")
-    g.fig.savefig(pdf_path, bbox_inches="tight")
-
-    return png_path
+    return save_figure(g.fig, os.path.join(results_folder, "histograms_network_strengths"))
 
 
 def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
@@ -199,13 +250,7 @@ def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
-    # Save
-    png_path = os.path.join(results_folder, "scatter_network_strengths.png")
-    pdf_path = os.path.join(results_folder, "scatter_network_strengths.pdf")
-    g.fig.savefig(png_path, dpi=600, bbox_inches="tight")
-    g.fig.savefig(pdf_path, bbox_inches="tight")
-
-    return png_path
+    return save_figure(g.fig, os.path.join(results_folder, "scatter_network_strengths"))
 
 def boxplot_model_performance(
     df: pd.DataFrame,
@@ -264,15 +309,8 @@ def boxplot_model_performance(
     )
     # Save plot
     suffix = f"_{filename_suffix}" if filename_suffix else ""
-    png_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.png")
-    pdf_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.pdf")
-    svg_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.svg")
     fig.tight_layout(pad=0.2)
-    fig.savefig(png_path, dpi=600, bbox_inches="tight")
-    fig.savefig(pdf_path, bbox_inches="tight")
-    fig.savefig(svg_path, bbox_inches="tight")
-
-    return png_path
+    return save_figure(fig, os.path.join(results_folder, f"boxplot_{metric}{suffix}"))
 
 
 def boxplot_models(
@@ -320,15 +358,62 @@ def boxplot_models(
 
     # Save plot
     suffix = f"_{filename_suffix}" if filename_suffix else ""
-    png_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.png")
-    pdf_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.pdf")
-    svg_path = os.path.join(results_folder, f"boxplot_{metric}{suffix}.svg")
     fig.tight_layout(pad=0.2)
-    fig.savefig(png_path, dpi=600, bbox_inches="tight")
-    fig.savefig(pdf_path, bbox_inches="tight")
-    fig.savefig(svg_path, bbox_inches="tight")
+    return save_figure(fig, os.path.join(results_folder, f"boxplot_{metric}{suffix}"))
 
-    return png_path
+
+def performance_grid(
+    df: pd.DataFrame,
+    metrics: list[str],
+    results_folder: str,
+    models: list[str] | None = None,
+) -> str:
+    """
+    One faceted small-multiples figure summarising model performance.
+
+    Metrics are columns; models are on the y-axis; network is the hue. This
+    replaces the previous one-figure-per-metric stack with a single panel that
+    makes the model x network x metric comparison legible at a glance.
+    """
+    apply_nature_style()
+
+    if models is None:
+        models = [m for m in MODEL_ORDER if m in df["model"].unique()]
+
+    long = df.melt(
+        id_vars=[c for c in ["model", "network", "fold", "run"] if c in df.columns],
+        value_vars=[m for m in metrics if m in df.columns],
+        var_name="metric",
+        value_name="value",
+    )
+    long = long[long["model"].isin(models)]
+    long["metric"] = long["metric"].str.replace("_", " ")
+
+    g = sns.catplot(
+        data=long,
+        kind="box",
+        y="model", x="value", hue="network",
+        col="metric",
+        order=models,
+        hue_order=["positive", "negative", "both"],
+        palette=COLOR_MAP,
+        orient="h",
+        fliersize=1.5,
+        linewidth=0.5,
+        width=0.6,
+        height=2.6,
+        aspect=0.7,
+        sharex=False,
+        legend_out=True,
+    )
+    g.set_titles(col_template="{col_name}", size=7)
+    g.set_axis_labels("", "")
+    for ax in g.axes.flat:
+        sns.despine(ax=ax)
+    g.fig.tight_layout(pad=0.3)
+
+    return save_figure(g.fig, os.path.join(results_folder, "performance_grid"))
+
 
 def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
@@ -359,12 +444,7 @@ def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -
     sns.despine(trim=True)
     g.fig.tight_layout(pad=0.5)
 
-    png_path = os.path.join(results_folder, "predictions_classification.png")
-    pdf_path = os.path.join(results_folder, "predictions_classification.pdf")
-    g.fig.savefig(png_path, dpi=600, bbox_inches="tight")
-    g.fig.savefig(pdf_path, bbox_inches="tight")
-
-    return png_path
+    return save_figure(g.fig, os.path.join(results_folder, "predictions_classification"))
 
 
 def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
@@ -424,7 +504,19 @@ def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
             ax.tick_params(axis='both', labelsize=6)
             sns.despine(ax=ax)
 
-    #plt.tight_layout()
-    fig.savefig(output_path, dpi=600)
+    # Reduce label collisions: only show tick labels on the outer edge
+    # (bottom row for x, left column for y), like a conventional pairplot.
+    for i in range(n):
+        for j in range(n):
+            ax = axes[i, j]
+            if i != n - 1:
+                ax.set_xticklabels([])
+                ax.set_xlabel("")
+            if j != 0:
+                ax.set_yticklabels([])
+                ax.set_ylabel("")
+
+    fig.tight_layout(pad=0.4)
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return output_path

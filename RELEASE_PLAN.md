@@ -233,13 +233,29 @@ artifact a run produces, grounded in the actual output files, for both task type
 ## Phase 5 — HTML report polish (Nils-driven, visual)
 You'll own the visual decisions; I can support structure + iteration speed.
 
-- [ ] Set up a fast iteration loop: a script that regenerates the report from a fixed
-      fixture and opens it, so visual changes are a few seconds to preview.
-- [ ] Make plots/theming configurable; ensure the report is self-contained & portable
-      (assets embedded or relative), works offline.
-- [ ] Add explanatory captions so a researcher unfamiliar with the internals can read
-      it; consistent terminology with the docs.
-- [ ] Accessibility / print-friendliness pass.
+**Done on branch `html-report-redesign` (off `develop`).** Replaced arakawa with a
+custom Jinja2 + CSS report (self-contained, offline), then a full visual redesign:
+- [x] Fast iteration loop: `scripts/preview_report.py` regenerates the report from a
+      fixed fixture (`--results`, `--atlas`, `--no-open`) and opens it.
+- [x] Self-contained & portable: all figures are inline vector **SVG** (brain renders
+      base64 PNG); report works offline. New `plots/figure_style.py` standardises figure
+      sizes + palette + SVG output (root-cause fix for mismatched/blurry figures). Report
+      shrank 1.88 MB → ~0.8 MB.
+- [x] **Hero + inverted-pyramid layout**: Summary (one-sentence verdict + stat chips +
+      headline scatter) → Model Comparison (one faceted figure + APA table) → Predictions
+      → Network Strengths → Brain & Edges → Stable Edges → Data & Methods appendix.
+      Restored the dropped Hyperparameters section.
+- [x] **Neuroscience figures written into CCCPM** (`plots/brain_figures.py`,
+      `plots/connectome_utils.py`): connectivity matrix, network-summary matrix, chord
+      (pycirclize), node-degree/hub — glass-brain kept. Designed for later extraction into
+      `wwu-mmll/brainplots` (deferred). Added `tests/fixtures/atlas_30.csv` + smoke tests.
+- [x] Explanatory captions embedded in each section (terminology aligned with
+      `interpreting_results.md`).
+- [~] Accessibility / print-friendliness: `@media print` stylesheet in place (hides
+      sidebar, page-breaks sections); a full a11y audit is still deferred.
+- [ ] **Later (deferred, discussed w/ Nils):** move the brain figures into the
+      `wwu-mmll/brainplots` toolbox and make it a PyPI package; then have CCCPM depend on
+      it (likely an optional `cccpm[plots]` extra). Not done now — code lives in CCCPM.
 
 ## Phase 6 — Release
 - [ ] Final version bump + CHANGELOG entry.
