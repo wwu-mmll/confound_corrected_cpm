@@ -83,7 +83,7 @@ You don't trust the tests; turn 115 green checks into real confidence.
         `semi_partial_correlation*` helpers. ~150 lines of branchy correlation code gone.
         Logistic GLM deliberately NOT used for selection (no closed form, FWL fails →
         would need batched IRLS); logistic stays in the model-fitting stage (`LinearCPM`).
-  - [ ] **FDR / multiple-comparison correction — DISCUSSION PENDING (Open decisions #8).**
+  - [ ] **FDR / multiple-comparison correction — DISCUSSION PENDING (Open decisions #7).**
         Whether/which correction to apply by default is an open methods question.
   - [x] **Residualization (`get_residuals`):** validated OLS residualization (intercept
         + pinv) against numpy `lstsq` for both data orientations ([N,features] and
