@@ -46,19 +46,25 @@ So a single number like "Pearson r" is always reported per *(model, network)* pa
 
 ## The HTML report (`report.html`)
 
-`report.html` is a self-contained, shareable summary — open it in any browser. It is
-organised into the following pages:
+`report.html` is a self-contained, shareable summary — open it in any browser, print it
+to PDF, or send it to a collaborator (everything, including the figures, is embedded, so
+it works offline). It is a single scrolling page with a sticky sidebar, organised top-down
+from the headline result to the supporting detail:
 
-| Page | What it shows |
-|------|---------------|
-| **Info** | Run configuration: task type, CV strategy, edge-selection settings, number of permutations, device. |
-| **Data Description** | Names and basic properties of your features, target, and covariates. |
-| **Data Insights** | Target distribution, covariate scatter plots, and a summary of the input data (mirrors the `data_insights/` folder). |
-| **Hyperparameters** | Selected p-thresholds / edge-selection parameters per fold (relevant when using an inner CV). |
-| **Main Results** | The headline performance table and box plots across folds, per model and network. **Start here.** |
-| **Network Strengths** | How the summed positive/negative network strength relates to the target. |
-| **Brain Plots** | Anatomical visualisation of the selected edges (requires `atlas_labels`; otherwise limited). |
-| **Edge Table** | The stable, significant edges with their region labels. |
+| Section | What it shows |
+|---------|---------------|
+| **Summary** | The headline cross-validated result as a one-sentence verdict, key-stat chips (samples, nodes, edges, covariates, permutations, edge p-threshold), and predicted-vs-observed scatter plots for the positive, negative, and both networks plus the covariates-only baseline. Each scatter is annotated with its cross-validated effect size (Pearson *r* / AUC) and permutation *p*. **Start here.** |
+| **Model Comparison** | One faceted figure comparing every model (`connectome`, `covariates`, `full`, `residuals`, `increment`) across metrics and networks, plus the APA results table (mean [SD] with permutation *p*-values). Foregrounds the `increment` model — your confound-control evidence. |
+| **Network Strengths** | How the summed positive/negative network strength relates to the target, and the distribution of strength across participants. |
+| **Brain & Edges** | The predictive edges in the brain: a connectivity matrix, a hub (node-degree) plot, and — when an atlas with a `network` column is supplied — a network-summary matrix and a chord diagram. With node coordinates (`x, y, z`) it also renders a glass-brain view. |
+| **Stable Edges** | The most reliably selected edges (region A — region B) sorted by significance, capped to the top rows per network. |
+| **Data & Methods** | Appendix: target distribution, covariate scatter matrix, the full run configuration, and (with an inner CV) per-fold hyperparameters. |
+
+Every section carries a short always-visible "what this shows" note so a reader unfamiliar
+with the internals can follow it.
+
+You can view a full example report in the
+[Simulated Data example](examples/simulated_data.md).
 
 ---
 
@@ -132,11 +138,11 @@ significance.
 
 ## A reading workflow
 
-1. Open `report.html` → **Main Results**. Look at the `full` and `increment` models on
-   the `both` network.
+1. Open `report.html` → **Summary** for the headline result, then **Model Comparison**.
+   Look at the `full` and `increment` models on the `both` network.
 2. Check `p_values.csv`: is the `increment` model significant? That's your evidence the
    connectome adds information beyond confounds.
-3. Inspect `stability_edges.npy` (or the **Edge Table** page) to see *which* connections
+3. Inspect `stability_edges.npy` (or the **Stable Edges** section) to see *which* connections
    drive the prediction.
 4. Use `cv_predictions.csv` / `cv_results_full.csv` to make your own figures or run
    additional statistics.

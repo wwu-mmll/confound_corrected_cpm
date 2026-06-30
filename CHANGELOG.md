@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-06-30
+
+HTML report redesign.
+
+### Changed
+- **Rebuilt the HTML report on Jinja2 + CSS instead of `arakawa`.** The report is now a
+  single, self-contained, offline page (figures embedded as inline SVG / base64) with a
+  sticky-sidebar table of contents and a print stylesheet. `arakawa` (a ~1.7 MB React
+  bundle) is no longer a dependency.
+- **Redesigned the layout into a top-down narrative**: a **Summary** with a one-sentence
+  verdict, key-stat chips, and predicted-vs-observed scatter plots for the positive /
+  negative / both networks plus the covariates baseline (each annotated with its
+  cross-validated effect size and permutation *p*); **Model Comparison** (one faceted
+  figure + the APA results table); **Network Strengths**; **Brain & Edges**; **Stable
+  Edges**; and a **Data & Methods** appendix. Every section has an always-visible
+  explanatory note, and a design-token-based stylesheet for a consistent look.
+- All report figures are generated at standardized sizes and saved as vector SVG.
+
+### Added
+- **Neuroscience figures** (`cccpm.reporting.plots.brain_figures`): connectivity matrix,
+  network-summary matrix, chord diagram (via `pycirclize`), node-degree/hub plot, and a
+  glass-brain rendering of the stable edges. The matrix and hub plots need no atlas; the
+  network-summary and chord need a `network` column; the glass brain needs node
+  coordinates. New `pycirclize` dependency.
+- `scripts/preview_report.py` to regenerate the report from a fixture for fast iteration,
+  and reporting smoke tests.
+
+### Fixed
+- The glass-brain figure no longer silently disappears (it was loading
+  `sig_stability_*` files the pipeline does not write); it is now built from the
+  stability matrices.
+- The effect size annotated on the summary scatter now matches the hero verdict
+  (cross-validated mean, not the pooled-points correlation).
+
 ## [0.3.0] — 2026-06-30
 
 Release-readiness pass focused on a reliable install, cross-platform support, and
