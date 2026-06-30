@@ -1,4 +1,7 @@
+import base64
 import os
+import re
+from pathlib import Path
 
 import pandas as pd
 
@@ -114,6 +117,48 @@ def load_data_from_folder(folder_path, filename):
         return pd.read_csv(csv_path)
     else:
         raise RuntimeError(f"No CSV file found at path: {csv_path}")
+
+
+def embed_svg(path: str) -> str:
+    """Read an SVG file and return its content as an inline string."""
+    p = Path(path)
+    if not p.exists():
+        return f'<p class="missing-asset">Figure not found: {p.name}</p>'
+    return p.read_text(encoding="utf-8")
+
+
+def embed_image_base64(path: str, mime: str = "image/png") -> str:
+    """Return an <img> tag with the image embedded as a base64 data URI."""
+    p = Path(path)
+    if not p.exists():
+        return f'<p class="missing-asset">Image not found: {p.name}</p>'
+    b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+    return f'<img src="data:{mime};base64,{b64}" style="max-width:100%;" />'
+
+
+def parse_config_block(log_path: str) -> list[tuple[str, str]]:
+    """
+    Parse the configuration block from cpm_log.txt.
+
+    Returns a list of (key, value) pairs in log order.
+    """
+    raw = extract_log_block(log_path)
+    pairs = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^([^:]+):\s*(.*)$", line)
+        if m:
+            pairs.append((m.group(1).strip(), m.group(2).strip()))
+        else:
+            pairs.append((line, ""))
+    return pairs
+
+
+def styler_to_html(styler) -> str:
+    """Render a pandas Styler to an HTML string."""
+    return styler.to_html(escape=False)
 
 
 def load_results_from_folder(folder_path, filename):

@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CCCPM Report — {{ y_name }}</title>
+  <style>
+{{ styles }}
+  </style>
+</head>
+<body>
+
+<div id="layout">
+
+  <!-- ── Sidebar ── -->
+  <aside id="sidebar">
+    <div class="nav-logo">
+      {{ logo_img }}
+    </div>
+    <div class="nav-title">Report sections</div>
+    <nav>
+      <ul>
+        <li><a href="#overview">Summary</a></li>
+        <li><a href="#performance">Model Comparison</a></li>
+        <li><a href="#network-strengths">Network Strengths</a></li>
+        <li><a href="#brain-plots">Brain &amp; Edges</a></li>
+        <li><a href="#stable-edges">Stable Edges</a></li>
+        <li><a href="#appendix">Data &amp; Methods</a></li>
+      </ul>
+    </nav>
+    <div class="nav-footer">
+      <div>CCCPM v{{ version }}</div>
+      <div>generated {{ run_date }}</div>
+    </div>
+  </aside>
+
+  <!-- ── Main content ── -->
+  <main id="content">
+
+    <!-- ── Masthead ── -->
+    <header class="masthead">
+      <h1>CCCPM Report</h1>
+      <div class="subtitle">
+        {{ "Classifying" if task_type == "classification" else "Predicting" }}
+        <strong>{{ y_name }}</strong> from connectome data
+      </div>
+      <div class="meta">v{{ version }} · generated {{ run_date }} ·
+        <a href="https://github.com/wwu-mmll/confound_corrected_cpm" target="_blank">wwu-mmll/confound_corrected_cpm</a>
+      </div>
+    </header>
+
+    <!-- ── 1. Hero / Summary ── -->
+    <section class="report-section" id="overview">
+      <h2>Summary</h2>
+
+      {% if headline %}
+      <div class="headline-callout">{{ headline }}</div>
+      {% endif %}
+
+      <div class="info">
+        <p>
+          The result above is the headline cross-validated number for the main
+          <em>connectome</em> model on the <em>both</em> network. The effect size
+          (Pearson <em>r</em> for regression, AUC for classification) is computed on
+          held-out test folds and <strong>averaged across folds</strong> — the
+          conventional CPM headline number — and the <em>p</em>-value comes from
+          permutation testing. The scatter plots below show every out-of-sample
+          prediction (pooled across folds) for each network, and for the covariates-only
+          model as a baseline the connectome should beat.
+        </p>
+      </div>
+
+      {% if stat_chips %}
+      <div class="stat-chips">
+        {% for label, value in stat_chips %}
+        <div class="stat-chip">
+          <div class="stat-value">{{ value }}</div>
+          <div class="stat-label">{{ label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if hero_scatters %}
+      <div class="scatter-row">
+        {% for s in hero_scatters %}
+        <div class="figure-wrap">
+          {{ s.html }}
+          <p class="caption">{{ s.caption }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- ── 2. Model Comparison ── -->
+    <section class="report-section" id="performance">
+      <h2>Model Comparison</h2>
+      <p class="section-intro">
+        How the model variants compare across metrics and networks. The
+        <em>increment</em> model — the full model minus the covariates-only model — is the
+        key confound-control result: it isolates the predictive value the connectome adds
+        <em>beyond</em> the confounds.
+      </p>
+
+      <div class="info">
+        <p>Each model answers a different question:</p>
+        <ul>
+          <li><strong>connectome</strong> — how well does brain connectivity alone predict?</li>
+          <li><strong>covariates</strong> — the baseline from nuisance variables (age, sex, motion…).</li>
+          <li><strong>full</strong> — connectome + covariates combined (best prediction).</li>
+          <li><strong>residuals</strong> — connectome after removing covariate effects from the target.</li>
+          <li><strong>increment</strong> — the <em>added</em> value of the connectome over covariates
+            (full − covariates). A significant increment is your evidence the connectome carries
+            information the confounds do not.</li>
+        </ul>
+        <p>
+          Colours are the network the edges came from: red = positive, blue = negative,
+          grey = both. Boxes span the outer CV folds; the table gives mean [SD] with
+          permutation <em>p</em>-values (* p&lt;0.05, ** p&lt;0.01).
+        </p>
+      </div>
+
+      {% if performance_grid %}
+      <div class="figure-wrap">
+        {{ performance_grid }}
+        <p class="caption">
+          Performance by model (rows), metric (columns) and network (colour: red positive,
+          blue negative, grey both). Boxes span outer CV folds.
+        </p>
+      </div>
+      {% endif %}
+
+      {% if results_table %}
+      <h3>Results Table</h3>
+      <p class="section-intro">
+        Mean [SD] across outer CV folds. Permutation p-values: * p&lt;0.05, ** p&lt;0.01.
+        Models: <em>connectome</em> (connectivity only), <em>covariates</em> (confounds only),
+        <em>full</em> (connectome + confounds), <em>residuals</em> (residualised connectome),
+        <em>increment</em> (full minus covariates).
+        Networks: <em>positive</em> / <em>negative</em> / <em>both</em>.
+      </p>
+      <div class="table-scroll card">{{ results_table }}</div>
+      {% endif %}
+    </section>
+
+    <!-- ── 3. Network Strengths ── -->
+    <section class="report-section" id="network-strengths">
+      <h2>Network Strengths</h2>
+      <p class="section-intro">
+        Network strength is the sum of all selected edge weights for each participant,
+        separately for the positive and negative networks. A strong correlation with the
+        target variable indicates that the selected edges carry predictive information.
+      </p>
+      <div class="info">
+        <p>
+          For each participant, CCCPM sums the connectivity of all selected positive edges
+          (and, separately, the negative edges). These two scalar "network strength" values
+          are the actual features the connectome model uses. The scatter shows how strength
+          tracks the target; the histograms show the distribution of strength across
+          participants.
+        </p>
+      </div>
+
+      <div class="figure-row">
+        {% if ns_scatter %}
+        <div class="figure-wrap">
+          {{ ns_scatter }}
+          <p class="caption">Network strength vs {{ y_name }}.</p>
+        </div>
+        {% endif %}
+        {% if ns_hist %}
+        <div class="figure-wrap">
+          {{ ns_hist }}
+          <p class="caption">Distribution of network strength scores.</p>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <!-- ── 5. Brain & Edges ── -->
+    <section class="report-section" id="brain-plots">
+      <h2>Brain &amp; Edges</h2>
+      <p class="section-intro">
+        Where the predictive edges are in the brain. Throughout, <em>positive</em>
+        edges (red) are associated with higher target values and <em>negative</em>
+        edges (blue) with lower values. Strength here is edge <em>stability</em> —
+        the fraction of outer CV folds in which an edge was selected.
+      </p>
+      <div class="info">
+        <ul>
+          <li><strong>Connectivity matrix</strong> — node × node grid of stable edges; red/blue
+            mark the positive/negative networks. Ordered by brain network when an atlas is given.</li>
+          <li><strong>Hub nodes</strong> — the nodes participating in the most stable edges.</li>
+          <li><strong>Network-summary matrix</strong> — the same edges collapsed to canonical
+            networks (needs a <code>network</code> column in the atlas).</li>
+          <li><strong>Chord diagram</strong> — between-network connectivity as a ring; arc width is
+            the aggregated stability.</li>
+          <li><strong>Glass brain</strong> — the significantly stable edges drawn on a brain
+            (needs node coordinates <code>x, y, z</code>).</li>
+        </ul>
+      </div>
+
+      <div class="figure-grid">
+        {% if conn_matrix %}
+        <div class="figure-wrap">
+          {{ conn_matrix }}
+          <p class="caption">Connectivity matrix of stable edges (node × node).</p>
+        </div>
+        {% endif %}
+        {% if node_degree %}
+        <div class="figure-wrap">
+          {{ node_degree }}
+          <p class="caption">Hub nodes — number of stable edges per node.</p>
+        </div>
+        {% endif %}
+        {% if network_summary %}
+        <div class="figure-wrap">
+          {{ network_summary }}
+          <p class="caption">Edges aggregated by canonical brain network.</p>
+        </div>
+        {% endif %}
+        {% if chord %}
+        <div class="figure-wrap">
+          {{ chord }}
+          <p class="caption">Chord diagram of between-network connectivity.</p>
+        </div>
+        {% endif %}
+        {% if brain_positive %}
+        <div class="figure-wrap">
+          {{ brain_positive }}
+          <p class="caption">Glass brain — stable positive edges.</p>
+        </div>
+        {% endif %}
+        {% if brain_negative %}
+        <div class="figure-wrap">
+          {{ brain_negative }}
+          <p class="caption">Glass brain — stable negative edges.</p>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if not conn_matrix and not node_degree %}
+      <div class="missing-asset">
+        No edge-stability data found to build brain figures. Run the analysis with
+        edge stability enabled to populate this section.
+      </div>
+      {% elif not has_network_labels %}
+      <p class="caption">
+        Network-summary and chord diagrams need a <code>network</code> column in your
+        atlas; the glass brain additionally needs node coordinates
+        (<code>x, y, z</code>). Pass <code>atlas_labels</code> to enable them.
+      </p>
+      {% endif %}
+    </section>
+
+    <!-- ── 6. Stable Edges ── -->
+    <section class="report-section" id="stable-edges">
+      <h2>Stable Edges</h2>
+
+      {% if not has_edge_data %}
+      <div class="missing-asset">
+        No edge stability data found. Run the analysis with
+        <code>n_permutations &gt; 0</code> and <code>select_stable_edges=True</code>
+        to generate this table.
+      </div>
+      {% else %}
+      <p class="section-intro">
+        Edges sorted by permutation p-value (ascending). Stability is the proportion
+        of outer folds in which the edge was selected.
+      </p>
+      <div class="info">
+        <p>
+          The individual connections (region A — region B) that most reliably drive the
+          prediction. <em>Stability</em> is how often an edge was selected across folds;
+          <em>significance</em> is the permutation p-value for that stability. These are the
+          edges you would report and interpret anatomically.
+        </p>
+      </div>
+      <div class="figure-row">
+        {% if edge_table_positive %}
+        <div style="flex:1 1 400px">
+          <h3>Positive Network</h3>
+          {% if edge_count_positive > edge_max_rows %}
+          <p class="caption">Showing the top {{ edge_max_rows }} of {{ edge_count_positive }} edges (by significance).</p>
+          {% endif %}
+          <div class="table-scroll table-tall">{{ edge_table_positive }}</div>
+        </div>
+        {% endif %}
+        {% if edge_table_negative %}
+        <div style="flex:1 1 400px">
+          <h3>Negative Network</h3>
+          {% if edge_count_negative > edge_max_rows %}
+          <p class="caption">Showing the top {{ edge_max_rows }} of {{ edge_count_negative }} edges (by significance).</p>
+          {% endif %}
+          <div class="table-scroll table-tall">{{ edge_table_negative }}</div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- ── 6. Data & Methods appendix ── -->
+    <section class="report-section" id="appendix">
+      <h2>Data &amp; Methods</h2>
+
+      <div class="figure-row">
+        {% if target_distribution %}
+        <div class="figure-wrap">
+          {{ target_distribution }}
+          <p class="caption">Distribution of the target variable.</p>
+        </div>
+        {% endif %}
+        {% if scatter_matrix %}
+        <div class="figure-wrap">
+          {{ scatter_matrix }}
+          <p class="caption">Scatter matrix of target and covariates.</p>
+        </div>
+        {% endif %}
+      </div>
+
+      <h3>Analysis Configuration</h3>
+      <div class="table-scroll card">
+        <table class="config-table">
+          <tbody>
+            {% for key, value in config_items %}
+            <tr>
+              <th scope="row">{{ key }}</th>
+              <td>{{ value if value else "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if has_hyperparameters %}
+      <h3>Hyperparameters</h3>
+      {% if hyper_table %}
+      <h4>Parameters used in each fold</h4>
+      <div class="table-scroll card">{{ hyper_table }}</div>
+      {% endif %}
+      {% if hyper_summary %}
+      <h4>Summary across folds</h4>
+      <div class="table-scroll card">{{ hyper_summary }}</div>
+      {% endif %}
+      {% endif %}
+    </section>
+
+    <footer>
+      Generated by <a href="https://github.com/wwu-mmll/confound_corrected_cpm">CCCPM</a>
+      v{{ version }} on {{ run_date }}
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  // Highlight the active nav link based on scroll position
+  (function () {
+    const sections = document.querySelectorAll('.report-section');
+    const links = document.querySelectorAll('nav a');
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          links.forEach(l => l.classList.remove('active'));
+          const active = document.querySelector(`nav a[href="#${entry.target.id}"]`);
+          if (active) active.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    sections.forEach(s => observer.observe(s));
+  })();
+</script>
+
+</body>
+</html>
