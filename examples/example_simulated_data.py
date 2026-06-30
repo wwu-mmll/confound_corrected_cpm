@@ -19,7 +19,7 @@ cpm = CPMAnalysis(results_directory='./tmp/example_simulated_data',
                   n_permutations=100,
                   #atlas_labels='atlas_labels.csv',
                   select_stable_edges=False,
-                  device='cuda')
+                  device='cpu')
 
-#cpm.run(X=X, y=y, covariates=covariates)
+cpm.run(X=X, y=y, covariates=covariates)
 cpm.generate_html_report()
