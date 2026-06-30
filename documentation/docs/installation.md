@@ -107,3 +107,31 @@ poetry run pytest         # run the test suite
 - **CUDA out of memory / wrong CUDA version** — install the matching PyTorch build from
   the [official instructions](https://pytorch.org/get-started/locally/) first, then
   install CCCPM.
+- **`_tkinter.TclError: Can't find a usable tk.tcl` (or `init.tcl`) when running an
+  analysis or generating the report** — this is a plotting error, usually on **Windows**.
+  CCCPM saves all figures to disk, but matplotlib defaults to an interactive GUI backend
+  (Tk), and some Python installs ship without a working Tcl/Tk. The simplest fix is to
+  tell matplotlib to use the non-interactive `Agg` backend, which needs no GUI:
+
+    === "Windows (PowerShell)"
+        ```powershell
+        $env:MPLBACKEND = "Agg"
+        python your_script.py
+        ```
+
+    === "Windows (cmd)"
+        ```bat
+        set MPLBACKEND=Agg
+        python your_script.py
+        ```
+
+    === "Inside a script (any OS)"
+        ```python
+        import matplotlib
+        matplotlib.use("Agg")   # before importing cccpm or matplotlib.pyplot
+        import cccpm
+        ```
+
+    Alternatively, reinstall Python from [python.org](https://www.python.org/downloads/)
+    and make sure the **"tcl/tk and IDLE"** component is selected in the installer, which
+    provides a working Tk.
