@@ -52,7 +52,7 @@ statsmodels = "*"
 nilearn = "*"
 matplotlib = "*"
 seaborn = "*"
-arakawa = "*"
+jinja2 = "*"
 tqdm = "*"
 pygam = "*"
 
