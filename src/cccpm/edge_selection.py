@@ -61,51 +61,12 @@ def compute_correlation_and_pvalues(x, Y, rank=False):
     return correlations, p_values
 
 
-def semi_partial_correlation(x, Y, Z, rank=False):
-    # ToDo: THIS IS A PARTIAL CORRELATION, NOT SEMI-PARTIAL
-    if rank:
-        x = rankdata(x)
-        Y = rankdata(Y, axis=0)
-        Z = rankdata(Z, axis=0)
-
-        #Y = np.apply_along_axis(rankdata, 0, Y)
-        #Z = np.apply_along_axis(rankdata, 0, Z)
-
-    # Calculate residuals for x and each column in Y
-    x_residuals = get_residuals(x.reshape(-1, 1), Z).ravel()
-    Y_residuals = get_residuals(Y, Z)
-
-    # Mean-centering the residuals
-    x_centered = x_residuals - np.mean(x_residuals)
-    Y_centered = Y_residuals - np.mean(Y_residuals, axis=0)
-
-    # Correlation calculation
-    corr_numerator = np.dot(Y_centered.T, x_centered)
-    corr_denominator = (np.sqrt(np.sum(Y_centered ** 2, axis=0)) * np.sqrt(np.sum(x_centered ** 2)))
-    partial_corr = corr_numerator / corr_denominator
-
-    # Calculate t-statistics and p-values
-    n = len(x)
-    k = Z.shape[1]
-    _, p_values = compute_t_and_p_values(partial_corr, n - k - 2)
-
-    return partial_corr, p_values
-
-
 def pearson_correlation_with_pvalues(x, Y):
     return compute_correlation_and_pvalues(x, Y, rank=False)
 
 
 def spearman_correlation_with_pvalues(x, Y):
     return compute_correlation_and_pvalues(x, Y, rank=True)
-
-
-def semi_partial_correlation_pearson(x, Y, Z):
-    return semi_partial_correlation(x, Y, Z, rank=False)
-
-
-def semi_partial_correlation_spearman(x, Y, Z):
-    return semi_partial_correlation(x, Y, Z, rank=True)
 
 
 def torch_rankdata(data, dim=-1):
@@ -179,155 +140,115 @@ def get_residuals(data, confounds):
         raise ValueError(f"Data shape {data.shape} incompatible with confounds {confounds.shape}")
 
 
-def point_biserial_correlation(X, Y_perms, confounds=None):
-    """
-    Computes point-biserial correlation for binary target variables.
-
-    Point-biserial correlation measures the relationship between a continuous
-    variable (features in X) and a binary variable (Y). It is mathematically
-    equivalent to Pearson correlation when one variable is binary.
-
-    Args:
-        X: (N_samples, N_features) - Continuous features
-        Y_perms: (N_samples, N_perms) - Binary target (0 or 1)
-        confounds: Optional (N_samples, N_confounds) tensor for partial correlation
-
-    Returns:
-        r_matrix: (N_features, N_perms) - Point-biserial correlations
-        p_matrix: (N_features, N_perms) - P-values
-    """
-    n_samples = X.size(0)
-
-    # Handle partial correlation. Point-biserial is Pearson with a binary
-    # variable, so the partial version is the Pearson correlation of the
-    # residuals after regressing out the confounds. We must NOT use the
-    # binary group-mean formula below here, because residualizing makes Y
-    # continuous (it would no longer equal exactly 0/1, yielding empty groups
-    # and r == 0 for every feature).
-    if confounds is not None:
-        confounds = torch.as_tensor(confounds, device=X.device, dtype=X.dtype)
-        k_confounds = confounds.size(1)
-        X_res = get_residuals(X, confounds)
-        Y_res = get_residuals(Y_perms, confounds)
-
-        X_norm = (X_res - X_res.mean(0, keepdim=True)) / (X_res.std(0, keepdim=True) + 1e-8)
-        Y_norm = (Y_res - Y_res.mean(0, keepdim=True)) / (Y_res.std(0, keepdim=True) + 1e-8)
-        r_matrix = torch.matmul(X_norm.t(), Y_norm) / (n_samples - 1)  # (N_features, N_perms)
-        r_matrix = torch.clamp(r_matrix, -0.999999, 0.999999)
-
-        df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=X.dtype)
-        t_stats = r_matrix * torch.sqrt(df / (1 - r_matrix ** 2))
-        z = t_stats / torch.sqrt(df / (df + 1))
-        val = -torch.abs(z) / 1.41421356
-        p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
-        return r_matrix, p_matrix
-
-    k_confounds = 0
-
-    # Point-biserial correlation is *exactly* the Pearson correlation between the
-    # continuous feature and the binary (0/1) target, so we compute it that way.
-    #
-    # The previous implementation used the group-mean formula
-    #   r_pb = (M1 - M0) / s_pooled * sqrt(n0*n1/(n0+n1)^2)
-    # with ``s_pooled`` = the *pooled within-group* standard deviation. That is
-    # wrong: the correct denominator is the *total* standard deviation of X
-    # (which also contains the between-group variance). Using the within-group SD
-    # systematically inflates |r| — with imbalanced groups and strong separation
-    # it drove r to the clamp (1.0) where scipy.stats.pointbiserialr gives ~0.78.
-    # Computing Pearson on standardized X and Y reproduces scipy to ~1e-6.
-    Y_perms = Y_perms.to(X.dtype)
-    X_norm = (X - X.mean(0, keepdim=True)) / (X.std(0, keepdim=True) + 1e-8)
-    Y_norm = (Y_perms - Y_perms.mean(0, keepdim=True)) / (Y_perms.std(0, keepdim=True) + 1e-8)
-    r_matrix = torch.matmul(X_norm.t(), Y_norm) / (n_samples - 1)  # (N_features, N_perms)
-
-    # Clamp to valid correlation range
-    r_matrix = torch.clamp(r_matrix, -0.999999, 0.999999)
-
-    # Calculate p-values using t-distribution
-    df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=X.dtype)
-    t_stats = r_matrix * torch.sqrt(df / (1 - r_matrix ** 2))
-
-    # Approximate p-values using normal distribution (fast approximation)
-    z = t_stats / torch.sqrt(df / (df + 1))
-    val = -torch.abs(z) / 1.41421356
-    p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
-
-    return r_matrix, p_matrix  # Shape: (N_features, N_perms)
-
-
 def correlations_and_pvalues(X, Y_perms,
                              correlation_type='pearson',
                              confounds=None):
     """
-    Computes correlations (Pearson/Spearman/Partial/Point-Biserial) and p-values on GPU.
+    Univariate edge selection as a vectorised OLS GLM, batched over permutations.
+
+    For each edge (column of ``X``) and each (permuted) target (column of
+    ``Y_perms``) this fits, in one batched linear-algebra pass on CPU/GPU, the
+    linear model
+
+        target ~ intercept [+ confounds] + edge
+
+    and returns the edge effect and the p-value of its coefficient. By the
+    Frisch–Waugh–Lovell theorem the coefficient only requires residualising the
+    *edge* on the confounds — the target is **never** residualised to obtain the
+    coefficient (its raw values drive it; this is what we want when the target is
+    the thing we ultimately predict). This single path is mathematically
+    identical to:
+
+      * Pearson correlation                         (continuous target, no confounds)
+      * point-biserial correlation                  (binary 0/1 target, no confounds)
+      * the partial-correlation / coefficient F-test (confounds present)
+      * Spearman, when ``X`` and ``Y`` are rank-transformed first.
+
+    A binary (0/1) target needs no special handling: regressing it on an edge is
+    the linear-probability model, whose coefficient test equals the
+    point-biserial correlation. (Its homoskedastic p-values are the conventional
+    point-biserial ones; OLS standard errors are not heteroskedasticity-robust,
+    which is standard for this kind of screening filter.)
+
+    The reported ``r`` is the **semi-partial** correlation (confounds removed
+    from the connectome edge only, not the target). Its sign and the p-value are
+    those of the regression coefficient, so the choice of semi-partial vs partial
+    affects only the reported effect-size magnitude, never which edges are
+    selected.
 
     Args:
-        X: (N_samples, N_features)
-        Y_perms: (N_perms, N_samples)
-        correlation_type: 'pearson', 'spearman', or 'point_biserial'
-        confounds: Optional (N_samples, N_confounds) tensor.
-                   If provided, partial correlation is computed.
+        X: (N_samples, N_features) — continuous edge values (fixed across perms)
+        Y_perms: (N_samples, N_perms) — target(s), one column per permutation
+        correlation_type: 'pearson' (linear / point-biserial) or 'spearman' (ranks)
+        confounds: optional (N_samples, N_confounds); when given, the edge effect
+                   controls for these covariates.
+
+    Returns:
+        r_matrix: (N_features, N_perms) — semi-partial correlation (effect size)
+        p_matrix: (N_features, N_perms) — p-value of the edge coefficient
     """
-    # Check if Y is binary and auto-select point-biserial if appropriate
-    Y_unique = torch.unique(Y_perms)
-    is_binary = Y_unique.numel() == 2 and set(Y_unique.tolist()).issubset({0, 1, -1})
-
-    if is_binary and correlation_type in ['pearson', 'spearman']:
-        # Binary target detected - use point-biserial (equivalent to Pearson for binary)
-        # Convert -1/1 to 0/1 if needed
-        if -1 in Y_unique:
-            Y_perms = (Y_perms + 1) / 2
-        return point_biserial_correlation(X, Y_perms, confounds)
-
+    X = torch.as_tensor(X)
+    Y = torch.as_tensor(Y_perms, dtype=X.dtype, device=X.device)
     n_samples = X.size(0)
 
-    # --- A. HANDLE PARTIAL CORRELATION (RESIDUALIZE) ---
-    if confounds is not None:
-        confounds = torch.as_tensor(confounds, device=X.device, dtype=X.dtype)
-        # 1. Clean X (Fixed)
-        X = get_residuals(X, confounds)
-        # 2. Clean Y (Batch)
-        Y_perms = get_residuals(Y_perms, confounds)
-
-        # Note: When doing partial correlation, Degrees of Freedom decrease
-        # df = N - 2 - k (where k is number of confounds)
-        k_confounds = confounds.size(1)
-    else:
-        k_confounds = 0
-
-    # --- B. HANDLE SPEARMAN (RANKING) ---
+    # Spearman = Pearson on ranks. Rank every variable (incl. the confounds),
+    # matching the conventional "rank, then partial" definition (e.g. pingouin).
     if correlation_type == 'spearman':
-        # Rank X (column-wise)
         X = torch_rankdata(X, dim=0)
-        # Rank Y (row-wise for each perm)
-        Y_perms = torch_rankdata(Y_perms, dim=0)
+        Y = torch_rankdata(Y, dim=0)
+        if confounds is not None:
+            confounds = torch_rankdata(
+                torch.as_tensor(confounds, dtype=X.dtype, device=X.device), dim=0)
 
-    # --- C. STANDARD PEARSON LOGIC (Now applied to Ranks or Residuals) ---
+    # --- Residualise on the confounds (or just centre, when there are none) ---
+    if confounds is not None:
+        confounds = torch.as_tensor(confounds, dtype=X.dtype, device=X.device)
+        k_confounds = confounds.size(1)
+        # FWL: residualising only the EDGE is sufficient for the coefficient.
+        # Y is residualised solely to obtain the full model's error variance.
+        X_res = torch.as_tensor(get_residuals(X, confounds), dtype=X.dtype, device=X.device)
+        Y_res = torch.as_tensor(get_residuals(Y, confounds), dtype=X.dtype, device=X.device)
+    else:
+        # Residualising on an intercept only is just mean-centring.
+        k_confounds = 0
+        X_res = X - X.mean(dim=0, keepdim=True)
+        Y_res = Y - Y.mean(dim=0, keepdim=True)
 
-    # 1. Standardize Inputs (Z-score)
-    X_mean = X.mean(dim=0, keepdim=True)
-    X_std = X.std(dim=0, keepdim=True)
-    X_norm = (X - X_mean) / (X_std + 1e-8)
+    # Mean-centre so cross-products are (co)variances. X_res is already centred
+    # (the intercept is part of the confound space), but be explicit.
+    X_res = X_res - X_res.mean(dim=0, keepdim=True)
+    Y_res = Y_res - Y_res.mean(dim=0, keepdim=True)
+    Y_centered = Y - Y.mean(dim=0, keepdim=True)   # raw target, centred
 
-    Y_mean = Y_perms.mean(dim=0, keepdim=True)
-    Y_std = Y_perms.std(dim=0, keepdim=True)
-    Y_norm = (Y_perms - Y_mean) / (Y_std + 1e-8)
+    # Cross-products. Because X_res is orthogonal to the confound space
+    # (including the intercept), X_res^T Y == X_res^T Y_res, so the raw centred
+    # target gives exactly the regression coefficient (no Y residualisation).
+    cross = torch.matmul(X_res.t(), Y_centered)        # (F, P)  = x_res^T y
+    sxx = (X_res ** 2).sum(dim=0)                      # (F,)    ||x_res||^2
+    sse_y = (Y_res ** 2).sum(dim=0)                    # (P,)    full-model error SS
+    ssy = (Y_centered ** 2).sum(dim=0)                 # (P,)    total SS of target
 
-    # 2. Correlation (MatMul)
-    r_matrix = torch.matmul(Y_norm.t(), X_norm) / (n_samples - 1)
+    # Partial correlation == regression-coefficient test; it drives the p-value.
+    partial_r = cross / (torch.sqrt(sxx.unsqueeze(1) * sse_y.unsqueeze(0)) + 1e-12)
+    partial_r = torch.clamp(partial_r, -0.999999, 0.999999)
 
-    # 3. P-Values
-    r_matrix = torch.clamp(r_matrix, -0.999999, 0.999999)
+    # Semi-partial correlation (confounds removed from the edge only) — reported
+    # effect size; same sign as the coefficient.
+    semipartial_r = cross / (torch.sqrt(sxx.unsqueeze(1) * ssy.unsqueeze(0)) + 1e-12)
+    semipartial_r = torch.clamp(semipartial_r, -0.999999, 0.999999)
 
-    # Update DF based on confounds
-    df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=X.dtype)
-
-    t_stats = r_matrix * torch.sqrt(df / (1 - r_matrix ** 2))
+    # p-value of the edge coefficient, df = N - k - 2.
+    # NOTE: normal approximation to the t-tail, kept identical to the previous
+    # implementation. See RELEASE_PLAN "Open decisions #6" — do not change the
+    # tail approximation without sign-off (torch 2.x lacks an exact incomplete
+    # beta / t-CDF; this is the GPU-friendly approximation).
+    df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=partial_r.dtype)
+    t_stats = partial_r * torch.sqrt(df / (1 - partial_r ** 2))
     z = t_stats / torch.sqrt(df / (df + 1))
     val = -torch.abs(z) / 1.41421356
     p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
 
-    return r_matrix.t(), p_matrix.t()
+    return semipartial_r, p_matrix
 
 
 
@@ -482,11 +403,14 @@ class EdgeStatistic(BaseEstimator):
                                                                       confounds=covariates,
                                                                       correlation_type='spearman')
         elif self.edge_statistic == 'point_biserial':
-            r_edges_masked, p_edges_masked = point_biserial_correlation(X=X[:, valid_edges], Y_perms=y,
-                                                                        confounds=None)
+            # Point-biserial is Pearson against a binary 0/1 target; the unified
+            # OLS path handles it with no special-casing.
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+                                                                      correlation_type='pearson')
         elif self.edge_statistic == 'point_biserial_partial':
-            r_edges_masked, p_edges_masked = point_biserial_correlation(X=X[:, valid_edges], Y_perms=y,
-                                                                        confounds=covariates)
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+                                                                      confounds=covariates,
+                                                                      correlation_type='pearson')
         else:
             raise NotImplementedError("Unsupported edge selection method")
         r_edges[valid_edges] = r_edges_masked.to(r_edges.dtype)

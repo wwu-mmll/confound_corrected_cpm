@@ -62,16 +62,32 @@ You don't trust the tests; turn 115 green checks into real confidence.
         r to the clamp (1.0) where `scipy.stats.pointbiserialr` gives ~0.78. Replaced
         with Pearson-on-standardized X/Y (point-biserial *is* Pearson against a 0/1
         target) — now matches scipy to ~1e-8. Added a parametrized regression test.
-  - [ ] **Partial vs semi-partial — DECISION PENDING (Open decisions #7).** Confirmed
-        the `semi_partial_*` functions and the `*_partial` production path compute a
-        **full partial correlation** (both X and Y residualized on the confounds), and
-        are correctly validated against pingouin's full `partial_corr`. Nils wants a
-        **semi-partial** (residualize the confounds out of the connectome X only, not
-        the target). To be documented in code; NOT changed unilaterally — discuss together.
+  - [x] **Partial vs semi-partial — RESOLVED via unified OLS GLM (discussed w/ Nils).**
+        The old `*_partial` path computed a **full partial** correlation (both X and Y
+        residualized). Decided: edge selection is one **OLS GLM** — `target ~ intercept
+        [+ confounds] + edge`, testing the edge coefficient. By Frisch–Waugh–Lovell this
+        only residualizes the **edge** (the target is never residualized for the
+        coefficient — important since y is the ML prediction target). The reported `r`
+        is now the **semi-partial** correlation (confound removed from the connectome
+        only); its sign and the p-value are the regression coefficient's, so the
+        partial-vs-semipartial choice does **not** change which edges are selected, only
+        the reported effect-size magnitude. Validated p vs statsmodels OLS coefficient
+        test and r vs the semi-partial definition. 35k edges × 1000 perms = 0.25s (CPU).
+  - [x] **Unified edge-selection path (code reduction).** Collapsed the separate
+        `point_biserial_correlation` + per-statistic branches into one vectorised
+        `correlations_and_pvalues` (residualize-once + matmul, batched over all perms).
+        A binary 0/1 target flows through OLS with no special-casing (= point-biserial /
+        linear-probability model). Spearman = same path on ranks (now ranks the confounds
+        too, matching the conventional "rank-then-partial" definition — a slight change
+        from the old "residualize-then-rank"). Removed the misnamed numpy
+        `semi_partial_correlation*` helpers. ~150 lines of branchy correlation code gone.
+        Logistic GLM deliberately NOT used for selection (no closed form, FWL fails →
+        would need batched IRLS); logistic stays in the model-fitting stage (`LinearCPM`).
   - [ ] **FDR / multiple-comparison correction — DISCUSSION PENDING (Open decisions #8).**
         Whether/which correction to apply by default is an open methods question.
-  - [ ] **Residualization (`get_residuals`):** validate OLS residualization against
-        numpy `lstsq` / statsmodels OLS for both data orientations; add tests.
+  - [x] **Residualization (`get_residuals`):** validated OLS residualization (intercept
+        + pinv) against numpy `lstsq` for both data orientations ([N,features] and
+        [batch,N]) to ~1e-9, incl. orthogonality of residuals to the confound space.
 - [x] **Input validation gap (found while writing examples):** `check_data()` now
       validates that `n_features` is a valid upper-triangular connectome size
       (`infer_n_nodes`) and raises a clear error suggesting the nearest valid sizes,
@@ -243,3 +259,14 @@ You'll own the visual decisions; I can support structure + iteration speed.
      so the cost is small in practice.
    Recommendation to discuss: (b) if we want to stay GPU-pure with correct stats, else
    (c) scoped to just the p-value step (r is still computed on GPU).
+   Note: confirmed `torch.special.betainc` is MISSING in torch 2.12.1 (but `igamma`,
+   `ndtr`, `erf` exist). The unified OLS-GLM refactor does NOT change this — it uses the
+   same normal-tail approximation; the question is unchanged and decoupled.
+7. **Multiple-comparison / FDR correction in edge selection** (DISCUSSION PENDING).
+   `PThreshold` supports statsmodels corrections (bonferroni/fdr_bh/…) applied to the
+   flattened edge p-values, default `None`. Audited: no bug (the hard-coded `alpha=0.05`
+   only affects the unused `reject` array; corrected p-values are compared to the user
+   threshold). Open question: should CPM correct across the ~tens-of-thousands of edges
+   by default, and with which method? CPM is traditionally run *uncorrected* at a liberal
+   threshold (e.g. p<0.01) because the predictive model + permutation test provide the
+   real inferential control — but this deserves a deliberate decision. Decide together.
