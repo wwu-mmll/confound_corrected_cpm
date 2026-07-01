@@ -71,8 +71,10 @@ cpm = CPMAnalysis(
     task_type="regression",                       # or leave as None to auto-detect
     cv=KFold(n_splits=10, shuffle=True, random_state=42),
     edge_selection=edge_selection,
-    n_permutations=100,                           # use 1000+ for a real analysis
+    n_permutations=1000,                           # use 1000+ for a real analysis
     device="cpu",                                 # "cuda" uses the GPU if available
+    edge_significance_method='nbs',
+    nbs_threshold=0.5
 )
 
 cpm.run(X=X, y=y, covariates=covariates)

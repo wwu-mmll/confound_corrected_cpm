@@ -300,3 +300,99 @@ class TestPermutationManager:
         assert PermutationManager._is_lower_better('pearson_score') == False
         assert PermutationManager._is_lower_better('accuracy') == False
         assert PermutationManager._is_lower_better('some_error') == True
+
+
+def _make_stability_arrays(n_nodes, n_perms, clique, isolated, seed=0,
+                           clique_val=0.9, isolated_val=0.8, null_density=0.05):
+    """Build (true, permutation) stability arrays of the stored shape
+    [n_nodes, n_nodes, 2, runs]. A dense positive-network clique and a few
+    isolated positive-network edges are planted in the observed data; the null
+    is sparse low-stability noise. The negative network is left empty."""
+    rng = np.random.default_rng(seed)
+    triu = np.triu_indices(n_nodes, k=1)
+
+    true = np.zeros((n_nodes, n_nodes, 2, 1))
+    for a in range(len(clique)):
+        for b in range(a + 1, len(clique)):
+            true[clique[a], clique[b], 0, 0] = clique_val
+            true[clique[b], clique[a], 0, 0] = clique_val
+    for (i, j) in isolated:
+        true[i, j, 0, 0] = isolated_val
+        true[j, i, 0, 0] = isolated_val
+
+    perm = np.zeros((n_nodes, n_nodes, 2, n_perms))
+    for p in range(n_perms):
+        for layer in (0, 1):
+            vals = (rng.random(len(triu[0])) < null_density) * rng.choice(
+                [0.4, 0.6], len(triu[0]))
+            perm[triu[0], triu[1], layer, p] = vals
+            perm[triu[1], triu[0], layer, p] = vals
+    return true, perm
+
+
+class TestEdgeSignificance:
+    def test_nbs_shape_and_symmetry(self):
+        true, perm = _make_stability_arrays(20, 100, clique=range(6),
+                                            isolated=[(10, 11)])
+        sig = PermutationManager.calculate_p_values_edges_nbs(true, perm)
+        assert sig.shape == (20, 20, 2)
+        assert np.allclose(sig[:, :, 0], sig[:, :, 0].T)
+        assert np.allclose(sig[:, :, 1], sig[:, :, 1].T)
+
+    def test_nbs_pvalue_bounds(self):
+        true, perm = _make_stability_arrays(20, 100, clique=range(6),
+                                            isolated=[(10, 11)])
+        sig = PermutationManager.calculate_p_values_edges_nbs(true, perm)
+        assert np.all(sig > 0) and np.all(sig <= 1)
+        # floor is 1 / (n_perms + 1)
+        assert sig.min() >= 1.0 / (100 + 1) - 1e-12
+
+    def test_nbs_detects_planted_subnetwork(self):
+        true, perm = _make_stability_arrays(20, 200, clique=range(6),
+                                            isolated=[(10, 11), (14, 17)])
+        sig = PermutationManager.calculate_p_values_edges_nbs(
+            true, perm, threshold=0.5, component_stat="extent")
+        # every clique edge is significant; isolated weak edges are not
+        assert sig[0, 1, 0] < 0.05
+        assert sig[10, 11, 0] == 1.0
+        # empty negative network -> all p == 1
+        assert np.all(sig[:, :, 1] == 1.0)
+
+    def test_nbs_extent_and_intensity_both_run(self):
+        true, perm = _make_stability_arrays(20, 100, clique=range(6),
+                                            isolated=[(10, 11)])
+        ext = PermutationManager.calculate_p_values_edges_nbs(
+            true, perm, component_stat="extent")
+        inten = PermutationManager.calculate_p_values_edges_nbs(
+            true, perm, component_stat="intensity")
+        assert ext[0, 1, 0] < 0.05
+        assert inten[0, 1, 0] < 0.05
+
+    def test_nbs_rejects_unknown_component_stat(self):
+        true, perm = _make_stability_arrays(10, 20, clique=range(4), isolated=[])
+        with pytest.raises(ValueError):
+            PermutationManager.calculate_p_values_edges_nbs(
+                true, perm, component_stat="bogus")
+
+    def test_nbs_deterministic(self):
+        true, perm = _make_stability_arrays(20, 100, clique=range(6),
+                                            isolated=[(10, 11)])
+        a = PermutationManager.calculate_p_values_edges_nbs(true, perm)
+        b = PermutationManager.calculate_p_values_edges_nbs(true, perm)
+        assert np.array_equal(a, b)
+
+    def test_tfce_shape_and_bounds(self):
+        true, perm = _make_stability_arrays(20, 100, clique=range(6),
+                                            isolated=[(10, 11)])
+        sig = PermutationManager.calculate_p_values_edges_tfce(true, perm)
+        assert sig.shape == (20, 20, 2)
+        assert np.all(sig > 0) and np.all(sig <= 1)
+
+    def test_tfce_strong_isolated_edge_can_be_significant(self):
+        # A strongly-stable isolated edge (0.8) beats a null capped at 0.6,
+        # with no primary threshold needed.
+        true, perm = _make_stability_arrays(20, 200, clique=range(6),
+                                            isolated=[(10, 11)],
+                                            isolated_val=0.8)
+        sig = PermutationManager.calculate_p_values_edges_tfce(true, perm)
+        assert sig[10, 11, 0] < 0.05

@@ -8,9 +8,10 @@ import torch
 
 from glob import glob
 
+import networkx as nx
+
 from cccpm.constants import Networks, Models, Metrics, TaskType, get_metrics_for_task
-from cccpm.utils import vector_to_matrix_tensor_version, matrix_to_vector_tensor_version, matrix_to_vector_numpy, vector_to_matrix_numpy
-from statsmodels.stats.multitest import multipletests
+from cccpm.utils import vector_to_matrix_tensor_version
 
 
 class ResultsManager:
@@ -454,11 +455,24 @@ class PermutationManager:
         return pd.Series(result_dict)
 
     @staticmethod
-    def calculate_permutation_results(results_directory, logger):
+    def calculate_permutation_results(results_directory, logger, method="nbs",
+                                      nbs_threshold=0.5, nbs_component_stat="extent"):
         """
         Calculate and save the permutation test results.
 
+        Model-level metric p-values are always computed. Edge-stability
+        significance is established at the *subnetwork* level via a
+        Network-Based Statistic (``method='nbs'``) or, threshold-free, via
+        network TFCE (``method='tfce'``); both control the family-wise error
+        rate through a permutation max-statistic and write a per-edge p-value
+        matrix (edges belonging to a significant subnetwork carry that
+        subnetwork's p-value) to ``stability_edges_significance.npy``.
+
         :param results_directory: Directory where the results are saved.
+        :param logger: Logger for progress messages.
+        :param method: Edge-significance method, ``'nbs'`` (default) or ``'tfce'``.
+        :param nbs_threshold: Stability threshold for NBS component forming.
+        :param nbs_component_stat: NBS component statistic, ``'extent'`` or ``'intensity'``.
         """
         true_results = ResultsManager.load_cv_results(results_directory)
 
@@ -471,13 +485,16 @@ class PermutationManager:
         p_values = PermutationManager.calculate_p_values(true_results, perm_results)
         p_values.to_csv(os.path.join(results_directory, 'p_values.csv'))
 
-        use_fdr = True
-        if use_fdr:
-            calculate_p_values_edges = PermutationManager.calculate_p_values_edges_fdr
+        if method == "nbs":
+            stability_significance = PermutationManager.calculate_p_values_edges_nbs(
+                true_edge_stability, perm_edge_stability,
+                threshold=nbs_threshold, component_stat=nbs_component_stat)
+        elif method == "tfce":
+            stability_significance = PermutationManager.calculate_p_values_edges_tfce(
+                true_edge_stability, perm_edge_stability)
         else:
-            calculate_p_values_edges = PermutationManager.calculate_p_values_edges_max_value
-
-        stability_significance = calculate_p_values_edges(true_edge_stability, perm_edge_stability)
+            raise ValueError(
+                f"Unknown edge-significance method '{method}'. Use 'nbs' or 'tfce'.")
 
         np.save(os.path.join(results_directory, 'stability_edges_significance.npy'), stability_significance)
 
@@ -487,91 +504,175 @@ class PermutationManager:
         return
 
     @staticmethod
-    def calculate_p_values_edges_max_value(true_stability, permutation_stability):
-        """
-        Calculate empirical p-values for each edge in a connectivity matrix using the
-        max-value method from permutation testing.
-
-        For each permutation, the maximum value across all edges is taken to construct
-        a max-null distribution. Each true edge value is then compared to this distribution
-        to compute a p-value, which controls the family-wise error rate (FWER).
-
-        Parameters
-        ----------
-        true_stability : ndarray of shape (n_regions, n_regions)
-            Symmetric matrix containing the observed stability scores for each edge.
-
-        permutation_stability : ndarray of shape (n_permutations, n_regions, n_regions)
-            Array containing stability scores from each permutation run. Each entry is
-            a symmetric matrix of the same shape as `true_stability`.
-
-        Returns
-        -------
-        sig_stability : ndarray of shape (n_regions, n_regions)
-            Symmetric matrix of empirical p-values for each edge, calculated by comparing
-            the true stability values to the max null distribution. The p-values reflect
-            the probability of observing a value as extreme or more extreme under the null.
-            Family-wise error is controlled via the max-statistic method.
-        """
-        # n_permutations
-        n_permutations = permutation_stability.shape[0]
-
-        triu_indices = np.triu_indices_from(true_stability, k=1)
-
-        # Extract only the upper triangle for each permutation (ignores symmetric redundancy and diagonal)
-        max_null = np.max(permutation_stability[:, triu_indices[0], triu_indices[1]], axis=1)
-
-        # Compute significance p-values per edge, comparing against max null distribution
-        sig_stability = np.ones_like(true_stability)
-
-        # For only upper triangle (to avoid redundant computation)
-        for i, j in zip(*triu_indices):
-            true_val = true_stability[i, j]
-            p = (np.sum(max_null >= true_val) + 1) / (n_permutations + 1)
-
-            sig_stability[i, j] = p
-            sig_stability[j, i] = p  # symmetric
-        return sig_stability
+    def _layer_arrays(true_stability, permutation_stability, layer):
+        """Extract the observed ``[n_nodes, n_nodes]`` matrix and the
+        ``[n_nodes, n_nodes, n_perms]`` null stack for one network *layer*
+        (``0`` = positive, ``1`` = negative) from the stored stability arrays,
+        which have shape ``[n_nodes, n_nodes, 2, runs]``."""
+        true_layer = true_stability[:, :, layer, 0]
+        perm_layer = permutation_stability[:, :, layer, :]
+        return true_layer, perm_layer
 
     @staticmethod
-    def calculate_p_values_edges_fdr(true_stability, permutation_stability):
-        """
-        Calculate FDR-corrected p-values for each edge in a connectivity matrix using
-        permutation-based empirical p-values and the Benjamini–Yekutieli procedure.
+    def _connected_components(supra):
+        """Yield the edge lists of the connected components (each with at least
+        one edge) of a symmetric boolean adjacency matrix, using its upper
+        triangle only. Isolated nodes are skipped."""
+        graph = nx.from_numpy_array(np.triu(supra, k=1))
+        for nodes in nx.connected_components(graph):
+            if len(nodes) < 2:
+                continue
+            edges = list(graph.subgraph(nodes).edges())
+            if edges:
+                yield edges
 
-        For each edge, an empirical p-value is calculated by comparing the true
-        stability score to the distribution of permuted scores at the same edge.
-        The Benjamini–Yekutieli (BY) method is then applied to correct for multiple
-        comparisons, controlling the false discovery rate (FDR).
+    @staticmethod
+    def calculate_p_values_edges_nbs(true_stability, permutation_stability,
+                                     threshold=0.5, component_stat="extent"):
+        """
+        Network-Based Statistic (Zalesky et al., 2010) for edge-stability
+        significance.
+
+        Edges whose stability meets ``threshold`` form a graph; its connected
+        components are the candidate subnetworks. A permutation null of the
+        **largest component statistic** controls the family-wise error rate, so
+        an observed component is significant if it is larger/stronger than the
+        biggest component seen in (almost) any permutation. Each component's
+        p-value is broadcast onto all of its member edges; every other edge is
+        assigned ``p = 1``.
+
+        Inference is at the *subnetwork* level: a significant result licenses
+        "this connected subnetwork is selected more consistently than chance",
+        not per-edge claims.
+
+        Note on discreteness: stability over ``K`` outer folds takes only the
+        values ``{0, 1/K, ..., 1}``, so ``threshold=0.5`` keeps edges selected
+        in a majority of folds and the effective thresholding is coarse for few
+        folds. A continuous edge statistic (deferred) would sharpen this.
 
         Parameters
         ----------
-        true_stability : ndarray of shape (n_regions, n_regions)
-            Symmetric matrix containing the observed stability scores for each edge.
-
-        permutation_stability : ndarray of shape (n_permutations, n_regions, n_regions)
-            Array containing stability scores from each permutation run. Each entry is
-            a symmetric matrix of the same shape as `true_stability`.
+        true_stability : ndarray of shape (n_nodes, n_nodes, 2, 1)
+            Observed edge stability; dim 2 is the positive/negative network.
+        permutation_stability : ndarray of shape (n_nodes, n_nodes, 2, n_perms)
+            Edge stability from each permutation run.
+        threshold : float, default=0.5
+            Stability threshold (``>=``) for component forming.
+        component_stat : {'extent', 'intensity'}, default='extent'
+            ``'extent'`` = number of edges in the component (classic NBS);
+            ``'intensity'`` = sum of ``(stability - threshold)`` over its edges.
 
         Returns
         -------
-        sig_stability : ndarray of shape (n_regions, n_regions)
-            Symmetric matrix of FDR-corrected p-values for each edge, calculated by first
-            computing empirical p-values and then applying the Benjamini–Yekutieli correction
-            to control the expected false discovery rate across all edges.
+        sig_stability : ndarray of shape (n_nodes, n_nodes, 2)
+            Per-edge p-values (member edges carry their component's p-value).
         """
-        n_permutations = permutation_stability.shape[-1]
-        permutation_stability_flattenened = matrix_to_vector_numpy(permutation_stability, dim=0)
-        true_stability_flattenened = matrix_to_vector_numpy(true_stability, dim=0)
+        true_stability = np.asarray(true_stability, dtype=float)
+        permutation_stability = np.asarray(permutation_stability, dtype=float)
+        n_nodes = true_stability.shape[0]
+        n_perms = permutation_stability.shape[-1]
+        sig = np.ones((n_nodes, n_nodes, 2))
 
-        # Compute empirical p-values for each edge. Use the standard
-        # (count + 1) / (n_permutations + 1) form so p-values are valid in (0, 1].
-        condition_count = (true_stability_flattenened < permutation_stability_flattenened).sum(axis=-1)
-        p_vals = (condition_count + 1) / (n_permutations + 1)
+        if component_stat not in ("extent", "intensity"):
+            raise ValueError(
+                f"Unknown component_stat '{component_stat}'. Use 'extent' or 'intensity'.")
 
-        # Apply Benjamini-Yekutieli correction
-        p_vals_corrected = np.full_like(p_vals, np.nan)
-        _, p_vals_corrected[:, 0], _, _ = multipletests(p_vals[:, 0], alpha=0.05, method='fdr_by')
-        _, p_vals_corrected[:, 1], _, _ = multipletests(p_vals[:, 1], alpha=0.05, method='fdr_by')
+        def components_with_stats(mat):
+            out = []
+            for edges in PermutationManager._connected_components(mat >= threshold):
+                if component_stat == "extent":
+                    stat = float(len(edges))
+                else:  # intensity
+                    stat = float(sum(mat[i, j] - threshold for i, j in edges))
+                out.append((edges, stat))
+            return out
 
-        return vector_to_matrix_numpy(p_vals_corrected, dim=0)
+        for layer in (Networks.positive, Networks.negative):
+            true_layer, perm_layer = PermutationManager._layer_arrays(
+                true_stability, permutation_stability, layer)
+
+            # Null distribution of the largest component statistic.
+            max_null = np.zeros(n_perms)
+            for p in range(n_perms):
+                comps = components_with_stats(perm_layer[:, :, p])
+                max_null[p] = max((s for _, s in comps), default=0.0)
+
+            # Observed components -> component p-value on every member edge.
+            for edges, stat in components_with_stats(true_layer):
+                p_value = (np.sum(max_null >= stat) + 1) / (n_perms + 1)
+                for i, j in edges:
+                    sig[i, j, layer] = p_value
+                    sig[j, i, layer] = p_value
+        return sig
+
+    @staticmethod
+    def _tfce_map(layer_matrix, heights, E, H, dh):
+        """Threshold-Free Cluster Enhancement score per edge for one network
+        layer: integrate ``extent(component)^E * h^H * dh`` over the threshold
+        sweep *heights* (extent = number of edges in the component the edge
+        belongs to at height ``h``)."""
+        n_nodes = layer_matrix.shape[0]
+        tfce = np.zeros((n_nodes, n_nodes))
+        for h in heights:
+            for edges in PermutationManager._connected_components(layer_matrix >= h):
+                contrib = (len(edges) ** E) * (h ** H) * dh
+                for i, j in edges:
+                    tfce[i, j] += contrib
+                    tfce[j, i] += contrib
+        return tfce
+
+    @staticmethod
+    def calculate_p_values_edges_tfce(true_stability, permutation_stability,
+                                      E=0.5, H=2.0, dh=0.1):
+        """
+        Threshold-Free Cluster Enhancement (Smith & Nichols, 2009) adapted to
+        networks, for per-edge stability significance without an arbitrary
+        primary threshold.
+
+        Each edge's TFCE score integrates the support of the components it
+        belongs to across a sweep of stability thresholds. A permutation
+        **max-TFCE** null across edges controls the family-wise error rate, so
+        this yields genuine per-edge FWER-corrected p-values (unlike NBS, which
+        is subnetwork-level).
+
+        Parameters
+        ----------
+        true_stability : ndarray of shape (n_nodes, n_nodes, 2, 1)
+            Observed edge stability; dim 2 is the positive/negative network.
+        permutation_stability : ndarray of shape (n_nodes, n_nodes, 2, n_perms)
+            Edge stability from each permutation run.
+        E, H : float
+            TFCE extent/height exponents (field-standard defaults 0.5 / 2.0).
+        dh : float, default=0.1
+            Step of the stability-threshold sweep over ``(0, 1]``.
+
+        Returns
+        -------
+        sig_stability : ndarray of shape (n_nodes, n_nodes, 2)
+            Per-edge FWER-corrected p-values.
+        """
+        true_stability = np.asarray(true_stability, dtype=float)
+        permutation_stability = np.asarray(permutation_stability, dtype=float)
+        n_nodes = true_stability.shape[0]
+        n_perms = permutation_stability.shape[-1]
+        heights = np.arange(dh, 1.0 + dh / 2, dh)
+        triu = np.triu_indices(n_nodes, k=1)
+        sig = np.ones((n_nodes, n_nodes, 2))
+
+        for layer in (Networks.positive, Networks.negative):
+            true_layer, perm_layer = PermutationManager._layer_arrays(
+                true_stability, permutation_stability, layer)
+
+            true_tfce = PermutationManager._tfce_map(true_layer, heights, E, H, dh)
+            max_null = np.zeros(n_perms)
+            for p in range(n_perms):
+                perm_tfce = PermutationManager._tfce_map(perm_layer[:, :, p], heights, E, H, dh)
+                max_null[p] = perm_tfce[triu].max(initial=0.0)
+
+            for i, j in zip(*triu):
+                score = true_tfce[i, j]
+                if score > 0:
+                    p_value = (np.sum(max_null >= score) + 1) / (n_perms + 1)
+                    sig[i, j, layer] = p_value
+                    sig[j, i, layer] = p_value
+        return sig

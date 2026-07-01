@@ -45,6 +45,9 @@ class CPMAnalysis:
                  impute_missing_values: bool = True,
                  calculate_residuals: bool = False,
                  n_permutations: int = 0,
+                 edge_significance_method: str = "nbs",
+                 nbs_threshold: float = 0.5,
+                 nbs_component_stat: str = "extent",
                  atlas_labels: str = None,
                  device: str = 'cpu',
                  random_state: int = 42):
@@ -85,6 +88,19 @@ class CPMAnalysis:
         n_permutations: int, default=0
             Number of label permutations for significance testing. ``0`` disables
             permutation testing; use 1000+ for publishable p-values.
+        edge_significance_method: str, default='nbs'
+            How edge-stability significance is established from the permutations.
+            ``'nbs'`` uses the Network-Based Statistic (connected-component test,
+            subnetwork-level FWER control); ``'tfce'`` uses network Threshold-Free
+            Cluster Enhancement (per-edge FWER control, no primary threshold).
+        nbs_threshold: float, default=0.5
+            Stability threshold (``>=``) for NBS component forming. Because
+            stability is discrete over the outer folds, ``0.5`` keeps edges
+            selected in a majority of folds. Ignored when method is ``'tfce'``.
+        nbs_component_stat: str, default='extent'
+            NBS component statistic: ``'extent'`` (number of edges, classic NBS)
+            or ``'intensity'`` (summed supra-threshold stability). Ignored when
+            method is ``'tfce'``.
         atlas_labels: str, default=None
             Path to a CSV file with atlas region labels (columns ``x``, ``y``,
             ``z``, ``region``) used for the brain plots in the report.
@@ -119,6 +135,9 @@ class CPMAnalysis:
         self.impute_missing_values = impute_missing_values
         self.calculate_residuals = calculate_residuals
         self.n_permutations = n_permutations
+        self.edge_significance_method = edge_significance_method
+        self.nbs_threshold = nbs_threshold
+        self.nbs_component_stat = nbs_component_stat
 
         if device.lower() == 'gpu' or device.lower() == 'cuda':
             if torch.cuda.is_available():
@@ -245,7 +264,11 @@ class CPMAnalysis:
             self.logger.info(f"Running {self.n_permutations} permutations.")
             y_perms = self._create_permuted_y(y)
             self._single_run(X=X, y=y_perms, covariates=covariates, perm_run=True)
-            PermutationManager.calculate_permutation_results(self.results_directory, self.logger)
+            PermutationManager.calculate_permutation_results(
+                self.results_directory, self.logger,
+                method=self.edge_significance_method,
+                nbs_threshold=self.nbs_threshold,
+                nbs_component_stat=self.nbs_component_stat)
 
         self.logger.info("=" * 50)
         self.logger.info("Estimation completed.")

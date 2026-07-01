@@ -90,8 +90,26 @@ You don't trust the tests; turn 115 green checks into real confidence.
         `semi_partial_correlation*` helpers. ~150 lines of branchy correlation code gone.
         Logistic GLM deliberately NOT used for selection (no closed form, FWL fails →
         would need batched IRLS); logistic stays in the model-fitting stage (`LinearCPM`).
-  - [ ] **FDR / multiple-comparison correction — DISCUSSION PENDING (Open decisions #7).**
-        Whether/which correction to apply by default is an open methods question.
+  - [x] **Edge-stability significance — RESOLVED (see Open decisions #7).** Per-edge
+        FDR (Benjamini–Yekutieli) and per-edge max-statistic both failed in practice:
+        FDR needs raw p-values far below the `1/(n_perm+1)≈0.001` resolution floor, and
+        the max-statistic is crippled by the discreteness of stability (only `K+1` values
+        over `K` folds). Replaced both with a **subnetwork-level Network-Based Statistic**
+        (`calculate_p_values_edges_nbs`, Zalesky et al. 2010): stability-threshold →
+        connected components (`networkx`) → permutation max-component null; configurable
+        `extent`/`intensity` component statistic. Added **network TFCE**
+        (`calculate_p_values_edges_tfce`) as a threshold-free per-edge alternative.
+        Selected via `CPMAnalysis(edge_significance_method=...)`; both write the same
+        `[n_nodes, n_nodes, 2]` `stability_edges_significance.npy` so the report is
+        unchanged. Old FDR/max-value methods removed. **Caveat documented:** NBS licenses
+        subnetwork-level, not per-edge, claims.
+  - [ ] **Continuous edge statistic for NBS/TFCE (deferred).** Stability is coarse;
+        persist the per-edge semi-partial correlation (currently computed in
+        `edge_selection.py` then discarded after thresholding), aggregate across folds into
+        a continuous `[N_features, N_perms]` map, and let NBS/TFCE run on it instead of
+        stability. Continuous → better-behaved thresholding/cluster-forming. Note the
+        meaning shift ("consistently associated" vs "consistently selected") and memory
+        cost (~140 MB at 35k edges × 1000 perms after folding across folds).
   - [x] **Residualization (`get_residuals`):** validated OLS residualization (intercept
         + pinv) against numpy `lstsq` for both data orientations ([N,features] and
         [batch,N]) to ~1e-9, incl. orthogonality of residuals to the confound space.
@@ -338,3 +356,5 @@ custom Jinja2 + CSS report (self-contained, offline), then a full visual redesig
    by default, and with which method? CPM is traditionally run *uncorrected* at a liberal
    threshold (e.g. p<0.01) because the predictive model + permutation test provide the
    real inferential control — but this deserves a deliberate decision. Decide together.
+   NB: this is the *edge-selection* threshold, distinct from *edge-stability
+   significance* (resolved — NBS/TFCE, see Phase 1).

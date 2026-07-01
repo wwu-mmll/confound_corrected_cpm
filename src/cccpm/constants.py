@@ -14,6 +14,18 @@ class Networks(IntEnum):
     both = 2
 
 
+class EdgeSignificance(str, Enum):
+    """Method for testing edge-stability significance under permutation.
+
+    ``nbs``  — Network-Based Statistic: connected-component test controlling
+               FWER via a permutation max-component null (subnetwork-level).
+    ``tfce`` — Threshold-Free Cluster Enhancement: per-edge FWER control with
+               no arbitrary primary threshold.
+    """
+    nbs = "nbs"
+    tfce = "tfce"
+
+
 class Models(IntEnum):
     """Model types in CPM analysis."""
     connectome = 0
