@@ -173,7 +173,7 @@ class TestCalculateFinalCVResults:
         assert 'mean_squared_error' not in df_full.columns
 
     def test_increment_computed(self, tmp_path):
-        """Test that increment = full - connectome is computed correctly."""
+        """Test that increment = full - covariates is computed correctly."""
         mgr = ResultsManager(
             output_dir=str(tmp_path), n_runs=1, n_folds=2, n_features=3
         )
@@ -183,7 +183,7 @@ class TestCalculateFinalCVResults:
 
         mgr.calculate_final_cv_results()
 
-        expected = mgr.results[:, Models.full] - mgr.results[:, Models.connectome]
+        expected = mgr.results[:, Models.full] - mgr.results[:, Models.covariates]
         actual = mgr.results[:, Models.increment]
         assert torch.allclose(actual, expected)
 
@@ -389,11 +389,14 @@ class TestEdgeSignificance:
         assert np.all(sig > 0) and np.all(sig <= 1)
 
     def test_tfce_strong_isolated_edge_can_be_significant(self):
-        # A strongly-stable isolated edge (0.8) beats a null capped at 0.6,
-        # with no primary threshold needed.
+        # A strongly-stable isolated edge (0.8) beats a sparse null capped at
+        # 0.6, with no primary threshold needed. The null density is kept low so
+        # it cannot form a large connected 0.6-stability cluster: extent-weighted
+        # TFCE legitimately lets such a cluster outscore a single strong edge, so
+        # a dense null would (correctly) mask the isolated edge.
         true, perm = _make_stability_arrays(20, 200, clique=range(6),
                                             isolated=[(10, 11)],
-                                            isolated_val=0.8)
+                                            isolated_val=0.8, null_density=0.02)
         sig = PermutationManager.calculate_p_values_edges_tfce(true, perm)
         assert sig[10, 11, 0] < 0.05
 

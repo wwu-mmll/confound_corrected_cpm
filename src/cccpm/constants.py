@@ -1,4 +1,4 @@
-from enum import IntEnum, Enum, auto
+from enum import IntEnum, Enum
 
 
 class TaskType(str, Enum):

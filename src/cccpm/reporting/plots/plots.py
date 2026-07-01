@@ -13,8 +13,6 @@ from cccpm.reporting.plots.figure_style import (
     COLOR_MAP,
     PANEL,
     SQUARE,
-    WIDE,
-    WIDE_TALL,
     apply_nature_style,
     save_figure,
 )

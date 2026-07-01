@@ -7,7 +7,6 @@ from typing import Union
 import numpy as np
 import torch
 
-from glob import glob
 
 import networkx as nx
 
@@ -225,32 +224,9 @@ class ResultsManager:
         """
         self.cv_network_strengths.to_csv(os.path.join(self.results_directory, 'cv_network_strengths.csv'))
 
-    def calculate_final_cv_results_old(self):
-        """
-        Calculate mean and standard deviation of cross-validation results and save to CSV.
-
-        :param cv_results: DataFrame with cross-validation results.
-        :param results_directory: Directory to save the results.
-        :return: Updated cross-validation results DataFrame.
-        """
-        # calculate increments
-        self.results[Models.increment] = self.results[Models.full] - self.results[Models.connectome]
-
-        # 2. Calculate Means across Folds (Dimension 3)
-        means = torch.mean(self.results, dim=3)
-        std = torch.std(self.results, dim=3)
-
-
-        self.agg_results = self.cv_results.groupby(['network', 'model'])[regression_metrics].agg(['mean', 'std'])
-
-        # Save results to CSV
-        self.cv_results.to_csv(os.path.join(self.results_directory, 'cv_results.csv'))
-        self.agg_results.to_csv(os.path.join(self.results_directory, 'cv_results_mean_std.csv'), float_format='%.4f')
-        return
-
     def calculate_final_cv_results(self, task_type: TaskType = TaskType.regression):
-        # Calculate increment: Full - Connectome
-        self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.connectome]
+        # Calculate increment: Full - Covariates (added value of the connectome over confounds)
+        self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.covariates]
 
         # Move to CPU for processing
         # Shape: [Metrics, Models, Networks, Params, Folds, Runs]
@@ -324,9 +300,9 @@ class ResultsManager:
         """
         Calculates increments, aggregates across folds, and saves results.
         """
-        # 1. Calculate Increments (Full - Connectome) inline
+        # 1. Calculate Increments (Full - Covariates) inline
         # This operates on the entire tensor at once (all params, folds, metrics, perms)
-        self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.connectome]
+        self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.covariates]
 
         # 2. Calculate Means across Folds (Dimension 4)
         inner_means = torch.mean(self.results, dim=4)
@@ -660,8 +636,14 @@ class PermutationManager:
         belongs to at height ``h``)."""
         n_nodes = layer_matrix.shape[0]
         tfce = np.zeros((n_nodes, n_nodes))
+        # Tolerance so an edge whose stability lands exactly on a sweep height is
+        # reliably included there. ``heights`` comes from ``np.arange``, whose
+        # accumulated rounding can place a gridpoint a hair above the intended
+        # value (e.g. 0.8 -> 0.8000000000000001); without this, an edge at that
+        # value would non-deterministically drop its top contribution.
+        tol = dh * 1e-6
         for h in heights:
-            for edges in PermutationManager._connected_components(layer_matrix >= h):
+            for edges in PermutationManager._connected_components(layer_matrix >= h - tol):
                 contrib = (len(edges) ** E) * (h ** H) * dh
                 for i, j in edges:
                     tfce[i, j] += contrib

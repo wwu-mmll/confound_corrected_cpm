@@ -8,7 +8,6 @@ inserted directly into the Jinja2 template context.  The data layer
 
 from __future__ import annotations
 
-import io
 import os
 from pathlib import Path
 from typing import Optional
