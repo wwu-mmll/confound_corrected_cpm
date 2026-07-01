@@ -39,6 +39,13 @@ You don't trust the tests; turn 115 green checks into real confidence.
       selected edges (platform-robust; no brittle hard-coded baselines).
 - [ ] Validate against an external reference (Shen et al. CPM / existing MATLAB
       results) on at least one dataset so numbers are defensible in a paper.
+- [x] **Independent numerical validation vs scikit-learn / scipy**
+      (`tests/test_sklearn_equivalence.py`): the vectorised torch/CUDA edge statistics
+      (Pearson, partial/semipartial, Spearman) and the batched OLS solvers for all four
+      CPM model variants (connectome/covariates/full/residuals) match scipy/numpy/sklearn
+      references (effect sizes to 1e-6, predictions to 2e-3, identical selected-edge masks);
+      the full CV pipeline reproduces an independent sklearn pipeline. Also exercises the
+      previously-thin `edge_selection.py` branches.
 - [x] **Permutation p-value convention bug (statistical validity):** metric
       p-values (`_calculate_group_p_value`) and edge-FDR p-values
       (`calculate_p_values_edges_fdr`) used `(count+1)/n` instead of the correct
@@ -200,6 +207,10 @@ in both flavors so users can copy the one matching their task.
       `examples/classification.md` embed the actual quickstart scripts via mkdocs
       snippets (so docs can't drift), explain each step, and cross-link to
       "Interpreting Results". Added to nav; `mkdocs build --strict` passes.
+- [ ] Migrate the quickstart/example scripts to the new SEM-based simulator
+      (`simulation/simulate_sem.py`: `simulate_data_given_R2` / `simulate_data_given_kappa`
+      / `generate_confound_grid`) for more realistic, confound-aware example data with
+      known ground-truth R². See `examples/confound_inflation_demo.py` for the pattern.
 - [ ] Show the key variations in both: confound control (partial corr vs residuals),
       nested CV with p-threshold tuning, stable-edge selection, permutation testing,
       and passing `atlas_labels` for brain plots.
