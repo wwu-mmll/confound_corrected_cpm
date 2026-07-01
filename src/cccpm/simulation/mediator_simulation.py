@@ -11,6 +11,21 @@ def generate_confound_simulation(n_samples=1000, n_features=100,
                                  sparsity=0.8, x_collinearity=0.6,
                                  target_r2=0.36, confounder_rho=0.4,
                                  random_state=None):
+    """
+    Simulate X, y, and a correlate ``c`` of the outcome.
+
+    .. warning::
+        Here ``c = confounder_rho * y + noise`` is generated *from* ``y`` and is
+        **not** injected into ``X``. It is therefore a downstream **proxy of the
+        outcome**, not a common-cause confounder (there is no ``c -> X`` path).
+        Partialling ``c`` out of the X–y relationship removes genuine signal
+        (over-correction / collider-like behaviour), so this generator does **not**
+        demonstrate confound inflation. For true common-cause confounding with
+        analytically known R² use
+        :func:`cccpm.simulation.simulate_sem.simulate_data_given_kappa` /
+        :func:`~cccpm.simulation.simulate_sem.generate_confound_grid`, or the
+        mechanistic :func:`cccpm.simulation.simulate_multivariate.simulate_confounders`.
+    """
     if random_state is not None:
         np.random.seed(random_state)
     cov_row = x_collinearity ** np.arange(n_features)
