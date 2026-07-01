@@ -377,6 +377,16 @@ figcaption, .caption {
 .figure-row { display: flex; gap: var(--sp-5); flex-wrap: wrap; margin: var(--sp-4) 0; }
 .figure-row > .figure-wrap { flex: 1 1 300px; }
 
+a.download-link {
+  display: inline-block;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--accent-strong);
+  border-radius: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+a.download-link:hover { background: var(--accent-strong); color: #fff; }
+
 /* Uniform card grid for figures */
 .figure-grid {
   display: grid;

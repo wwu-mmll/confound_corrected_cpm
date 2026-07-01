@@ -162,6 +162,17 @@ class ReportDataLoader:
 
         return edge_stability, edge_stability_significance
 
+    def load_edge_significance_meta(self) -> Optional[dict]:
+        """Load the edge-significance diagnostics (method, null distributions,
+        components) written by the permutation step, or ``None`` if absent."""
+        import json
+
+        path = os.path.join(self.results_directory, "stability_edges_significance_meta.json")
+        if os.path.exists(path):
+            with open(path) as f:
+                return json.load(f)
+        return None
+
     def load_data_insights(self) -> Tuple[Optional[pd.DataFrame], str, str]:
         """
         Load data insight files (summary stats and scatter matrix).

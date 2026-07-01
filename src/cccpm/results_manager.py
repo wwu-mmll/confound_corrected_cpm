@@ -1,4 +1,5 @@
 import os
+import json
 import pandas as pd
 
 from typing import Union
@@ -486,17 +487,20 @@ class PermutationManager:
         p_values.to_csv(os.path.join(results_directory, 'p_values.csv'))
 
         if method == "nbs":
-            stability_significance = PermutationManager.calculate_p_values_edges_nbs(
+            stability_significance, sig_meta = PermutationManager.calculate_p_values_edges_nbs(
                 true_edge_stability, perm_edge_stability,
-                threshold=nbs_threshold, component_stat=nbs_component_stat)
+                threshold=nbs_threshold, component_stat=nbs_component_stat,
+                return_diagnostics=True)
         elif method == "tfce":
-            stability_significance = PermutationManager.calculate_p_values_edges_tfce(
-                true_edge_stability, perm_edge_stability)
+            stability_significance, sig_meta = PermutationManager.calculate_p_values_edges_tfce(
+                true_edge_stability, perm_edge_stability, return_diagnostics=True)
         else:
             raise ValueError(
                 f"Unknown edge-significance method '{method}'. Use 'nbs' or 'tfce'.")
 
         np.save(os.path.join(results_directory, 'stability_edges_significance.npy'), stability_significance)
+        with open(os.path.join(results_directory, 'stability_edges_significance_meta.json'), 'w') as f:
+            json.dump(sig_meta, f)
 
         logger.debug("Saving significance of edge stability.")
         logger.info("Permutation test results")
@@ -528,7 +532,8 @@ class PermutationManager:
 
     @staticmethod
     def calculate_p_values_edges_nbs(true_stability, permutation_stability,
-                                     threshold=0.5, component_stat="extent"):
+                                     threshold=0.5, component_stat="extent",
+                                     alpha=0.05, return_diagnostics=False):
         """
         Network-Based Statistic (Zalesky et al., 2010) for edge-stability
         significance.
@@ -561,11 +566,19 @@ class PermutationManager:
         component_stat : {'extent', 'intensity'}, default='extent'
             ``'extent'`` = number of edges in the component (classic NBS);
             ``'intensity'`` = sum of ``(stability - threshold)`` over its edges.
+        alpha : float, default=0.05
+            Significance level recorded in the diagnostics.
+        return_diagnostics : bool, default=False
+            If ``True``, also return a JSON-serialisable diagnostics dict with
+            the per-network max-component null distribution, the observed
+            components (size / statistic / p-value) and the largest component.
 
         Returns
         -------
         sig_stability : ndarray of shape (n_nodes, n_nodes, 2)
             Per-edge p-values (member edges carry their component's p-value).
+        diagnostics : dict, optional
+            Returned only when ``return_diagnostics=True``.
         """
         true_stability = np.asarray(true_stability, dtype=float)
         permutation_stability = np.asarray(permutation_stability, dtype=float)
@@ -587,6 +600,17 @@ class PermutationManager:
                 out.append((edges, stat))
             return out
 
+        meta = {
+            "method": "nbs",
+            "threshold": float(threshold),
+            "component_stat": component_stat,
+            "n_permutations": int(n_perms),
+            "alpha": float(alpha),
+            "statistic_label": ("Component size (edges)" if component_stat == "extent"
+                                else "Component intensity"),
+            "networks": {},
+        }
+
         for layer in (Networks.positive, Networks.negative):
             true_layer, perm_layer = PermutationManager._layer_arrays(
                 true_stability, permutation_stability, layer)
@@ -598,11 +622,34 @@ class PermutationManager:
                 max_null[p] = max((s for _, s in comps), default=0.0)
 
             # Observed components -> component p-value on every member edge.
+            components = []
             for edges, stat in components_with_stats(true_layer):
                 p_value = (np.sum(max_null >= stat) + 1) / (n_perms + 1)
+                nodes = set()
                 for i, j in edges:
+                    nodes.update((i, j))
                     sig[i, j, layer] = p_value
                     sig[j, i, layer] = p_value
+                components.append({
+                    "n_edges": int(len(edges)),
+                    "n_nodes": int(len(nodes)),
+                    "statistic": float(stat),
+                    "p_value": float(p_value),
+                    "significant": bool(p_value < alpha),
+                })
+
+            components.sort(key=lambda c: c["statistic"], reverse=True)
+            name = "positive" if layer == Networks.positive else "negative"
+            meta["networks"][name] = {
+                "max_null": [float(v) for v in max_null],
+                "critical_value": float(np.quantile(max_null, 1.0 - alpha)) if n_perms else 0.0,
+                "components": components,
+                "largest_component_edges": max((c["n_edges"] for c in components), default=0),
+                "n_significant_components": int(sum(c["significant"] for c in components)),
+            }
+
+        if return_diagnostics:
+            return sig, meta
         return sig
 
     @staticmethod
@@ -623,7 +670,8 @@ class PermutationManager:
 
     @staticmethod
     def calculate_p_values_edges_tfce(true_stability, permutation_stability,
-                                      E=0.5, H=2.0, dh=0.1):
+                                      E=0.5, H=2.0, dh=0.1, alpha=0.05,
+                                      return_diagnostics=False):
         """
         Threshold-Free Cluster Enhancement (Smith & Nichols, 2009) adapted to
         networks, for per-edge stability significance without an arbitrary
@@ -645,11 +693,18 @@ class PermutationManager:
             TFCE extent/height exponents (field-standard defaults 0.5 / 2.0).
         dh : float, default=0.1
             Step of the stability-threshold sweep over ``(0, 1]``.
+        alpha : float, default=0.05
+            Significance level recorded in the diagnostics.
+        return_diagnostics : bool, default=False
+            If ``True``, also return a JSON-serialisable diagnostics dict with
+            the per-network max-TFCE null distribution and observed maximum.
 
         Returns
         -------
         sig_stability : ndarray of shape (n_nodes, n_nodes, 2)
             Per-edge FWER-corrected p-values.
+        diagnostics : dict, optional
+            Returned only when ``return_diagnostics=True``.
         """
         true_stability = np.asarray(true_stability, dtype=float)
         permutation_stability = np.asarray(permutation_stability, dtype=float)
@@ -658,6 +713,15 @@ class PermutationManager:
         heights = np.arange(dh, 1.0 + dh / 2, dh)
         triu = np.triu_indices(n_nodes, k=1)
         sig = np.ones((n_nodes, n_nodes, 2))
+
+        meta = {
+            "method": "tfce",
+            "E": float(E), "H": float(H), "dh": float(dh),
+            "n_permutations": int(n_perms),
+            "alpha": float(alpha),
+            "statistic_label": "Max TFCE score",
+            "networks": {},
+        }
 
         for layer in (Networks.positive, Networks.negative):
             true_layer, perm_layer = PermutationManager._layer_arrays(
@@ -675,4 +739,15 @@ class PermutationManager:
                     p_value = (np.sum(max_null >= score) + 1) / (n_perms + 1)
                     sig[i, j, layer] = p_value
                     sig[j, i, layer] = p_value
+
+            name = "positive" if layer == Networks.positive else "negative"
+            meta["networks"][name] = {
+                "max_null": [float(v) for v in max_null],
+                "critical_value": float(np.quantile(max_null, 1.0 - alpha)) if n_perms else 0.0,
+                "observed_max": float(true_tfce[triu].max(initial=0.0)),
+                "n_significant_edges": int(np.sum(sig[:, :, layer][triu] < alpha)),
+            }
+
+        if return_diagnostics:
+            return sig, meta
         return sig

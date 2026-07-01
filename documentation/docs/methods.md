@@ -79,6 +79,28 @@ fraction of permutations that match or beat the real result — your evidence th
 brain–behaviour association is not due to chance. Use **1000+** permutations for
 publishable significance.
 
+### 7. Edge-stability significance
+
+The same permutations also give a null distribution of edge **stability**, so CCCPM can
+test whether an edge is selected across folds *more consistently than chance*. Because
+there are tens of thousands of edges and permutation p-values are floored at
+`1/(n_perm+1)`, per-edge FDR is hopeless and a per-edge max-statistic is crippled by the
+discreteness of stability. CCCPM instead controls the family-wise error rate at the
+**subnetwork** level, selected via `edge_significance_method`:
+
+- **`"nbs"` (default)** — the Network-Based Statistic (Zalesky et al., 2010). Edges above
+  `nbs_threshold` form a graph; its connected components are tested against a permutation
+  null of the largest component (size = `nbs_component_stat="extent"`, or summed
+  supra-threshold stability = `"intensity"`). A significant result means *this connected
+  subnetwork* is selected more consistently than chance — not a claim about any single
+  edge.
+- **`"tfce"`** — network Threshold-Free Cluster Enhancement, giving per-edge FWER-corrected
+  p-values with no arbitrary cluster-forming threshold.
+
+Both write `stability_edges_significance.npy` (per-edge p-values; NBS edges carry their
+subnetwork's p-value) and a `stability_edges_significance_meta.json` with the null
+distribution and component diagnostics that the HTML report visualises.
+
 ## Putting it together
 
 A typical confound-aware analysis:

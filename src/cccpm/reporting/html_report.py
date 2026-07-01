@@ -68,6 +68,7 @@ class HTMLReporter:
         """Render the HTML report and write it to ``results_directory/report.html``."""
         summary_df, scatter_path, _ = self.data_loader.load_data_insights()
         edge_stability, edge_stability_sig = self.data_loader.load_edge_stability()
+        edge_significance_meta = self.data_loader.load_edge_significance_meta()
 
         # ── Build template context ──────────────────────────────────────────
         ctx: dict = {
@@ -120,6 +121,8 @@ class HTMLReporter:
             edge_stability=edge_stability,
             edge_stability_significance=edge_stability_sig,
             atlas_labels=self.atlas_labels,
+            significance_meta=edge_significance_meta,
+            plots_dir=self.plots_dir,
         ))
 
         # ── Render ─────────────────────────────────────────────────────────

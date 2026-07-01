@@ -57,7 +57,7 @@ from the headline result to the supporting detail:
 | **Model Comparison** | One faceted figure comparing every model (`connectome`, `covariates`, `full`, `residuals`, `increment`) across metrics and networks, plus the APA results table (mean [SD] with permutation *p*-values). Foregrounds the `increment` model — your confound-control evidence. |
 | **Network Strengths** | How the summed positive/negative network strength relates to the target, and the distribution of strength across participants. |
 | **Brain & Edges** | The predictive edges in the brain: a connectivity matrix, a hub (node-degree) plot, and — when an atlas with a `network` column is supplied — a network-summary matrix and a chord diagram. With node coordinates (`x, y, z`) it also renders a glass-brain view. |
-| **Stable Edges** | The most reliably selected edges (region A — region B) sorted by significance, capped to the top rows per network. |
+| **Stable Edges** | All significant edges (region A — region B) per network, the significance method and its diagnostics (e.g. largest NBS component), the permutation null-distribution plots, and a downloadable CSV of every selected edge with its stability and significance. |
 | **Data & Methods** | Appendix: target distribution, covariate scatter matrix, the full run configuration, and (with an inner CV) per-fold hyperparameters. |
 
 Every section carries a short always-visible "what this shows" note so a reader unfamiliar
@@ -125,7 +125,8 @@ significance.
 |------|----------|
 | `edges.npy` | The edges selected in each fold. |
 | `stability_edges.npy` | How consistently each edge was selected across folds (its *stability*). Edges chosen in most folds are the reliable ones. |
-| `stability_edges_significance.npy` | Significance of edge stability (when permutations are run). |
+| `stability_edges_significance.npy` | Per-edge significance of edge stability (when permutations are run). With the default NBS method these are *subnetwork-level* p-values shared by every edge in a significant connected component; with TFCE they are per-edge FWER-corrected p-values. |
+| `stability_edges_significance_meta.json` | Diagnostics for the significance test: method + parameters, the permutation null distribution, and (for NBS) the observed components and largest-component size. Drives the null-distribution plots in the report. |
 | `data_insights/` | Cached input summaries and figures (target distribution, covariate scatter, feature/target/covariate names). |
 
 ### Logs

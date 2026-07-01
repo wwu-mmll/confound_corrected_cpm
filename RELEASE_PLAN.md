@@ -301,6 +301,16 @@ custom Jinja2 + CSS report (self-contained, offline), then a full visual redesig
       Docs updated (`interpreting_results.md` new section layout; embedded example report
       regenerated with atlas). **Note:** `wwu-mmll/brainplots` could not be attached via
       `add_repo` (workspace access-policy 404; repo is public/reachable over SSH).
+- [x] **Edge-significance section overhaul (2026-07-01).** The Stable-Edges section now
+      names the significance method (NBS/TFCE) and its parameters, reports per-network
+      diagnostics (largest NBS component, # significant subnetworks/edges), and renders a
+      permutation null-distribution plot per network (`plots/stats_figures.py`). Removed the
+      top-50 cap — **all** significant edges are shown per network — and added a downloadable
+      CSV (data-URI) of every selected edge with its stability + significance. Backed by a
+      new `stability_edges_significance_meta.json` artifact (method, null distributions,
+      components) written by the permutation step; loaded via
+      `ReportDataLoader.load_edge_significance_meta`. Docs (`methods.md`,
+      `interpreting_results.md`) updated; `mkdocs build --strict` passes.
 - [ ] **Later (deferred, discussed w/ Nils):** move the brain figures into the
       `wwu-mmll/brainplots` toolbox and make it a PyPI package; then have CCCPM depend on
       it (likely an optional `cccpm[plots]` extra). Not done now — code lives in CCCPM.

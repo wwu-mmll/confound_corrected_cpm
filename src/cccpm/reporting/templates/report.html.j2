@@ -272,30 +272,77 @@
       <div class="info">
         <p>
           The individual connections (region A — region B) that most reliably drive the
-          prediction. <em>Stability</em> is how often an edge was selected across folds;
-          <em>significance</em> is the permutation p-value for that stability. These are the
-          edges you would report and interpret anatomically.
+          prediction. <em>Stability</em> is how often an edge was selected across folds.
+          {% if edge_method == "nbs" %}
+          Significance is assessed at the <strong>subnetwork</strong> level with the
+          Network-Based Statistic: connected components of stable edges are tested against
+          a permutation null of the largest component, so every edge in a significant
+          subnetwork shares that subnetwork's p-value. A significant result means
+          "this connected subnetwork is selected more consistently than chance" — not a
+          claim about any single edge in isolation.
+          {% elif edge_method == "tfce" %}
+          Significance is a per-edge family-wise-error-corrected p-value from network
+          Threshold-Free Cluster Enhancement (no arbitrary cluster-forming threshold).
+          {% else %}
+          <em>Significance</em> is the permutation p-value for that stability.
+          {% endif %}
         </p>
       </div>
+
+      {% if edge_method_label %}
+      <div class="info">
+        <p>
+          <strong>Significance method:</strong> {{ edge_method_label }},
+          {{ edge_method_n_permutations }} permutations, α = {{ edge_method_alpha }}.
+          {% if edge_method_lines.positive %}<br><strong>Positive network:</strong> {{ edge_method_lines.positive }}.{% endif %}
+          {% if edge_method_lines.negative %}<br><strong>Negative network:</strong> {{ edge_method_lines.negative }}.{% endif %}
+        </p>
+      </div>
+      {% endif %}
+
+      {% if null_plot_positive or null_plot_negative %}
       <div class="figure-row">
-        {% if edge_table_positive %}
+        {% if null_plot_positive %}
+        <div style="flex:1 1 320px">{{ null_plot_positive }}
+          <p class="caption">Permutation null of the max statistic (positive network); dashed = critical value, solid = observed.</p>
+        </div>
+        {% endif %}
+        {% if null_plot_negative %}
+        <div style="flex:1 1 320px">{{ null_plot_negative }}
+          <p class="caption">Permutation null of the max statistic (negative network); dashed = critical value, solid = observed.</p>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if edge_csv_data_uri %}
+      <p class="caption">
+        <a class="download-link" download="edge_significance.csv" href="{{ edge_csv_data_uri }}">
+          ⭳ Download all edges (CSV)
+        </a>
+        — every selected edge with its network, stability and significance.
+      </p>
+      {% endif %}
+
+      <div class="figure-row">
         <div style="flex:1 1 400px">
           <h3>Positive Network</h3>
-          {% if edge_count_positive > edge_max_rows %}
-          <p class="caption">Showing the top {{ edge_max_rows }} of {{ edge_count_positive }} edges (by significance).</p>
-          {% endif %}
+          <p class="caption">{{ edge_count_positive }} significant of {{ edge_total_positive }} selected edges (α = {{ edge_alpha }}).</p>
+          {% if edge_table_positive %}
           <div class="table-scroll table-tall">{{ edge_table_positive }}</div>
+          {% else %}
+          <p class="caption">No significant edges in this network.</p>
+          {% endif %}
         </div>
-        {% endif %}
-        {% if edge_table_negative %}
         <div style="flex:1 1 400px">
           <h3>Negative Network</h3>
-          {% if edge_count_negative > edge_max_rows %}
-          <p class="caption">Showing the top {{ edge_max_rows }} of {{ edge_count_negative }} edges (by significance).</p>
-          {% endif %}
+          <p class="caption">{{ edge_count_negative }} significant of {{ edge_total_negative }} selected edges (α = {{ edge_alpha }}).</p>
+          {% if edge_table_negative %}
           <div class="table-scroll table-tall">{{ edge_table_negative }}</div>
+          {% else %}
+          <p class="caption">No significant edges in this network.</p>
+          {% endif %}
         </div>
-        {% endif %}
       </div>
       {% endif %}
     </section>

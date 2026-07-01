@@ -496,18 +496,61 @@ def build_brain_plots_context(
 # 6. Stable Edges section
 # ---------------------------------------------------------------------------
 
+def _method_summary(meta: Optional[dict]) -> dict:
+    """Human-readable summary of the edge-significance method + per-network
+    headline diagnostics, for the Stable Edges section header."""
+    if not meta:
+        return {}
+    method = str(meta.get("method", "")).lower()
+    alpha = meta.get("alpha", 0.05)
+    n_perms = meta.get("n_permutations", 0)
+    if method == "nbs":
+        label = (f"Network-Based Statistic (component statistic: "
+                 f"{meta.get('component_stat', 'extent')}, stability threshold "
+                 f"≥ {meta.get('threshold', 0.5):g})")
+    elif method == "tfce":
+        label = (f"Network TFCE (E={meta.get('E', 0.5):g}, H={meta.get('H', 2.0):g}, "
+                 f"dh={meta.get('dh', 0.1):g})")
+    else:
+        label = method.upper()
+
+    lines = {}
+    for network in ("positive", "negative"):
+        nm = (meta.get("networks") or {}).get(network)
+        if not nm:
+            continue
+        if method == "nbs":
+            lines[network] = (
+                f"largest component: {nm.get('largest_component_edges', 0)} edges; "
+                f"{nm.get('n_significant_components', 0)} significant subnetwork(s)")
+        elif method == "tfce":
+            lines[network] = f"{nm.get('n_significant_edges', 0)} significant edge(s)"
+    return {
+        "edge_method": method,
+        "edge_method_label": label,
+        "edge_method_alpha": alpha,
+        "edge_method_n_permutations": n_perms,
+        "edge_method_lines": lines,
+        "edge_is_subnetwork": method == "nbs",
+    }
+
+
 def build_stable_edges_context(
     edge_stability: Optional[np.ndarray],
     edge_stability_significance: Optional[np.ndarray],
     atlas_labels: Optional[pd.DataFrame],
-    max_rows: int = 50,
+    significance_meta: Optional[dict] = None,
+    plots_dir: Optional[str] = None,
+    alpha: float = 0.05,
 ) -> dict:
     """
     Build context for the Stable Edges section.
 
-    Tables are capped at *max_rows* edges per network (already sorted by
-    significance) — without a stable-edge threshold a run can produce hundreds
-    of edges, which would make the report metres long. A note reports the total.
+    Displays *all* significant edges (p < *alpha*) per network — no cap — and
+    provides a downloadable CSV of every selected edge with its stability and
+    significance. When permutation diagnostics are available (see
+    :meth:`ReportDataLoader.load_edge_significance_meta`) the method is named
+    and a null-distribution figure is rendered per network.
     """
     if edge_stability is None or edge_stability_significance is None:
         return {
@@ -520,8 +563,14 @@ def build_stable_edges_context(
         "has_edge_data": True,
         "edge_table_positive": "", "edge_table_negative": "",
         "edge_count_positive": 0, "edge_count_negative": 0,
-        "edge_max_rows": max_rows,
+        "edge_total_positive": 0, "edge_total_negative": 0,
+        "edge_alpha": alpha,
+        "null_plot_positive": "", "null_plot_negative": "",
+        "edge_csv_data_uri": "",
     }
+    ctx.update(_method_summary(significance_meta))
+
+    all_rows = []
     try:
         for i, network in enumerate(["positive", "negative"]):
             edges = {
@@ -529,10 +578,48 @@ def build_stable_edges_context(
                 "stability_significance": edge_stability_significance[:, :, i],
             }
             df = create_edge_stability_table(edges, atlas_labels)
-            total = len(df)
-            html = df.head(max_rows).to_html(classes="data-table", border=0)
-            ctx[f"edge_table_{network}"] = html
-            ctx[f"edge_count_{network}"] = total
+            # A real table has the (Region A, Region B) MultiIndex; the empty
+            # placeholder does not.
+            is_real = list(df.index.names) == ["Region A", "Region B"]
+            if not is_real:
+                continue
+
+            flat = df.reset_index()
+            flat.insert(0, "Network", network)
+            all_rows.append(flat)
+
+            ctx[f"edge_total_{network}"] = len(df)
+            sig_df = df[df["Stability Significance"] < alpha]
+            ctx[f"edge_count_{network}"] = len(sig_df)
+            if len(sig_df):
+                ctx[f"edge_table_{network}"] = sig_df.to_html(
+                    classes="data-table", border=0)
+
+            # Null-distribution figure.
+            nm = (significance_meta or {}).get("networks", {}).get(network)
+            if nm and plots_dir and nm.get("max_null"):
+                from cccpm.reporting.plots.stats_figures import null_distribution_plot
+
+                if significance_meta.get("method") == "nbs":
+                    comps = nm.get("components") or []
+                    observed = max((c["statistic"] for c in comps), default=None)
+                else:
+                    observed = nm.get("observed_max")
+                path = null_distribution_plot(
+                    nm["max_null"], plots_dir, f"null_dist_{network}",
+                    network=network, observed=observed,
+                    critical_value=nm.get("critical_value"),
+                    statistic_label=significance_meta.get("statistic_label", "Max statistic"),
+                )
+                ctx[f"null_plot_{network}"] = _svg_to_html(path)
+
+        if all_rows:
+            full = pd.concat(all_rows, ignore_index=True)
+            import base64
+
+            csv_bytes = full.to_csv(index=False).encode("utf-8")
+            ctx["edge_csv_data_uri"] = (
+                "data:text/csv;base64," + base64.b64encode(csv_bytes).decode("ascii"))
     except Exception:
         pass
 

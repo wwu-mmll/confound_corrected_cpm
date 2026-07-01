@@ -396,3 +396,57 @@ class TestEdgeSignificance:
                                             isolated_val=0.8)
         sig = PermutationManager.calculate_p_values_edges_tfce(true, perm)
         assert sig[10, 11, 0] < 0.05
+
+    def test_nbs_diagnostics(self):
+        import json
+        true, perm = _make_stability_arrays(20, 200, clique=range(6),
+                                            isolated=[(10, 11)])
+        sig, meta = PermutationManager.calculate_p_values_edges_nbs(
+            true, perm, return_diagnostics=True)
+        assert sig.shape == (20, 20, 2)
+        assert meta["method"] == "nbs"
+        assert meta["n_permutations"] == 200
+        pos = meta["networks"]["positive"]
+        assert len(pos["max_null"]) == 200
+        assert pos["largest_component_edges"] == 15  # 6-node clique
+        assert pos["n_significant_components"] >= 1
+        assert pos["components"][0]["statistic"] >= pos["components"][-1]["statistic"]
+        # JSON-serialisable (this is what gets written to disk)
+        assert json.dumps(meta)
+
+    def test_tfce_diagnostics(self):
+        import json
+        true, perm = _make_stability_arrays(20, 100, clique=range(6),
+                                            isolated=[(10, 11)])
+        sig, meta = PermutationManager.calculate_p_values_edges_tfce(
+            true, perm, return_diagnostics=True)
+        assert meta["method"] == "tfce"
+        pos = meta["networks"]["positive"]
+        assert len(pos["max_null"]) == 100
+        assert pos["observed_max"] > 0
+        assert json.dumps(meta)
+
+
+class TestStableEdgesContext:
+    def test_context_uncapped_with_csv_and_method_info(self, tmp_path):
+        from cccpm.reporting.section_builders import build_stable_edges_context
+
+        true, perm = _make_stability_arrays(20, 200, clique=range(8),
+                                            isolated=[(10, 11)])
+        sig, meta = PermutationManager.calculate_p_values_edges_nbs(
+            true, perm, return_diagnostics=True)
+
+        ctx = build_stable_edges_context(
+            edge_stability=true,
+            edge_stability_significance=sig,
+            atlas_labels=None,
+            significance_meta=meta,
+            plots_dir=str(tmp_path),
+        )
+        assert ctx["has_edge_data"] is True
+        assert ctx["edge_method"] == "nbs"
+        assert "Network-Based Statistic" in ctx["edge_method_label"]
+        # every significant clique edge shown (8-node clique = 28 edges), no cap
+        assert ctx["edge_count_positive"] == 28
+        assert ctx["edge_csv_data_uri"].startswith("data:text/csv;base64,")
+        assert ctx["null_plot_positive"]  # figure embedded
