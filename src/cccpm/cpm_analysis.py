@@ -387,12 +387,24 @@ class CPMAnalysis:
 
         edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
                             device=self.device)
+
+        # The edge statistics (r, p) depend only on the data and the fixed
+        # correlation statistic — not on the per-run selector params — so compute
+        # them for every run in a single batched pass (over all target columns)
+        # instead of recomputing them once per run. This is the expensive step;
+        # only the cheap thresholding below can vary per run (e.g. when inner CV
+        # selects different params for different runs).
+        r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
+            X=X_train, y=y_train, covariates=cov_train, device=self.device)
+
         for run_id, params in enumerate(best_params):
             self.edge_selection.set_params(**params)
-            current_edges = self.edge_selection.fit_transform(
-                X=X_train, y=y_train[:, run_id].reshape(-1, 1), covariates=cov_train,
-                device=self.device
-            ).return_selected_edges()
+            # Feed this run's precomputed r/p column into the (unchanged)
+            # selection path, keeping any per-run multiple-comparison correction
+            # applied within a single run's family of edges, exactly as before.
+            self.edge_selection.r_edges = r_edges[:, [run_id]]
+            self.edge_selection.p_edges = p_edges[:, [run_id]]
+            current_edges = self.edge_selection.return_selected_edges()
             edges[:, :, run_id] = current_edges.squeeze()
 
         return edges

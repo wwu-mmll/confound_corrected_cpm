@@ -7,6 +7,7 @@ from scipy.stats import pointbiserialr
 from cccpm.edge_selection import (
     correlations_and_pvalues,
     get_residuals,
+    EdgeStatistic,
     UnivariateEdgeSelection,
     PThreshold,
 )
@@ -103,6 +104,43 @@ def test_point_biserial_matches_scipy(seed, n, n1):
 
     scipy_r = np.array([pointbiserialr(y, X[:, i])[0] for i in range(X.shape[1])])
     np.testing.assert_allclose(r, scipy_r, atol=1e-6)
+
+
+@pytest.mark.parametrize("statistic", [
+    "pearson", "spearman", "pearson_partial", "spearman_partial",
+])
+def test_batched_edge_statistics_match_per_column(statistic):
+    """Computing (r, p) for all target columns at once must equal computing
+    each column separately (up to float32 rounding).
+
+    The pipeline batches edge-statistic computation over all runs/permutations
+    in a single call (cpm_analysis._select_edges), relying on the fact that the
+    statistic for one target column does not depend on the others. This guards
+    that assumption: a regression here would change which edges get selected
+    across permutations. The two paths are not bit-identical because a batched
+    matrix-matrix product accumulates in a different order than the per-column
+    matrix-vector product, but they agree to float32 precision (which does not
+    change the downstream p<threshold edge selection in practice — this is also
+    exactly what the inner-CV path has always computed).
+    """
+    rng = np.random.RandomState(0)
+    n_samples, n_features, n_runs = 90, 15, 8
+    X = rng.randn(n_samples, n_features).astype(np.float32)
+    Y = rng.randn(n_samples, n_runs).astype(np.float32)
+    covariates = rng.randn(n_samples, 2).astype(np.float32)
+
+    stat = EdgeStatistic(edge_statistic=statistic)
+    device = torch.device('cpu')
+
+    # Batched: all columns at once.
+    r_all, p_all = stat.fit_transform(X=X, y=Y, covariates=covariates, device=device)
+
+    # Per column, exactly as the old loop did.
+    for run_id in range(n_runs):
+        r_col, p_col = stat.fit_transform(
+            X=X, y=Y[:, [run_id]], covariates=covariates, device=device)
+        torch.testing.assert_close(r_all[:, [run_id]], r_col, rtol=1e-5, atol=1e-6)
+        torch.testing.assert_close(p_all[:, [run_id]], p_col, rtol=1e-5, atol=1e-6)
 
 
 @pytest.mark.parametrize("statistic,binary_target", [
