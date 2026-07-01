@@ -3,56 +3,14 @@ import pandas as pd
 import pytest
 import torch
 import statsmodels.api as sm
-from scipy.stats import pearsonr, spearmanr, pointbiserialr
+from scipy.stats import pointbiserialr
 from cccpm.edge_selection import (
-    pearson_correlation_with_pvalues,
-    spearman_correlation_with_pvalues,
     correlations_and_pvalues,
     get_residuals,
     UnivariateEdgeSelection,
     PThreshold,
 )
 from cccpm.constants import Networks
-
-
-def test_cpm_pearson(simulated_data):
-    """Test CPM implementation of Pearson correlation with p-values"""
-    X, y, _ = simulated_data
-
-    cpm_r, cpm_p = pearson_correlation_with_pvalues(y, X)
-
-    scipy_r = []
-    scipy_p = []
-    for feature in range(X.shape[1]):
-        c, p = pearsonr(X[:, feature], y)
-        scipy_r.append(c)
-        scipy_p.append(p)
-
-    scipy_r = np.array(scipy_r)
-    scipy_p = np.array(scipy_p)
-
-    np.testing.assert_almost_equal(scipy_r, cpm_r, decimal=10)
-    np.testing.assert_almost_equal(scipy_p, cpm_p, decimal=10)
-
-
-def test_cpm_spearman(simulated_data):
-    """Test CPM implementation of Spearman correlation with p-values"""
-    X, y, _ = simulated_data
-
-    cpm_r, cpm_p = spearman_correlation_with_pvalues(y, X)
-
-    scipy_r = []
-    scipy_p = []
-    for feature in range(X.shape[1]):
-        c, p = spearmanr(X[:, feature], y)
-        scipy_r.append(c)
-        scipy_p.append(p)
-
-    scipy_r = np.array(scipy_r)
-    scipy_p = np.array(scipy_p)
-
-    np.testing.assert_almost_equal(scipy_r, cpm_r, decimal=10)
-    np.testing.assert_almost_equal(scipy_p, cpm_p, decimal=10)
 
 
 def test_partial_path_matches_glm_coefficient(simulated_data):

@@ -385,11 +385,13 @@ class CPMAnalysis:
         if self.select_stable_edges:
             return select_stable_edges(stability_edges, self.stability_threshold)
 
-        edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params))
+        edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
+                            device=self.device)
         for run_id, params in enumerate(best_params):
             self.edge_selection.set_params(**params)
             current_edges = self.edge_selection.fit_transform(
-                X=X_train, y=y_train[:, run_id].reshape(-1, 1), covariates=cov_train
+                X=X_train, y=y_train[:, run_id].reshape(-1, 1), covariates=cov_train,
+                device=self.device
             ).return_selected_edges()
             edges[:, :, run_id] = current_edges.squeeze()
 

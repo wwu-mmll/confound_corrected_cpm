@@ -1,72 +1,10 @@
-import pandas as pd
 import numpy as np
-from scipy.stats import ttest_1samp, t, rankdata
 from typing import Union
 
 import torch
 
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
-import statsmodels.stats.multitest as multitest
-from warnings import filterwarnings
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
-
-def one_sample_t_test(matrix, population_mean):
-    # Calculate the mean and standard deviation along the rows
-    sample_means = np.mean(matrix, axis=0)
-    sample_stds = np.std(matrix, axis=0, ddof=1)
-    n = matrix.shape[1]  # Number of samples in each row
-
-    # Calculate the t-statistics
-    filterwarnings('ignore', category=RuntimeWarning)
-    t_stats = (sample_means - population_mean) / (sample_stds / np.sqrt(n))
-
-    # Calculate the p-values using the t-distribution survival function
-    p_values = 2 * t.sf(np.abs(t_stats), df=n - 1)
-
-    return t_stats, p_values
-
-
-def compute_t_and_p_values(correlations, df):
-    # Calculate t-statistics
-    t_stats = correlations * np.sqrt(df / (1 - correlations ** 2))
-    # Calculate p-values
-    p_values = 2 * t.sf(np.abs(t_stats), df=df)
-    return t_stats, p_values
-
-
-def compute_correlation_and_pvalues(x, Y, rank=False):
-    n = len(x)
-
-    if rank:
-        x = rankdata(x)
-        Y = rankdata(Y, axis=0)
-
-    # Mean-centering
-    x_centered = x - np.mean(x)
-    Y_centered = Y - np.mean(Y, axis=0)
-
-    # Correlation calculation
-    corr_numerator = np.dot(Y_centered.T, x_centered)
-    corr_denominator = (np.sqrt(np.sum(Y_centered ** 2, axis=0)) * np.sqrt(np.sum(x_centered ** 2)))
-
-    correlations = corr_numerator / corr_denominator
-
-    # Calculate t-statistics and p-values
-    _, p_values = compute_t_and_p_values(correlations, n - 2)
-
-    return correlations, p_values
-
-
-def pearson_correlation_with_pvalues(x, Y):
-    return compute_correlation_and_pvalues(x, Y, rank=False)
-
-
-def spearman_correlation_with_pvalues(x, Y):
-    return compute_correlation_and_pvalues(x, Y, rank=True)
 
 
 def torch_rankdata(data, dim=-1):
@@ -370,11 +308,6 @@ class EdgeStatistic(BaseEstimator):
                       device):
         r_edges, p_edges = (torch.zeros((X.shape[1], y.shape[1]), device=device),
                             torch.ones((X.shape[1], y.shape[1]), device=device))
-        #if self.t_test_filter:
-        #    _, p_values = one_sample_t_test(X, 0)
-        #    valid_edges = p_values < 0.05
-        #else:
-        #    valid_edges = np.bool(np.ones(X.shape[1]))
 
         # 1. Convert to GPU Tensors immediately
         X = torch.as_tensor(X, device=device, dtype=torch.float32)
