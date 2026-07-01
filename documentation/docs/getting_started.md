@@ -62,6 +62,46 @@ univariate_edge_selection = UnivariateEdgeSelection(
 )
 ```
 
+### Edge & Network Significance
+
+When permutation testing is enabled (`n_permutations > 0`), CCCPM tests whether an edge is
+selected across folds **more consistently than chance** by building a null distribution of
+edge *stability* (the fraction of folds an edge is selected) from the shuffled-target runs.
+
+Because there are tens of thousands of edges — and permutation p-values are floored at
+`1/(n_permutations + 1)` — per-edge FDR is effectively powerless and a per-edge
+max-statistic is crippled by the discreteness of stability. CCCPM therefore controls the
+family-wise error rate at the **subnetwork** level, chosen with `edge_significance_method`:
+
+- **`"nbs"` (default)** — the [Network-Based Statistic](https://doi.org/10.1016/j.neuroimage.2010.06.041)
+  (Zalesky et al., 2010). Edges whose stability meets `nbs_threshold` form a graph; its
+  connected components are tested against a permutation null of the **largest component**.
+  A significant result means *this connected subnetwork* is selected more consistently than
+  chance — it is **not** a claim about any single edge in isolation.
+- **`"tfce"`** — network Threshold-Free Cluster Enhancement: per-edge FWER-corrected
+  p-values with no arbitrary cluster-forming threshold.
+
+```python
+cpm = CPMAnalysis(
+    results_directory="results/",
+    cv=outer_cv,
+    edge_selection=univariate_edge_selection,
+    n_permutations=1000,
+    edge_significance_method="nbs",   # or "tfce"
+    nbs_threshold=0.5,                # stability threshold for component forming
+    nbs_component_stat="extent",      # "extent" (edge count) or "intensity"
+)
+```
+
+The results are written to `stability_edges_significance.npy` (per-edge p-values; with NBS
+every edge in a significant subnetwork shares that subnetwork's p-value) and
+`stability_edges_significance_meta.json` (method, parameters, the permutation null
+distribution, and the observed components). The HTML report visualises these in the
+**Stable Edges** section — the significance method, the largest significant subnetwork, the
+null-distribution plots, every significant edge, and a downloadable CSV of all selected
+edges. See [How CCCPM Works](methods.md#7-edge-stability-significance) for the statistical
+details.
+
 ## Step 3: Set Up the CPMAnalysis Object
 Create an instance of the `CPMAnalysis` class with the required inputs:
 
@@ -88,6 +128,9 @@ cpm = CPMAnalysis(
 - **stability_threshold**: Minimum proportion of folds in which an edge must be selected to be considered stable.
 - **impute_missing_values**: Whether to impute missing values (True or False).
 - **n_permutations**: Number of permutations for permutation testing.
+- **edge_significance_method**: How edge-stability significance is established from the permutations — `"nbs"` (default, subnetwork-level) or `"tfce"` (per-edge). See [Edge & Network Significance](#edge-network-significance).
+- **nbs_threshold**: Stability threshold (`>=`) for NBS component forming (default `0.5`).
+- **nbs_component_stat**: NBS component statistic — `"extent"` (edge count, default) or `"intensity"` (summed supra-threshold stability).
 
 ## Step 4: Run the Analysis
 Call the `run` method to perform the analysis:
