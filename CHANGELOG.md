@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-07-02
+
+Correctness fixes and dead-code cleanup.
+
+### Fixed
+- **Predictive increment baseline.** The `increment` model now computes
+  `full − covariates` (the connectome's added value over the confounds), matching the
+  report and documentation, instead of `full − connectome`. The previous formula measured
+  the covariates' increment over the connectome and read ≈ 0 even when the `residuals`
+  model showed genuine confound-independent brain signal.
+- **TFCE threshold-sweep rounding.** Added a tolerance to the height comparison in the
+  network TFCE statistic so an edge whose stability lands exactly on a sweep gridpoint
+  reliably contributes at its own height. Accumulated `numpy.arange` rounding (e.g.
+  `0.8 → 0.8000000000000001`) could otherwise drop an edge's top contribution
+  non-deterministically across numpy versions.
+
+### Removed
+- Dead code: the uncallable `calculate_final_cv_results_old` method (referenced an
+  undefined name), the unused `chord_v2` plotting module, and unused imports.
+
 ## [0.4.0] — 2026-07-01
 
 Subnetwork-level significance for edge stability.
