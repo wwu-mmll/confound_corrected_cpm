@@ -327,8 +327,18 @@ custom Jinja2 + CSS report (self-contained, offline), then a full visual redesig
       Actions runs (Publish to PyPI on `v0.3.1`, Build and Deploy Docs on `main`, Run Tests,
       Package Smoke) were all queued/in-progress — **Nils: confirm they went green, that
       0.3.1 is on PyPI, and the docs site redeployed.**
-- [ ] Next time, consider a `v0.3.x-test` → TestPyPI dry-run before the real tag (skipped
-      again here since 0.3.0 already validated the publish path).
+- [x] **0.4.0 RELEASED 2026-07-01** (subnetwork-level edge-stability significance).
+      Bumped pyproject 0.3.2→0.4.0 + CHANGELOG; fast-forwarded `develop`→`main` (in sync at
+      commit `ee2b430`); pushed `main` (docs deploy) and tag `v0.4.0` (→ PyPI via publish.yml
+      OIDC). Verified the 0.4.0 wheel BEFORE tagging: clean-venv install on Python 3.11
+      imports, reports `__version__ == 0.4.0`, and includes the new
+      `reporting/plots/stats_figures.py` + Jinja templates. 200 tests green; `mkdocs build
+      --strict` passes. **CI not verified from the session (no `gh` CLI):** at push time the
+      Actions runs (Publish to PyPI on `v0.4.0`, Build and Deploy Docs on `main`, Run Tests,
+      Package Smoke) will be queued/in-progress — **Nils: confirm they went green, that
+      0.4.0 is on PyPI, and the docs site redeployed.**
+- [ ] Next time, consider a `v0.4.x-test` → TestPyPI dry-run before the real tag (skipped
+      again here since prior releases already validated the publish path).
 
 ---
 
