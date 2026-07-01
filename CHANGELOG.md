@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] — 2026-07-01
+
+Documentation and examples: SEM-based simulated data.
+
+### Added
+- **New "Simulating Data" documentation page** covering the SEM-based simulator
+  (`cccpm.simulation.simulate_sem`): the common-cause generative model, the four
+  interpretable edge classes (mixed / pure-signal / confound-only / noise), the
+  `R2` and `kappa` parameterisations, `generate_confound_grid`, and how to binarise
+  the target for classification. Added a matching mkdocstrings API reference page.
+
+### Changed
+- **Migrated the example scripts to the SEM-based simulator.**
+  `regression_quickstart.py`, `classification_quickstart.py` (median-split of the
+  continuous outcome), and `example_simulated_data.py` now generate confound-aware
+  data with a known ground-truth R² via `simulate_data_given_kappa`, instead of the
+  older `simulate_simple` generator.
+
+### Removed
+- Redundant example scripts (`example_simulated_classification.py`, the two
+  `mediator_*` examples) and the unused `simulation/mediator_simulation.py` module.
+
 ## [0.3.1] — 2026-06-30
 
 HTML report redesign.

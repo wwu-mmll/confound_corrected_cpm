@@ -19,7 +19,7 @@ import numpy as np
 from sklearn.model_selection import StratifiedKFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
-from cccpm.simulation.simulate_simple import simulate_confounded_binary_data_chyzhyk
+from cccpm.simulation.simulate_sem import simulate_data_given_kappa
 
 # ---------------------------------------------------------------------------
 # 1. Get some data
@@ -28,11 +28,24 @@ from cccpm.simulation.simulate_simple import simulate_confounded_binary_data_chy
 # y          : the binary outcome (0/1), shape (n_samples,)
 # covariates : nuisance variables to control for, shape (n_samples, n_covariates)
 #
-# We simulate a binary target that is linked to the connectome but also to a
-# confound, so confound control matters here too.
-X, y, covariates = simulate_confounded_binary_data_chyzhyk(
-    n_samples=100, n_features=435, link_type="direct_link"
+# The SEM-based simulator generates a *continuous* outcome with a known amount of
+# confounding (see regression_quickstart.py). ``kappa`` is the fraction of the
+# apparent brain–outcome R² that is actually confound-driven. We then binarise the
+# continuous outcome at its median to obtain a balanced two-class label — so the
+# confound is still baked into the connectome and confound control matters here too.
+sim = simulate_data_given_kappa(
+    R2_X_y=0.4,          # naive R²(y ~ X): apparent brain–outcome strength
+    kappa=0.3,           # 30% of that R² is driven by the confound
+    n_features=435,      # a 30-node connectome (30*29/2 = 435 edges)
+    n_features_informative=40,    # "mixed" edges: real signal + confound leakage
+    n_pure_signal_features=20,    # edges tied to y but NOT the confound
+    n_confound_only_features=20,  # edges tied to y ONLY through the confound
+    n_confounds=2,
+    n_samples=200,
+    random_state=42,
 )
+X, covariates = sim["X"], sim["Z"]
+y = (sim["y"].ravel() > np.median(sim["y"])).astype(float)   # median split → 0/1
 
 # ---------------------------------------------------------------------------
 # 2. Configure edge selection

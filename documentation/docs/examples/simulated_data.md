@@ -1,5 +1,13 @@
+# Simulated Data Example
+
+This example generates a connectome with a **known amount of confounding** using the
+SEM-based simulator and runs a full CPM analysis — including nested cross-validation
+for the p-threshold and an HTML report. For a conceptual guide to the simulator (the
+generative model, the edge classes, and the `R2` / `kappa` knobs), see
+[Simulating Data](../simulation.md).
+
 ### Example Code
-Here is an example of how to generate simulated data:
+
 ```python
 --8<-- "examples/example_simulated_data.py"
 ```

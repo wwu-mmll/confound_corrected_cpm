@@ -22,6 +22,10 @@ your own data.
 - `y` — the continuous outcome, shape `(n_samples,)`.
 - `covariates` — nuisance variables to control for (e.g. age, sex, motion).
 
+The script fills these arrays with the SEM-based simulator, which bakes in a *known*
+amount of confounding so confound control actually matters — see
+[Simulating Data](../simulation.md) for how it works and how to tune it.
+
 **2. Edge selection.** `UnivariateEdgeSelection` correlates each edge with the target
 and keeps edges below a p-value threshold. For regression, use `pearson` or
 `spearman`; switch to the `*_partial` variants (e.g. `pearson_partial`) to control for

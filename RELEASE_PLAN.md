@@ -207,10 +207,17 @@ in both flavors so users can copy the one matching their task.
       `examples/classification.md` embed the actual quickstart scripts via mkdocs
       snippets (so docs can't drift), explain each step, and cross-link to
       "Interpreting Results". Added to nav; `mkdocs build --strict` passes.
-- [ ] Migrate the quickstart/example scripts to the new SEM-based simulator
+- [x] Migrate the quickstart/example scripts to the new SEM-based simulator
       (`simulation/simulate_sem.py`: `simulate_data_given_R2` / `simulate_data_given_kappa`
       / `generate_confound_grid`) for more realistic, confound-aware example data with
-      known ground-truth R². See `examples/confound_inflation_demo.py` for the pattern.
+      known ground-truth R². `regression_quickstart.py`, `classification_quickstart.py`
+      (median-split of the continuous y), and `example_simulated_data.py` now use
+      `simulate_data_given_kappa` (R2_X_y=0.4, kappa=0.3, mixed/pure-signal/confound-only
+      edge classes). All three run; `test_integration.py`/`test_reporting.py` green.
+      Also added a **Simulating Data** docs page (`documentation/docs/simulation.md`:
+      generative model, edge classes, R²/kappa knobs, grid sweep, binarising the target)
+      + mkdocstrings API page (`api/simulation.md`), both wired into nav; `mkdocs build
+      --strict` passes.
 - [ ] Show the key variations in both: confound control (partial corr vs residuals),
       nested CV with p-threshold tuning, stable-edge selection, permutation testing,
       and passing `atlas_labels` for brain plots.

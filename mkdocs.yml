@@ -46,6 +46,7 @@ nav:
 - Installation: 'installation.md'
 - Getting Started: 'getting_started.md'
 - How CCCPM Works: 'methods.md'
+- Simulating Data: 'simulation.md'
 - Interpreting Results: 'interpreting_results.md'
 - Examples:
     - Regression: 'examples/regression.md'
@@ -57,6 +58,7 @@ nav:
     - Models: api/models.md
     - Inner Fold: api/fold.md
     - Results Manager: api/results_manager.md
+    - Simulation: api/simulation.md
 
 extra_css:
   - stylesheets/extra.css

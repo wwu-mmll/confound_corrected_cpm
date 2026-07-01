@@ -17,7 +17,7 @@ import numpy as np
 from sklearn.model_selection import KFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
-from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
+from cccpm.simulation.simulate_sem import simulate_data_given_kappa
 
 # ---------------------------------------------------------------------------
 # 1. Get some data
@@ -28,11 +28,29 @@ from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 #   covariates : nuisance variables to control for (e.g. age, motion, sex),
 #                shape (n_samples, n_covariates)
 #
-# Here we simulate data where the target is genuinely linked to the connectome
-# but also entangled with a confound, so confound control actually matters.
-X, y, covariates = simulate_confounded_data_chyzhyk(
-    n_samples=100, n_features=435, link_type="direct_link"
+# Here we use the SEM-based simulator, which builds data with a *known* ground
+# truth: a latent confound Z is a common cause of both the connectome and the
+# outcome. ``kappa`` is the fraction of the naive brain–outcome R² that is
+# actually confound-driven, so ``kappa=0.3`` means 30% of the apparent signal is
+# spurious and confound control genuinely matters.
+sim = simulate_data_given_kappa(
+    R2_X_y=0.4,          # naive R²(y ~ X): apparent brain–outcome strength
+    kappa=0.3,           # 30% of that R² is driven by the confound
+    n_features=435,      # a 30-node connectome (30*29/2 = 435 edges)
+    n_features_informative=40,    # "mixed" edges: real signal + confound leakage
+    n_pure_signal_features=20,    # edges tied to y but NOT the confound
+    n_confound_only_features=20,  # edges tied to y ONLY through the confound
+    n_confounds=2,
+    n_samples=200,
+    random_state=42,
 )
+X, y, covariates = sim["X"], sim["y"], sim["Z"]
+
+# The simulator records the analytic ground truth, so we know what "good"
+# deconfounded performance should look like before we even run the model.
+info = sim["info"]
+print(f"Naive R²(y~X)          : {info['R2_X_y']:.2f}  (inflated by the confound)")
+print(f"True R²(y~X | Z)        : {info['R2_X_y_given_Z']:.2f}  (what we hope to recover)")
 
 # ---------------------------------------------------------------------------
 # 2. Configure edge selection
@@ -67,4 +85,8 @@ cpm.run(X=X, y=y, covariates=covariates)
 #   - p_values.csv           : permutation-based significance
 #   - cv_predictions.csv     : out-of-sample predictions per subject
 #   - report.html            : a full, human-readable HTML report
+#
+# Because the connectome carries genuine confound leakage, compare the 'connectome'
+# model against the 'residuals' model (which removes the covariates first): the gap
+# between them is the confound inflation the SEM simulator built in on purpose.
 print("Done. Open ./results/regression_quickstart/report.html to explore the results.")
