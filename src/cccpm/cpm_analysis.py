@@ -394,6 +394,13 @@ class CPMAnalysis:
         # instead of recomputing them once per run. This is the expensive step;
         # only the cheap thresholding below can vary per run (e.g. when inner CV
         # selects different params for different runs).
+        #
+        # INVARIANT: this single shared pass is correct only because the edge
+        # statistic itself is fixed across runs (it is a scalar on
+        # UnivariateEdgeSelection, never part of the tunable param grid — only
+        # the p-threshold / correction are). If the statistic (e.g. pearson vs
+        # spearman) ever becomes a per-run hyperparameter, r/p can no longer be
+        # shared and must be computed once per distinct statistic in play.
         r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
             X=X_train, y=y_train, covariates=cov_train, device=self.device)
 
