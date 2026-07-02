@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cccpm"
-version = "0.4.1"
+version = "0.4.2"
 description = "Confound-Corrected Connectome-based Predictive Modeling Python Package"
 authors = [
     "Nils Winter <nils.r.winter@uni-muenster.de>",
@@ -33,6 +33,11 @@ include = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "network: exercises scripts/generate_atlas_data.py (downloads atlas source data); deselected by default — run explicitly with `pytest -m network`",
+]
+# Generator/download tests are opt-in: excluded from default and CI runs.
+addopts = "-m 'not network'"
 
 [tool.coverage.run]
 source = ["cccpm"]
