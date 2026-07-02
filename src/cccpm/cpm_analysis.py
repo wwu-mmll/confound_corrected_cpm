@@ -1,6 +1,6 @@
 import os
 import logging
-import shutil
+import warnings
 
 from typing import Union, Type
 
@@ -18,7 +18,9 @@ from cccpm.models.linear_model import LinearCPM
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import (train_test_split, check_data, impute_missing_values,
-                         select_stable_edges, generate_data_insights, detect_task_type, validate_task_type)
+                         select_stable_edges, generate_data_insights, detect_task_type,
+                         validate_task_type, infer_n_nodes)
+from cccpm.atlases import resolve_atlas
 from cccpm.scoring import score_models
 from cccpm.reporting import HTMLReporter
 from cccpm.constants import Networks, TaskType
@@ -48,6 +50,7 @@ class CPMAnalysis:
                  edge_significance_method: str = "nbs",
                  nbs_threshold: float = 0.5,
                  nbs_component_stat: str = "extent",
+                 atlas: str = None,
                  atlas_labels: str = None,
                  device: str = 'cpu',
                  random_state: int = 42):
@@ -101,9 +104,20 @@ class CPMAnalysis:
             NBS component statistic: ``'extent'`` (number of edges, classic NBS)
             or ``'intensity'`` (summed supra-threshold stability). Ignored when
             method is ``'tfce'``.
+        atlas: str, default=None
+            Which atlas to use for the brain plots in the report. Either the name
+            of a built-in atlas (e.g. ``'Schaefer100-17'``; see
+            :func:`cccpm.atlases.list_atlases`) or a path to a custom CSV file
+            with columns ``region``, ``x``, ``y``, ``z`` (MNI coordinates), and
+            optionally ``network``, ``hemisphere``, ``structure``. When a
+            ``network`` column is present, the network-summary matrix and chord
+            diagram are enabled automatically. ``None`` disables the brain plots
+            that require coordinates.
         atlas_labels: str, default=None
-            Path to a CSV file with atlas region labels (columns ``x``, ``y``,
-            ``z``, ``region``) used for the brain plots in the report.
+            .. deprecated::
+                Use ``atlas`` instead. Accepts a path to a custom atlas CSV. If
+                both ``atlas`` and ``atlas_labels`` are given, ``atlas`` wins.
+                This parameter will be removed in a future release.
         device: str, default='cpu'
             Compute device: ``'cpu'``, or ``'cuda'``/``'gpu'`` to use an available
             GPU (falls back to CPU with a warning if CUDA is unavailable).
@@ -159,8 +173,10 @@ class CPMAnalysis:
             if self.select_stable_edges:
                 raise RuntimeError("Stable edges can only be selected when using an inner cv.")
 
-        # check and copy atlas labels file
-        self.atlas_labels = self._validate_and_copy_atlas_file(atlas_labels)
+        # Resolve the atlas (built-in name or custom CSV path) to a DataFrame,
+        # then persist it alongside the results so the report is self-contained.
+        self.atlas = self._resolve_atlas(atlas, atlas_labels)
+        self.atlas_labels = self._save_atlas(self.atlas)
 
         # results are saved to the results manager instance
         self.results_manager = None
@@ -187,41 +203,62 @@ class CPMAnalysis:
         self.logger.info(f"Device:                  {self.device}")
         self.logger.info("="*50)
 
-    def _validate_and_copy_atlas_file(self, csv_path):
+    def _resolve_atlas(self, atlas, atlas_labels):
         """
-        Validates that a CSV file exists and contains the required columns ('x', 'y', 'z', 'region').
-        If valid, copies it to <self.results_directory>/edges.
+        Resolve the ``atlas`` / ``atlas_labels`` arguments to a validated
+        DataFrame (or ``None``). ``atlas`` may be a built-in atlas name or a
+        path to a custom CSV. ``atlas_labels`` is deprecated: it is accepted as
+        a custom CSV path but ``atlas`` takes precedence when both are given.
         """
-        if csv_path is None:
+        if atlas_labels is not None:
+            warnings.warn(
+                "`atlas_labels` is deprecated and will be removed in a future "
+                "release; use `atlas` instead (it accepts both built-in atlas "
+                "names and custom CSV paths).",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            if atlas is None:
+                atlas = atlas_labels
+            else:
+                self.logger.warning(
+                    "Both `atlas` and `atlas_labels` were provided; using "
+                    "`atlas` and ignoring `atlas_labels`."
+                )
+
+        atlas_df = resolve_atlas(atlas)
+        if atlas_df is not None:
+            self.logger.info(f"Using atlas '{atlas}' with {len(atlas_df)} regions.")
+        return atlas_df
+
+    def _save_atlas(self, atlas_df):
+        """
+        Persist the resolved atlas to ``<results_directory>/edges/atlas.csv`` so
+        the HTML report is self-contained. Returns the saved path (or ``None``).
+        """
+        if atlas_df is None:
             return None
+        dest_path = os.path.join(self.results_directory, "edges", "atlas.csv")
+        atlas_df.to_csv(dest_path, index=False)
+        self.logger.info(f"Saved atlas to {dest_path}")
+        return dest_path
 
-        required_columns = {"x", "y", "z", "region"}
-        csv_path = os.path.abspath(csv_path)
-
-        # Check if file exists
-        if not os.path.isfile(csv_path):
-            raise RuntimeError(f"CSV file does not exist: {csv_path}")
-
-        # Try to read and validate columns
-        try:
-            df = pd.read_csv(csv_path)
-            missing = required_columns - set(df.columns)
-
-            if missing:
-                raise RuntimeError(f"CSV file is missing required columns: {', '.join(missing)}")
-        except Exception as e:
-            raise RuntimeError(f"Error reading CSV file {csv_path}: {e}")
-
-        # File and columns valid, proceed to copy
-        dest_path = os.path.join(self.results_directory, "edges", os.path.basename(csv_path))
-
-        try:
-            shutil.copy(csv_path, dest_path)
-            self.logger.info(f"Copied CSV file to {dest_path}")
-            return dest_path
-        except Exception as e:
-            self.logger.error(f"Error copying file to {dest_path}: {e}")
-            return None
+    def _validate_atlas_node_count(self, n_features):
+        """
+        Ensure the atlas region count matches the connectome node count implied
+        by the number of edge features. A mismatched atlas would silently
+        mislabel regions and misplace nodes in the brain plots.
+        """
+        if self.atlas is None:
+            return
+        n_nodes = infer_n_nodes(n_features)
+        if n_nodes is not None and len(self.atlas) != n_nodes:
+            raise ValueError(
+                f"Atlas has {len(self.atlas)} regions but the connectome has "
+                f"{n_features} edges, implying {n_nodes} nodes. The atlas must "
+                f"have exactly one row per connectome node. Please select an "
+                f"atlas matching your parcellation."
+            )
 
     def run(self,
             X: Union[pd.DataFrame, np.ndarray],
@@ -242,6 +279,9 @@ class CPMAnalysis:
         # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
+
+        # Guard against an atlas that doesn't match the connectome size.
+        self._validate_atlas_node_count(X.shape[1])
 
         # Detect or validate task type
         if self.task_type is None:

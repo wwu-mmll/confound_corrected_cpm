@@ -1,0 +1,111 @@
+region,x,y,z,hemisphere,structure
+Left Frontal Pole,-24.96,53.0,7.53,L,cortical
+Right Frontal Pole,26.12,52.2,8.2,R,cortical
+Left Insular Cortex,-36.71,1.44,-0.17,L,cortical
+Right Insular Cortex,37.56,2.57,-0.33,R,cortical
+Left Superior Frontal Gyrus,-14.2,18.77,56.65,L,cortical
+Right Superior Frontal Gyrus,14.7,18.87,57.13,R,cortical
+Left Middle Frontal Gyrus,-38.32,18.59,42.34,L,cortical
+Right Middle Frontal Gyrus,39.37,18.76,43.03,R,cortical
+"Left Inferior Frontal Gyrus, pars triangularis",-49.99,28.57,8.8,L,cortical
+"Right Inferior Frontal Gyrus, pars triangularis",52.31,28.0,7.76,R,cortical
+"Left Inferior Frontal Gyrus, pars opercularis",-50.93,14.75,15.31,L,cortical
+"Right Inferior Frontal Gyrus, pars opercularis",52.41,15.48,16.15,R,cortical
+Left Precentral Gyrus,-34.28,-11.5,49.3,L,cortical
+Right Precentral Gyrus,34.85,-10.59,50.23,R,cortical
+Left Temporal Pole,-40.63,11.14,-29.7,L,cortical
+Right Temporal Pole,40.7,13.07,-29.83,R,cortical
+"Left Superior Temporal Gyrus, anterior division",-56.19,-3.65,-8.32,L,cortical
+"Right Superior Temporal Gyrus, anterior division",57.67,-0.51,-10.24,R,cortical
+"Left Superior Temporal Gyrus, posterior division",-60.65,-27.36,2.36,L,cortical
+"Right Superior Temporal Gyrus, posterior division",60.31,-23.29,1.58,R,cortical
+"Left Middle Temporal Gyrus, anterior division",-57.61,-4.04,-22.35,L,cortical
+"Right Middle Temporal Gyrus, anterior division",57.91,-1.31,-24.7,R,cortical
+"Left Middle Temporal Gyrus, posterior division",-61.31,-27.29,-11.54,L,cortical
+"Right Middle Temporal Gyrus, posterior division",61.49,-22.39,-12.78,R,cortical
+"Left Middle Temporal Gyrus, temporooccipital part",-57.84,-53.07,0.83,L,cortical
+"Right Middle Temporal Gyrus, temporooccipital part",58.41,-49.16,1.54,R,cortical
+"Left Inferior Temporal Gyrus, anterior division",-48.29,-5.08,-39.35,L,cortical
+"Right Inferior Temporal Gyrus, anterior division",46.33,-2.39,-41.26,R,cortical
+"Left Inferior Temporal Gyrus, posterior division",-53.66,-28.61,-26.02,L,cortical
+"Right Inferior Temporal Gyrus, posterior division",53.59,-23.44,-28.26,R,cortical
+"Left Inferior Temporal Gyrus, temporooccipital part",-51.94,-53.48,-16.6,L,cortical
+"Right Inferior Temporal Gyrus, temporooccipital part",54.24,-49.85,-16.81,R,cortical
+Left Postcentral Gyrus,-38.55,-27.75,51.85,L,cortical
+Right Postcentral Gyrus,38.0,-26.17,52.56,R,cortical
+Left Superior Parietal Lobule,-29.38,-49.55,57.65,L,cortical
+Right Superior Parietal Lobule,29.29,-47.77,59.08,R,cortical
+"Left Supramarginal Gyrus, anterior division",-56.93,-32.79,37.3,L,cortical
+"Right Supramarginal Gyrus, anterior division",58.55,-27.11,37.92,R,cortical
+"Left Supramarginal Gyrus, posterior division",-54.87,-46.2,33.44,L,cortical
+"Right Supramarginal Gyrus, posterior division",55.29,-40.47,33.82,R,cortical
+Left Angular Gyrus,-50.39,-55.68,29.97,L,cortical
+Right Angular Gyrus,52.05,-51.83,32.37,R,cortical
+"Left Lateral Occipital Cortex, superior division",-32.16,-72.88,38.02,L,cortical
+"Right Lateral Occipital Cortex, superior division",33.04,-71.11,38.98,R,cortical
+"Left Lateral Occipital Cortex, inferior division",-45.18,-75.62,-2.0,L,cortical
+"Right Lateral Occipital Cortex, inferior division",45.61,-74.0,-1.68,R,cortical
+Left Intracalcarine Cortex,-10.31,-74.94,8.12,L,cortical
+Right Intracalcarine Cortex,11.89,-73.45,8.46,R,cortical
+Left Frontal Medial Cortex,-5.16,43.51,-18.24,L,cortical
+Right Frontal Medial Cortex,4.44,43.07,-18.82,R,cortical
+Left Juxtapositional Lobule Cortex (formerly Supplementary Motor Cortex),-5.61,-2.57,56.26,L,cortical
+Right Juxtapositional Lobule Cortex (formerly Supplementary Motor Cortex),6.14,-2.63,57.67,R,cortical
+Left Subcallosal Cortex,-5.27,20.69,-15.08,L,cortical
+Right Subcallosal Cortex,4.59,21.1,-15.25,R,cortical
+Left Paracingulate Gyrus,-6.49,36.83,20.88,L,cortical
+Right Paracingulate Gyrus,6.67,36.69,22.57,R,cortical
+"Left Cingulate Gyrus, anterior division",-4.74,18.06,24.66,L,cortical
+"Right Cingulate Gyrus, anterior division",5.39,19.11,24.03,R,cortical
+"Left Cingulate Gyrus, posterior division",-6.0,-37.57,29.81,L,cortical
+"Right Cingulate Gyrus, posterior division",6.63,-35.9,30.18,R,cortical
+Left Precuneous Cortex,-7.89,-59.95,37.4,L,cortical
+Right Precuneous Cortex,8.94,-58.4,38.54,R,cortical
+Left Cuneal Cortex,-8.48,-80.28,27.26,L,cortical
+Right Cuneal Cortex,9.17,-78.38,28.09,R,cortical
+Left Frontal Orbital Cortex,-29.7,23.81,-16.5,L,cortical
+Right Frontal Orbital Cortex,29.23,23.08,-16.25,R,cortical
+"Left Parahippocampal Gyrus, anterior division",-21.89,-9.0,-30.41,L,cortical
+"Right Parahippocampal Gyrus, anterior division",22.2,-7.91,-30.3,R,cortical
+"Left Parahippocampal Gyrus, posterior division",-21.9,-32.37,-16.98,L,cortical
+"Right Parahippocampal Gyrus, posterior division",23.02,-30.4,-17.02,R,cortical
+Left Lingual Gyrus,-12.56,-65.24,-5.39,L,cortical
+Right Lingual Gyrus,13.98,-62.79,-4.98,R,cortical
+"Left Temporal Fusiform Cortex, anterior division",-31.75,-4.59,-42.2,L,cortical
+"Right Temporal Fusiform Cortex, anterior division",31.14,-2.96,-42.44,R,cortical
+"Left Temporal Fusiform Cortex, posterior division",-36.08,-29.5,-25.04,L,cortical
+"Right Temporal Fusiform Cortex, posterior division",36.32,-24.36,-27.72,R,cortical
+Left Temporal Occipital Fusiform Cortex,-33.56,-53.69,-16.05,L,cortical
+Right Temporal Occipital Fusiform Cortex,35.05,-49.97,-16.72,R,cortical
+Left Occipital Fusiform Gyrus,-26.41,-76.67,-13.67,L,cortical
+Right Occipital Fusiform Gyrus,27.35,-75.25,-12.3,R,cortical
+Left Frontal Opercular Cortex,-39.61,18.45,4.54,L,cortical
+Right Frontal Opercular Cortex,41.22,18.6,4.72,R,cortical
+Left Central Opercular Cortex,-47.88,-8.33,11.75,L,cortical
+Right Central Opercular Cortex,49.33,-5.59,11.08,R,cortical
+Left Parietal Opercular Cortex,-48.44,-31.65,20.39,L,cortical
+Right Parietal Opercular Cortex,48.83,-27.44,21.42,R,cortical
+Left Planum Polare,-46.57,-5.92,-7.49,L,cortical
+Right Planum Polare,48.1,-3.54,-7.14,R,cortical
+Left Heschl's Gyrus (includes H1 and H2),-45.27,-20.22,7.08,L,cortical
+Right Heschl's Gyrus (includes H1 and H2),46.01,-17.45,7.01,R,cortical
+Left Planum Temporale,-52.51,-29.79,10.92,L,cortical
+Right Planum Temporale,54.93,-25.17,12.1,R,cortical
+Left Supracalcarine Cortex,-16.42,-65.05,15.79,L,cortical
+Right Supracalcarine Cortex,3.21,-78.71,13.84,R,cortical
+Left Occipital Pole,-17.05,-96.51,6.89,L,cortical
+Right Occipital Pole,18.68,-95.15,8.57,R,cortical
+L_Thalamus,-10.14,-19.35,6.17,L,subcortical
+L_Caudate,-12.69,9.78,9.42,L,subcortical
+L_Putamen,-24.89,0.76,0.25,L,subcortical
+L_Pallidum,-19.27,-4.7,-1.27,L,subcortical
+L_Hippocampus,-24.85,-22.22,-14.34,L,subcortical
+L_Amygdala,-22.58,-4.86,-18.14,L,subcortical
+L_Accumbens,-9.51,11.44,-7.26,L,subcortical
+R_Thalamus,10.89,-18.33,6.58,R,subcortical
+R_Caudate,13.28,10.32,10.44,R,subcortical
+R_Putamen,25.49,1.94,0.25,R,subcortical
+R_Pallidum,19.98,-3.85,-1.13,R,subcortical
+R_Hippocampus,26.37,-20.59,-14.67,R,subcortical
+R_Amygdala,22.99,-3.7,-18.08,R,subcortical
+R_Accumbens,9.48,12.1,-6.64,R,subcortical

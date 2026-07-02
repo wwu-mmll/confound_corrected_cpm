@@ -48,6 +48,7 @@ nav:
 - How CCCPM Works: 'methods.md'
 - Simulating Data: 'simulation.md'
 - Interpreting Results: 'interpreting_results.md'
+- Brain Atlases: 'atlases.md'
 - Examples:
     - Regression: 'examples/regression.md'
     - Classification: 'examples/classification.md'

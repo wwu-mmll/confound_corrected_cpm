@@ -40,7 +40,7 @@ cpm = CPMAnalysis(results_directory='./tmp/example_simulated_data',
                   edge_selection=univariate_edge_selection,
                   inner_cv=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
                   n_permutations=100,
-                  #atlas_labels='atlas_labels.csv',
+                  #atlas='Schaefer100-17',  # built-in atlas, or a path to a custom CSV
                   select_stable_edges=False,
                   device='cpu')
 
