@@ -1,0 +1,163 @@
+region,x,y,z,hemisphere,structure
+L G_and_S_frontomargin,-23.35,56.7,-8.16,L,cortical
+L G_and_S_occipital_inf,-37.24,-82.3,-11.96,L,cortical
+L G_and_S_paracentral,-8.2,-33.42,68.84,L,cortical
+L G_and_S_subcentral,-56.27,-11.32,15.58,L,cortical
+L G_and_S_transv_frontopol,-14.21,63.64,-0.62,L,cortical
+L G_and_S_cingul-Ant,-8.03,38.9,10.44,L,cortical
+L G_and_S_cingul-Mid-Ant,-7.37,15.75,35.87,L,cortical
+L G_and_S_cingul-Mid-Post,-7.89,-11.35,42.17,L,cortical
+L G_cingul-Post-dorsal,-4.01,-39.19,31.92,L,cortical
+L G_cingul-Post-ventral,-7.66,-48.39,6.08,L,cortical
+L G_cuneus,-5.5,-81.93,18.14,L,cortical
+L G_front_inf-Opercular,-50.1,11.67,10.32,L,cortical
+L G_front_inf-Orbital,-44.16,30.49,-9.22,L,cortical
+L G_front_inf-Triangul,-49.85,30.21,5.11,L,cortical
+L G_front_middle,-38.63,27.73,35.7,L,cortical
+L G_front_sup,-9.86,25.48,46.89,L,cortical
+L G_Ins_lg_and_S_cent_ins,-38.48,-7.88,0.55,L,cortical
+L G_insular_short,-37.05,9.67,-2.48,L,cortical
+L G_occipital_middle,-39.75,-83.96,12.14,L,cortical
+L G_occipital_sup,-14.85,-88.93,28.68,L,cortical
+L G_oc-temp_lat-fusifor,-34.65,-53.95,-18.77,L,cortical
+L G_oc-temp_med-Lingual,-10.89,-72.39,-4.81,L,cortical
+L G_oc-temp_med-Parahip,-22.81,-18.84,-24.54,L,cortical
+L G_orbital,-27.92,34.28,-16.82,L,cortical
+L G_pariet_inf-Angular,-42.94,-67.1,37.59,L,cortical
+L G_pariet_inf-Supramar,-55.88,-36.8,31.77,L,cortical
+L G_parietal_sup,-21.44,-60.61,58.77,L,cortical
+L G_postcentral,-44.62,-24.77,54.73,L,cortical
+L G_precentral,-42.82,-8.89,51.18,L,cortical
+L G_precuneus,-6.1,-57.67,41.72,L,cortical
+L G_rectus,-5.06,38.35,-19.08,L,cortical
+L G_subcallosal,-4.12,14.83,-9.07,L,cortical
+L G_temp_sup-G_T_transv,-47.51,-19.41,7.08,L,cortical
+L G_temp_sup-Lateral,-58.22,-11.69,-4.9,L,cortical
+L G_temp_sup-Plan_polar,-40.47,4.12,-19.59,L,cortical
+L G_temp_sup-Plan_tempo,-57.24,-37.81,17.53,L,cortical
+L G_temporal_inf,-51.55,-34.4,-25.64,L,cortical
+L G_temporal_middle,-59.93,-30.52,-12.25,L,cortical
+L Lat_Fis-ant-Horizont,-37.94,31.69,-1.57,L,cortical
+L Lat_Fis-ant-Vertical,-43.26,21.45,8.09,L,cortical
+L Lat_Fis-post,-40.66,-33.73,17.74,L,cortical
+L Pole_occipital,-18.34,-98.38,-2.71,L,cortical
+L Pole_temporal,-34.4,6.99,-36.89,L,cortical
+L S_calcarine,-16.33,-67.09,5.54,L,cortical
+L S_central,-36.29,-20.44,46.13,L,cortical
+L S_cingul-Marginalis,-13.84,-36.85,47.93,L,cortical
+L S_circular_insula_ant,-29.91,21.72,-8.51,L,cortical
+L S_circular_insula_inf,-40.91,-12.55,-6.58,L,cortical
+L S_circular_insula_sup,-35.74,6.24,11.43,L,cortical
+L S_collat_transv_ant,-40.73,-21.85,-25.7,L,cortical
+L S_collat_transv_post,-24.75,-78.57,-7.25,L,cortical
+L S_front_inf,-39.36,23.23,22.03,L,cortical
+L S_front_middle,-27.08,42.98,20.67,L,cortical
+L S_front_sup,-23.93,19.09,44.83,L,cortical
+L S_interm_prim-Jensen,-50.6,-52.66,31.51,L,cortical
+L S_intrapariet_and_P_trans,-29.13,-59.97,39.85,L,cortical
+L S_oc_middle_and_Lunatus,-30.79,-86.74,4.41,L,cortical
+L S_oc_sup_and_transversal,-27.3,-80.32,19.85,L,cortical
+L S_occipital_ant,-43.26,-68.8,2.32,L,cortical
+L S_oc-temp_lat,-43.12,-51.49,-13.44,L,cortical
+L S_oc-temp_med_and_Lingual,-28.91,-49.5,-10.42,L,cortical
+L S_orbital_lateral,-40.7,41.53,-1.77,L,cortical
+L S_orbital_med-olfact,-12.86,23.85,-17.47,L,cortical
+L S_orbital-H_Shaped,-25.95,36.05,-12.14,L,cortical
+L S_parieto_occipital,-15.54,-68.23,24.16,L,cortical
+L S_pericallosal,-4.83,-4.06,20.62,L,cortical
+L S_postcentral,-37.45,-35.62,46.54,L,cortical
+L S_precentral-inf-part,-43.85,3.93,28.49,L,cortical
+L S_precentral-sup-part,-28.59,-8.45,53.13,L,cortical
+L S_suborbital,-7.26,39.88,-9.27,L,cortical
+L S_subparietal,-10.37,-48.54,36.19,L,cortical
+L S_temporal_inf,-53.35,-24.93,-21.78,L,cortical
+L S_temporal_sup,-49.32,-41.93,4.93,L,cortical
+L S_temporal_transverse,-50.52,-25.5,4.06,L,cortical
+R G_and_S_frontomargin,21.58,57.74,-9.43,R,cortical
+R G_and_S_occipital_inf,41.7,-78.33,-11.15,R,cortical
+R G_and_S_paracentral,6.8,-33.38,68.67,R,cortical
+R G_and_S_subcentral,56.87,-9.71,16.3,R,cortical
+R G_and_S_transv_frontopol,16.05,63.19,1.51,R,cortical
+R G_and_S_cingul-Ant,8.57,38.72,8.58,R,cortical
+R G_and_S_cingul-Mid-Ant,7.72,16.37,36.52,R,cortical
+R G_and_S_cingul-Mid-Post,6.66,-10.17,42.72,R,cortical
+R G_cingul-Post-dorsal,3.38,-38.9,33.19,R,cortical
+R G_cingul-Post-ventral,8.16,-50.07,7.65,R,cortical
+R G_cuneus,6.1,-78.95,19.64,R,cortical
+R G_front_inf-Opercular,51.02,8.84,9.05,R,cortical
+R G_front_inf-Orbital,49.52,33.13,-7.19,R,cortical
+R G_front_inf-Triangul,52.19,28.8,8.48,R,cortical
+R G_front_middle,39.66,29.64,33.92,R,cortical
+R G_front_sup,10.18,26.86,46.75,R,cortical
+R G_Ins_lg_and_S_cent_ins,39.58,-4.7,-1.93,R,cortical
+R G_insular_short,38.62,10.26,-1.58,R,cortical
+R G_occipital_middle,40.93,-81.29,14.61,R,cortical
+R G_occipital_sup,19.05,-85.21,32.94,R,cortical
+R G_oc-temp_lat-fusifor,33.81,-51.05,-18.33,R,cortical
+R G_oc-temp_med-Lingual,11.48,-66.6,-3.57,R,cortical
+R G_oc-temp_med-Parahip,24.89,-16.31,-25.38,R,cortical
+R G_orbital,28.48,34.67,-16.83,R,cortical
+R G_pariet_inf-Angular,45.91,-61.96,39.71,R,cortical
+R G_pariet_inf-Supramar,57.66,-32.35,32.24,R,cortical
+R G_parietal_sup,22.32,-56.27,61.69,R,cortical
+R G_postcentral,44.29,-23.42,55.06,R,cortical
+R G_precentral,42.11,-7.9,51.54,R,cortical
+R G_precuneus,6.12,-59.35,43.86,R,cortical
+R G_rectus,5.53,33.17,-20.08,R,cortical
+R G_subcallosal,5.37,14.53,-12.22,R,cortical
+R G_temp_sup-G_T_transv,48.03,-17.29,7.16,R,cortical
+R G_temp_sup-Lateral,59.87,-9.09,-4.52,R,cortical
+R G_temp_sup-Plan_polar,43.04,5.04,-18.16,R,cortical
+R G_temp_sup-Plan_tempo,57.96,-31.51,17.83,R,cortical
+R G_temporal_inf,53.27,-32.86,-25.28,R,cortical
+R G_temporal_middle,61.33,-28.07,-12.28,R,cortical
+R Lat_Fis-ant-Horizont,41.46,28.37,2.7,R,cortical
+R Lat_Fis-ant-Vertical,45.39,20.79,9.55,R,cortical
+R Lat_Fis-post,40.53,-27.82,18.42,R,cortical
+R Pole_occipital,17.79,-95.7,-1.59,R,cortical
+R Pole_temporal,37.52,7.67,-36.51,R,cortical
+R S_calcarine,17.92,-64.03,6.25,R,cortical
+R S_central,35.89,-19.39,46.7,R,cortical
+R S_cingul-Marginalis,13.06,-36.31,48.03,R,cortical
+R S_circular_insula_ant,31.83,22.85,-6.11,R,cortical
+R S_circular_insula_inf,42.8,-11.08,-6.91,R,cortical
+R S_circular_insula_sup,36.65,7.04,11.12,R,cortical
+R S_collat_transv_ant,42.61,-20.95,-25.3,R,cortical
+R S_collat_transv_post,26.16,-78.05,-7.81,R,cortical
+R S_front_inf,39.72,25.09,22.09,R,cortical
+R S_front_middle,28.88,41.8,22.0,R,cortical
+R S_front_sup,24.18,19.15,46.2,R,cortical
+R S_interm_prim-Jensen,44.34,-44.62,38.38,R,cortical
+R S_intrapariet_and_P_trans,29.83,-56.65,44.16,R,cortical
+R S_oc_middle_and_Lunatus,33.5,-82.78,7.3,R,cortical
+R S_oc_sup_and_transversal,28.22,-76.99,22.98,R,cortical
+R S_occipital_ant,43.7,-66.36,4.26,R,cortical
+R S_oc-temp_lat,43.89,-50.54,-13.63,R,cortical
+R S_oc-temp_med_and_Lingual,30.32,-48.08,-10.66,R,cortical
+R S_orbital_lateral,42.72,40.57,-1.2,R,cortical
+R S_orbital_med-olfact,13.75,23.42,-16.57,R,cortical
+R S_orbital-H_Shaped,26.11,35.8,-12.66,R,cortical
+R S_parieto_occipital,17.16,-67.14,25.67,R,cortical
+R S_pericallosal,6.22,-3.64,21.58,R,cortical
+R S_postcentral,36.77,-33.38,47.69,R,cortical
+R S_precentral-inf-part,43.21,5.78,29.34,R,cortical
+R S_precentral-sup-part,27.5,-7.93,54.3,R,cortical
+R S_suborbital,7.93,41.0,-12.02,R,cortical
+R S_subparietal,9.98,-48.8,37.29,R,cortical
+R S_temporal_inf,53.21,-23.38,-21.72,R,cortical
+R S_temporal_sup,50.09,-38.25,4.34,R,cortical
+R S_temporal_transverse,52.57,-22.04,6.36,R,cortical
+L_Thalamus,-10.14,-19.35,6.17,L,subcortical
+L_Caudate,-12.69,9.78,9.42,L,subcortical
+L_Putamen,-24.89,0.76,0.25,L,subcortical
+L_Pallidum,-19.27,-4.7,-1.27,L,subcortical
+L_Hippocampus,-24.85,-22.22,-14.34,L,subcortical
+L_Amygdala,-22.58,-4.86,-18.14,L,subcortical
+L_Accumbens,-9.51,11.44,-7.26,L,subcortical
+R_Thalamus,10.89,-18.33,6.58,R,subcortical
+R_Caudate,13.28,10.32,10.44,R,subcortical
+R_Putamen,25.49,1.94,0.25,R,subcortical
+R_Pallidum,19.98,-3.85,-1.13,R,subcortical
+R_Hippocampus,26.37,-20.59,-14.67,R,subcortical
+R_Amygdala,22.99,-3.7,-18.08,R,subcortical
+R_Accumbens,9.48,12.1,-6.64,R,subcortical

@@ -80,6 +80,24 @@ def test_volumetric_atlases_node_counts():
     assert set(load_atlas("Glasser360")["hemisphere"]) == {"L", "R"}
 
 
+def test_wholebrain_variants_add_subcortical():
+    # Each whole-brain variant = its cortical atlas + 14 subcortical structures.
+    for cortical, wholebrain in [
+        ("DesikanKilliany68", "DesikanKillianyWholeBrain"),
+        ("Destrieux148", "DestrieuxWholeBrain"),
+        ("Glasser360", "GlasserWholeBrain"),
+        ("HarvardOxfordCortical", "HarvardOxfordWholeBrain"),
+    ]:
+        cort = load_atlas(cortical)
+        wb = load_atlas(wholebrain)
+        assert len(wb) == len(cort) + 14
+        sub = wb[wb["structure"] == "subcortical"]
+        assert len(sub) == 14
+        assert {"L_Hippocampus", "R_Thalamus", "L_Amygdala"} <= set(sub["region"])
+        # Subcortical structures are lateralised correctly (left is x < 0).
+        assert ((sub["hemisphere"] == "L") == (sub["x"] < 0)).all()
+
+
 def test_load_atlas_is_case_insensitive():
     assert len(load_atlas("schaefer100-17")) == len(load_atlas("Schaefer100-17"))
 

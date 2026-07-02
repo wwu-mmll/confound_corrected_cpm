@@ -1,8 +1,10 @@
 # Design note: built-in atlas coordinates
 
-**Status:** implemented — `develop`. Bundled atlases (16): Schaefer 100–400 (×7/×17),
+**Status:** implemented — `develop`. Bundled atlases (20): Schaefer 100–400 (×7/×17),
 Power264, Dosenbach160, Seitzman300, **Destrieux148**, **HarvardOxfordCortical**, **AAL116**,
-**Glasser360**, **DesikanKilliany68**. Surface/volumetric atlases use published *volumetric
+**Glasser360**, **DesikanKilliany68**, plus whole-brain variants **DesikanKillianyWholeBrain**,
+**DestrieuxWholeBrain**, **GlasserWholeBrain**, **HarvardOxfordWholeBrain** (cortical atlas +
+the 14 standard subcortical GM structures with Harvard-Oxford MNI centroids). Surface/volumetric atlases use published *volumetric
 MNI* versions with computed centroids: Destrieux/Harvard-Oxford via nilearn +
 `find_parcellation_cut_coords`; AAL from the SPM12 release (downloaded via curl — the host
 `gin.cnrs.fr` ships a broken TLS chain that urllib/requests reject); Glasser MMP-360 from the

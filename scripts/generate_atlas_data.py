@@ -516,6 +516,81 @@ def generate_desikan_killiany() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Whole-brain variants — cortical atlas + the standard subcortical structures.
+#
+# The subcortical gray-matter structures (the FreeSurfer aseg / ENIGMA "sctx"
+# set: accumbens, amygdala, caudate, hippocampus, pallidum, putamen, thalamus
+# x L/R) are the same regardless of the cortical parcellation they accompany, so
+# we compute them once from the volumetric-MNI Harvard-Oxford subcortical atlas
+# and append them to each cortical atlas to form a *WholeBrain variant. The
+# cortical-only atlases are kept as-is.
+# ---------------------------------------------------------------------------
+
+_HO_SUBCORTICAL_KEEP = (
+    "Thalamus", "Caudate", "Putamen", "Pallidum",
+    "Hippocampus", "Amygdala", "Accumbens",
+)
+
+
+def _harvard_oxford_subcortical():
+    """The 14 standard subcortical GM structures as MNI centroids (or None).
+
+    Non-gray-matter Harvard-Oxford labels (white matter, ventricle, cortex,
+    brain-stem) are excluded so this is a clean, standard subcortical set."""
+    from nilearn import datasets as nds
+    from nilearn.plotting import find_parcellation_cut_coords
+    try:
+        ho = nds.fetch_atlas_harvard_oxford("sub-maxprob-thr25-2mm")
+    except Exception as e:  # noqa: BLE001
+        print(f"  (subcortical) Harvard-Oxford fetch failed: {e}")
+        return None
+    labels = list(ho["labels"])
+    coords, labs = find_parcellation_cut_coords(ho["maps"], return_label_names=True)
+    rows = []
+    for c, v in zip(coords, labs):
+        nm = labels[int(v)]
+        if not any(k in nm for k in _HO_SUBCORTICAL_KEEP):
+            continue
+        side = "L" if nm.startswith("Left") else "R" if nm.startswith("Right") else "M"
+        structure_name = nm.replace("Left ", "").replace("Right ", "").strip()
+        rows.append((f"{side}_{structure_name}", c[0], c[1], c[2], side, "subcortical"))
+    return pd.DataFrame(rows, columns=["region", "x", "y", "z", "hemisphere", "structure"])
+
+
+def generate_wholebrain_variants() -> None:
+    print("Whole-brain variants (cortical + subcortical):")
+    sub = _harvard_oxford_subcortical()
+    if sub is None or len(sub) != 14:
+        print(f"  SKIP whole-brain variants: got "
+              f"{0 if sub is None else len(sub)} subcortical structures (expected 14)")
+        return
+    sub_src = ("Harvard-Oxford subcortical, "
+               "nilearn.datasets.fetch_atlas_harvard_oxford('sub-maxprob-thr25-2mm')")
+    variants = [
+        ("DesikanKilliany68", "DesikanKillianyWholeBrain",
+         "Desikan et al. (2006), NeuroImage (cortical); "),
+        ("Destrieux148", "DestrieuxWholeBrain",
+         "Destrieux et al. (2010), NeuroImage (cortical); "),
+        ("Glasser360", "GlasserWholeBrain",
+         "Glasser et al. (2016), Nature / Bedini et al. (2023) (cortical); "),
+        ("HarvardOxfordCortical", "HarvardOxfordWholeBrain",
+         "Harvard-Oxford (Desikan/Makris 2006) cortical + subcortical; "),
+    ]
+    keep = ["region", "x", "y", "z", "hemisphere", "structure"]
+    for cortical_name, wb_name, cite in variants:
+        p = DATA_DIR / f"{cortical_name}.csv"
+        if not p.exists():
+            print(f"  SKIP {wb_name}: {cortical_name}.csv not found")
+            continue
+        cort = pd.read_csv(p)
+        combined = pd.concat([cort[[c for c in keep if c in cort.columns]], sub],
+                             ignore_index=True)
+        _write(wb_name, combined,
+               f"{cortical_name}.csv (cortical) + {sub_src}",
+               cite + "Harvard-Oxford subcortical structures.")
+
+
+# ---------------------------------------------------------------------------
 # Provenance sidecar
 # ---------------------------------------------------------------------------
 
@@ -547,6 +622,7 @@ def main() -> int:
     generate_aal116()
     generate_glasser360()
     generate_desikan_killiany()
+    generate_wholebrain_variants()
     if not _PROVENANCE:
         print("No atlases generated (network unavailable?).", file=sys.stderr)
         return 1

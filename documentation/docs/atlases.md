@@ -53,14 +53,30 @@ print(list_atlases())
 | `Seitzman300` | 300 | ✅ | whole-brain |
 | `AAL116` | 116 | — | whole-brain |
 | `HarvardOxfordCortical` | 96 | — | cortical |
+| `HarvardOxfordWholeBrain` | 110 | — | whole-brain |
 | `Destrieux148` | 148 | — | cortical |
+| `DestrieuxWholeBrain` | 162 | — | whole-brain |
 | `Glasser360` | 360 | — | cortical |
+| `GlasserWholeBrain` | 374 | — | whole-brain |
 | `DesikanKilliany68` | 68 | — | cortical |
+| `DesikanKillianyWholeBrain` | 82 | — | whole-brain |
 
 Schaefer comes in 7- and 17-network variants at 100/200/300/400 parcels; the name is always
 `Schaefer<parcels>-<networks>`, e.g. `Schaefer200-17`. Atlases marked **Networks ✅** carry a
 functional-network label per region, which automatically enables the network-summary matrix
 and chord diagram in the report.
+
+### Cortical vs. whole-brain
+
+Several parcellations are cortical **by design** — the Glasser HCP-MMP (360), Desikan-Killiany,
+and Destrieux atlases define cortical regions only. For these, and for Harvard-Oxford, CCCPM
+also ships a `*WholeBrain` variant that appends the 14 standard subcortical gray-matter
+structures (thalamus, caudate, putamen, pallidum, hippocampus, amygdala, accumbens ×
+left/right, from the Harvard-Oxford subcortical atlas). Use the cortical-only version when your
+connectome covers cortex alone, and the whole-brain version when it also includes subcortical
+nodes — the node count must match your connectome either way. (Subcortical "extensions" of, for
+example, the Glasser atlas are not part of the original parcellation; here they come from a
+separate, standard subcortical atlas.)
 
 All coordinates are in MNI space (mm). Each atlas is derived from an authoritative public
 source; the exact source and citation for every atlas are listed in
