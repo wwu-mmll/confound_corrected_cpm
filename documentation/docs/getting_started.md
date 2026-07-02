@@ -131,6 +131,7 @@ cpm = CPMAnalysis(
 - **edge_significance_method**: How edge-stability significance is established from the permutations — `"nbs"` (default, subnetwork-level) or `"tfce"` (per-edge). See [Edge & Network Significance](#edge-network-significance).
 - **nbs_threshold**: Stability threshold (`>=`) for NBS component forming (default `0.5`).
 - **nbs_component_stat**: NBS component statistic — `"extent"` (edge count, default) or `"intensity"` (summed supra-threshold stability).
+- **atlas** *(optional)*: A built-in atlas name (e.g. `"Schaefer100-17"`) or a path to a custom CSV of region names and MNI coordinates, used for the brain figures in the report. See [Brain Atlases](atlases.md).
 
 ## Step 4: Run the Analysis
 Call the `run` method to perform the analysis:
