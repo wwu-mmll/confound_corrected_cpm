@@ -1,0 +1,1718 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://wwu-mmll.github.io/confound_corrected_cpm/interpreting_results/">
+      
+      
+        <link rel="prev" href="../simulation/">
+      
+      
+        <link rel="next" href="../atlases/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/img/CCCPM.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Interpreting Results - Confound-Corrected CPM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Figtree:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Figtree";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#interpreting-your-results" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Confound-Corrected CPM" class="md-header__button md-logo" aria-label="Confound-Corrected CPM" data-md-component="logo">
+      
+  <img src="../assets/img/CCCPM.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Confound-Corrected CPM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Interpreting Results
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/wwu-mmll/confound_corrected_cpm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    confound_corrected_cpm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting_started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../methods/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  How CCCPM Works
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../simulation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Simulating Data
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Interpreting Results
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../atlases/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Brain Atlases
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/regression/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/cpm_regression/" class="md-tabs__link">
+          
+  
+  
+  API
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Confound-Corrected CPM" class="md-nav__button md-logo" aria-label="Confound-Corrected CPM" data-md-component="logo">
+      
+  <img src="../assets/img/CCCPM.png" alt="logo">
+
+    </a>
+    Confound-Corrected CPM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/wwu-mmll/confound_corrected_cpm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    confound_corrected_cpm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting_started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../methods/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How CCCPM Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulating Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interpreting Results
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interpreting Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#two-concepts-that-appear-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two concepts that appear everywhere
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Two concepts that appear everywhere">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#models-what-each-one-is-built-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Models — what each one is built from
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#networks-which-edges-are-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Networks — which edges are used
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-html-report-reporthtml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The HTML report (report.html)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#regression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regression
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Classification
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#significance-only-if-n_permutations-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Significance (only if n_permutations &gt; 0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#selected-edges-stability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selected edges &amp; stability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-reading-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A reading workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../atlases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Brain Atlases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/regression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/classification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Classification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/simulated_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulated Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/cpm_regression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CPM Analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/edge_selection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Edge Selection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/fold/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inner Fold
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/results_manager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/simulation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#two-concepts-that-appear-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two concepts that appear everywhere
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Two concepts that appear everywhere">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#models-what-each-one-is-built-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Models — what each one is built from
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#networks-which-edges-are-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Networks — which edges are used
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-html-report-reporthtml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The HTML report (report.html)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#regression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regression
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Classification
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#significance-only-if-n_permutations-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Significance (only if n_permutations &gt; 0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#selected-edges-stability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selected edges &amp; stability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-reading-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A reading workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="interpreting-your-results">Interpreting Your Results</h1>
+<p>After <code>cpm.run(...)</code> finishes, everything CCCPM produces is written to the
+<code>results_directory</code> you specified. This page explains what each output means and
+how to read it — both the interactive <strong>HTML report</strong> and the underlying CSV/array
+files you can load for your own figures and statistics.</p>
+<p>The same structure is produced for <strong>regression</strong> and <strong>classification</strong>; only the
+performance metrics differ (see <a href="#metrics">Metrics</a>).</p>
+<hr />
+<h2 id="two-concepts-that-appear-everywhere">Two concepts that appear everywhere</h2>
+<p>Almost every result is broken down by a <strong>model</strong> and a <strong>network</strong>.</p>
+<h3 id="models-what-each-one-is-built-from">Models — what each one is built from</h3>
+<p>For every cross-validation fold, CCCPM fits several models so you can see how much
+the connectome actually adds on top of your covariates:</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Predicts the target from…</th>
+<th>Use it to answer…</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connectome</code></td>
+<td>connectome network strength only</td>
+<td>How well does brain connectivity alone predict?</td>
+</tr>
+<tr>
+<td><code>covariates</code></td>
+<td>the covariates only (e.g. age, sex, motion)</td>
+<td>What's the baseline from nuisance variables?</td>
+</tr>
+<tr>
+<td><code>full</code></td>
+<td>connectome <strong>+</strong> covariates</td>
+<td>Best combined prediction</td>
+</tr>
+<tr>
+<td><code>residuals</code></td>
+<td>connectome, after removing covariate effects from the target</td>
+<td>Connectome contribution with confounds removed</td>
+</tr>
+<tr>
+<td><code>increment</code></td>
+<td>the <em>added</em> value of the connectome over covariates alone (<code>full</code> − <code>covariates</code>)</td>
+<td>Does the connectome explain anything <strong>beyond</strong> confounds?</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>increment</code> model is usually the most important for a confound-aware claim: a
+significant increment means the connectome carries predictive information that the
+covariates do not.</p>
+<h3 id="networks-which-edges-are-used">Networks — which edges are used</h3>
+<p>Edge selection splits predictive edges into two sub-networks, and CCCPM evaluates
+each plus their combination:</p>
+<ul>
+<li><strong>positive</strong> — edges <em>positively</em> correlated with the target.</li>
+<li><strong>negative</strong> — edges <em>negatively</em> correlated with the target.</li>
+<li><strong>both</strong> — positive and negative networks combined.</li>
+</ul>
+<p>So a single number like "Pearson r" is always reported per <em>(model, network)</em> pair.</p>
+<hr />
+<h2 id="the-html-report-reporthtml">The HTML report (<code>report.html</code>)</h2>
+<p><code>report.html</code> is a self-contained, shareable summary — open it in any browser, print it
+to PDF, or send it to a collaborator (everything, including the figures, is embedded, so
+it works offline). It is a single scrolling page with a sticky sidebar, organised top-down
+from the headline result to the supporting detail:</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>What it shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Summary</strong></td>
+<td>The headline cross-validated result as a one-sentence verdict, key-stat chips (samples, nodes, edges, covariates, permutations, edge p-threshold), and predicted-vs-observed scatter plots for the positive, negative, and both networks plus the covariates-only baseline. Each scatter is annotated with its cross-validated effect size (Pearson <em>r</em> / AUC) and permutation <em>p</em>. <strong>Start here.</strong></td>
+</tr>
+<tr>
+<td><strong>Model Comparison</strong></td>
+<td>One faceted figure comparing every model (<code>connectome</code>, <code>covariates</code>, <code>full</code>, <code>residuals</code>, <code>increment</code>) across metrics and networks, plus the APA results table (mean [SD] with permutation <em>p</em>-values). Foregrounds the <code>increment</code> model — your confound-control evidence.</td>
+</tr>
+<tr>
+<td><strong>Network Strengths</strong></td>
+<td>How the summed positive/negative network strength relates to the target, and the distribution of strength across participants.</td>
+</tr>
+<tr>
+<td><strong>Brain &amp; Edges</strong></td>
+<td>The predictive edges in the brain: a connectivity matrix, a hub (node-degree) plot, and — when an atlas with a <code>network</code> column is supplied — a network-summary matrix and a chord diagram. With node coordinates (<code>x, y, z</code>) it also renders a glass-brain view. These figures come from the <a href="../atlases/">atlas</a> you pass to <code>CPMAnalysis</code>.</td>
+</tr>
+<tr>
+<td><strong>Stable Edges</strong></td>
+<td>All significant edges (region A — region B) per network, the significance method and its diagnostics (e.g. largest NBS component), the permutation null-distribution plots, and a downloadable CSV of every selected edge with its stability and significance.</td>
+</tr>
+<tr>
+<td><strong>Data &amp; Methods</strong></td>
+<td>Appendix: target distribution, covariate scatter matrix, the full run configuration, and (with an inner CV) per-fold hyperparameters.</td>
+</tr>
+</tbody>
+</table>
+<p>Every section carries a short always-visible "what this shows" note so a reader unfamiliar
+with the internals can follow it.</p>
+<p>You can view a full example report in the
+<a href="../examples/simulated_data/">Simulated Data example</a>.</p>
+<hr />
+<h2 id="metrics">Metrics</h2>
+<p>Metrics are computed <strong>out-of-sample</strong> (on held-out test folds) and then averaged
+across folds. Higher is better unless noted.</p>
+<h3 id="regression">Regression</h3>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Meaning</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pearson_score</code></td>
+<td>Correlation between predicted and true values</td>
+<td>The conventional CPM headline number</td>
+</tr>
+<tr>
+<td><code>explained_variance_score</code></td>
+<td>Fraction of target variance explained</td>
+<td>1.0 is perfect; can be negative</td>
+</tr>
+<tr>
+<td><code>mean_absolute_error</code></td>
+<td>Average absolute prediction error</td>
+<td>Lower is better; in target units</td>
+</tr>
+<tr>
+<td><code>mean_squared_error</code></td>
+<td>Average squared prediction error</td>
+<td>Lower is better; penalises large errors</td>
+</tr>
+</tbody>
+</table>
+<h3 id="classification">Classification</h3>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Meaning</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>roc_auc</code></td>
+<td>Area under the ROC curve</td>
+<td>Threshold-independent; robust headline metric</td>
+</tr>
+<tr>
+<td><code>balanced_accuracy</code></td>
+<td>Mean of sensitivity and specificity</td>
+<td><strong>Prefer over accuracy for imbalanced classes</strong></td>
+</tr>
+<tr>
+<td><code>accuracy</code></td>
+<td>Fraction correctly classified</td>
+<td>Misleading when classes are imbalanced</td>
+</tr>
+<tr>
+<td><code>f1_score</code></td>
+<td>Harmonic mean of precision and recall</td>
+<td>Useful when the positive class is rare</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="output-files">Output files</h2>
+<p>Everything in the report is also available as plain files for your own analysis.</p>
+<h3 id="performance">Performance</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cv_results_summary.csv</code></td>
+<td>Mean ± std of every metric, indexed by <code>(model, network)</code>. The numbers behind the Main Results page.</td>
+</tr>
+<tr>
+<td><code>cv_results_full.csv</code></td>
+<td>Per-fold metric values (before averaging) — use these for your own error bars / tests.</td>
+</tr>
+<tr>
+<td><code>cv_predictions.csv</code></td>
+<td>Out-of-sample predictions per subject: columns <code>sample_index, model, network, y_pred, y_true, fold</code>.</td>
+</tr>
+<tr>
+<td><code>cv_network_strengths.csv</code></td>
+<td>Summed positive/negative network strength per subject, with the target: <code>y_true, network_strength, model, network, fold</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="significance-only-if-n_permutations-0">Significance (only if <code>n_permutations &gt; 0</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>p_values.csv</code></td>
+<td>Permutation p-value for each <code>(network, model)</code> × metric. A small value (e.g. ≤ 0.05) means the observed performance is unlikely under the null of no brain–behaviour association.</td>
+</tr>
+<tr>
+<td><code>permutation/</code></td>
+<td>The full null distributions (<code>cv_results_*</code>) and permuted edge selections used to compute those p-values.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How the p-values are defined:</strong> the entire pipeline is re-run on many shuffled
+copies of the target to build a null distribution of performance; the p-value is the
+fraction of permutations that match or beat the real result. With <code>n_permutations=100</code>
+the smallest possible p-value is ~0.01 — use <strong>1000+</strong> permutations for publishable
+significance.</p>
+<h3 id="selected-edges-stability">Selected edges &amp; stability</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>edges.npy</code></td>
+<td>The edges selected in each fold.</td>
+</tr>
+<tr>
+<td><code>stability_edges.npy</code></td>
+<td>How consistently each edge was selected across folds (its <em>stability</em>). Edges chosen in most folds are the reliable ones.</td>
+</tr>
+<tr>
+<td><code>stability_edges_significance.npy</code></td>
+<td>Per-edge significance of edge stability (when permutations are run). With the default NBS method these are <em>subnetwork-level</em> p-values shared by every edge in a significant connected component; with TFCE they are per-edge FWER-corrected p-values.</td>
+</tr>
+<tr>
+<td><code>stability_edges_significance_meta.json</code></td>
+<td>Diagnostics for the significance test: method + parameters, the permutation null distribution, and (for NBS) the observed components and largest-component size. Drives the null-distribution plots in the report.</td>
+</tr>
+<tr>
+<td><code>data_insights/</code></td>
+<td>Cached input summaries and figures (target distribution, covariate scatter, feature/target/covariate names).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="logs">Logs</h3>
+<ul>
+<li><code>cpm_log.txt</code> — a full, timestamped log of the run (configuration, per-step progress, final aggregated table). The first place to look if something behaved unexpectedly.</li>
+<li><code>task_type.txt</code> — <code>regression</code> or <code>classification</code>, recorded for the report.</li>
+<li><code>plots/</code> — every figure from the report exported as PNG/PDF/SVG for direct use in papers.</li>
+</ul>
+<hr />
+<h2 id="a-reading-workflow">A reading workflow</h2>
+<ol>
+<li>Open <code>report.html</code> → <strong>Summary</strong> for the headline result, then <strong>Model Comparison</strong>.
+   Look at the <code>full</code> and <code>increment</code> models on the <code>both</code> network.</li>
+<li>Check <code>p_values.csv</code>: is the <code>increment</code> model significant? That's your evidence the
+   connectome adds information beyond confounds.</li>
+<li>Inspect <code>stability_edges.npy</code> (or the <strong>Stable Edges</strong> section) to see <em>which</em> connections
+   drive the prediction.</li>
+<li>Use <code>cv_predictions.csv</code> / <code>cv_results_full.csv</code> to make your own figures or run
+   additional statistics.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["toc.follow", "navigation.tabs", "navigation.sections"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
