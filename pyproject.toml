@@ -24,6 +24,12 @@ packages = [
     { include = "cccpm", from = "src" }
 ]
 
+# Bundled atlas coordinate tables (see src/cccpm/atlases/data/SOURCES.md).
+include = [
+    { path = "src/cccpm/atlases/data/*.csv", format = ["sdist", "wheel"] },
+    { path = "src/cccpm/atlases/data/SOURCES.md", format = ["sdist", "wheel"] },
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

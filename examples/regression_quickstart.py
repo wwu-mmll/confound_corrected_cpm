@@ -36,7 +36,8 @@ from cccpm.simulation.simulate_sem import simulate_data_given_kappa
 sim = simulate_data_given_kappa(
     R2_X_y=0.4,          # naive R²(y ~ X): apparent brain–outcome strength
     kappa=0.3,           # 30% of that R² is driven by the confound
-    n_features=435,      # a 30-node connectome (30*29/2 = 435 edges)
+    n_features=4950,     # a 100-node connectome (100*99/2 = 4950 edges),
+                         # matching the built-in Schaefer100 atlas used below
     n_features_informative=40,    # "mixed" edges: real signal + confound leakage
     n_pure_signal_features=20,    # edges tied to y but NOT the confound
     n_confound_only_features=20,  # edges tied to y ONLY through the confound
@@ -72,6 +73,10 @@ cpm = CPMAnalysis(
     cv=KFold(n_splits=10, shuffle=True, random_state=42),
     edge_selection=edge_selection,
     n_permutations=1000,                           # use 1000+ for a real analysis
+    atlas="Schaefer100-17",                       # built-in atlas → brain plots in the
+                                                  # report; or pass a path to a custom
+                                                  # CSV (region,x,y,z[,network]).
+                                                  # See cccpm.atlases.list_atlases().
     device="cpu",                                 # "cuda" uses the GPU if available
     edge_significance_method='nbs',
     nbs_threshold=0.5

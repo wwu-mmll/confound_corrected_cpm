@@ -170,3 +170,5 @@ src/cccpm/simulation/simulation_results
 .claude
 
 *.DS_Store
+# Quickstart output when run from the repo root
+/results/

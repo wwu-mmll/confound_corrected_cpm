@@ -1,0 +1,161 @@
+region,x,y,z,network,hemisphere,structure
+inf cerebellum 155,18.0,-81.0,-33.0,cerebellum,R,cerebellum
+inf cerebellum 150,-21.0,-79.0,-33.0,cerebellum,L,cerebellum
+inf cerebellum 151,-6.0,-79.0,-33.0,cerebellum,L,cerebellum
+inf cerebellum 140,33.0,-73.0,-30.0,cerebellum,R,cerebellum
+inf cerebellum 131,-34.0,-67.0,-29.0,cerebellum,L,cerebellum
+inf cerebellum 122,32.0,-61.0,-31.0,cerebellum,R,cerebellum
+inf cerebellum 121,-25.0,-60.0,-34.0,cerebellum,L,cerebellum
+inf cerebellum 110,-37.0,-54.0,-37.0,cerebellum,L,cerebellum
+lat cerebellum 128,21.0,-64.0,-22.0,cerebellum,R,cerebellum
+lat cerebellum 113,-34.0,-57.0,-24.0,cerebellum,L,cerebellum
+lat cerebellum 109,-24.0,-54.0,-21.0,cerebellum,L,cerebellum
+lat cerebellum 98,-28.0,-44.0,-25.0,cerebellum,L,cerebellum
+med cerebellum 143,5.0,-75.0,-11.0,cerebellum,R,cerebellum
+med cerebellum 144,14.0,-75.0,-21.0,cerebellum,R,cerebellum
+med cerebellum 138,-11.0,-72.0,-14.0,cerebellum,L,cerebellum
+med cerebellum 130,1.0,-66.0,-24.0,cerebellum,M,cerebellum
+med cerebellum 127,-16.0,-64.0,-21.0,cerebellum,L,cerebellum
+med cerebellum 120,-6.0,-60.0,-15.0,cerebellum,L,cerebellum
+ACC 19,-2.0,30.0,27.0,cingulo-opercular,L,cortical
+TPJ 125,-52.0,-63.0,15.0,cingulo-opercular,L,cortical
+aPFC 8,27.0,49.0,26.0,cingulo-opercular,R,cortical
+angular gyrus 102,-41.0,-47.0,29.0,cingulo-opercular,L,cortical
+ant insula 28,-36.0,18.0,2.0,cingulo-opercular,L,cortical
+ant insula 26,38.0,21.0,-1.0,cingulo-opercular,R,cortical
+basal ganglia 71,11.0,-24.0,2.0,cingulo-opercular,R,cortical
+basal ganglia 38,-20.0,6.0,7.0,cingulo-opercular,L,cortical
+basal ganglia 39,14.0,6.0,7.0,cingulo-opercular,R,cortical
+basal ganglia 30,-6.0,17.0,34.0,cingulo-opercular,L,cortical
+dACC 27,9.0,20.0,34.0,cingulo-opercular,R,cortical
+fusiform 81,54.0,-31.0,-18.0,cingulo-opercular,R,cortical
+mFC 31,0.0,15.0,45.0,cingulo-opercular,M,cortical
+mid insula 61,-30.0,-14.0,1.0,cingulo-opercular,L,cortical
+mid insula 59,32.0,-12.0,2.0,cingulo-opercular,R,cortical
+mid insula 44,37.0,-2.0,-3.0,cingulo-opercular,R,cortical
+parietal 97,-55.0,-44.0,30.0,cingulo-opercular,L,cortical
+parietal 89,58.0,-41.0,20.0,cingulo-opercular,R,cortical
+post cingulate 80,-4.0,-31.0,-4.0,cingulo-opercular,L,cortical
+post insula 76,-30.0,-28.0,9.0,cingulo-opercular,L,cortical
+precuneus 87,8.0,-40.0,50.0,cingulo-opercular,R,cortical
+sup temporal 100,42.0,-46.0,21.0,cingulo-opercular,R,cortical
+temporal 103,-59.0,-47.0,11.0,cingulo-opercular,L,cortical
+temporal 95,43.0,-43.0,8.0,cingulo-opercular,R,cortical
+temporal 78,51.0,-30.0,5.0,cingulo-opercular,R,cortical
+thalamus 57,-12.0,-12.0,6.0,cingulo-opercular,L,cortical
+thalamus 58,11.0,-12.0,6.0,cingulo-opercular,R,cortical
+thalamus 47,-12.0,-3.0,13.0,cingulo-opercular,L,cortical
+vFC 40,-48.0,6.0,1.0,cingulo-opercular,L,cortical
+vFC 33,-46.0,10.0,14.0,cingulo-opercular,L,cortical
+vFC 25,51.0,23.0,8.0,cingulo-opercular,R,cortical
+vPFC 18,34.0,32.0,7.0,cingulo-opercular,R,cortical
+ACC 14,9.0,39.0,20.0,default,R,cortical
+IPS 134,-36.0,-69.0,40.0,default,L,cortical
+aPFC 5,-25.0,51.0,27.0,default,L,cortical
+angular gyrus 124,-48.0,-63.0,35.0,default,L,cortical
+angular gyrus 117,51.0,-59.0,34.0,default,R,cortical
+fusiform 84,28.0,-37.0,-15.0,default,R,cortical
+inf temporal 91,-61.0,-41.0,-2.0,default,L,cortical
+inf temporal 72,-59.0,-25.0,-15.0,default,L,cortical
+inf temporal 63,52.0,-15.0,-13.0,default,R,cortical
+mPFC 4,0.0,51.0,32.0,default,M,cortical
+occipital 146,-42.0,-76.0,26.0,default,L,cortical
+occipital 141,-2.0,-75.0,32.0,default,L,cortical
+occipital 136,-9.0,-72.0,41.0,default,L,cortical
+occipital 137,45.0,-72.0,29.0,default,R,cortical
+occipital 92,-28.0,-42.0,-11.0,default,L,cortical
+post cingulate 115,-11.0,-58.0,17.0,default,L,cortical
+post cingulate 111,10.0,-55.0,17.0,default,R,cortical
+post cingulate 108,-5.0,-52.0,17.0,default,L,cortical
+post cingulate 93,-5.0,-43.0,25.0,default,L,cortical
+post cingulate 90,-8.0,-41.0,3.0,default,L,cortical
+post cingulate 73,1.0,-26.0,31.0,default,M,cortical
+precuneus 132,11.0,-68.0,42.0,default,R,cortical
+precuneus 112,-6.0,-56.0,29.0,default,L,cortical
+precuneus 105,5.0,-50.0,33.0,default,R,cortical
+precuneus 94,9.0,-43.0,25.0,default,R,cortical
+precuneus 85,-3.0,-38.0,45.0,default,L,cortical
+sup frontal 20,-16.0,29.0,54.0,default,L,cortical
+sup frontal 17,23.0,33.0,47.0,default,R,cortical
+vlPFC 15,46.0,39.0,-15.0,default,R,cortical
+vmPFC 13,8.0,42.0,-5.0,default,R,cortical
+vmPFC 11,-11.0,45.0,17.0,default,L,cortical
+vmPFC 7,-6.0,50.0,-1.0,default,L,cortical
+vmPFC 6,9.0,51.0,16.0,default,R,cortical
+vmPFC 1,6.0,64.0,3.0,default,R,cortical
+ACC 21,-1.0,28.0,40.0,fronto-parietal,M,cortical
+IPL 107,44.0,-52.0,47.0,fronto-parietal,R,cortical
+IPL 104,-53.0,-50.0,39.0,fronto-parietal,L,cortical
+IPL 101,-48.0,-47.0,49.0,fronto-parietal,L,cortical
+IPL 96,54.0,-44.0,43.0,fronto-parietal,R,cortical
+IPL 88,-41.0,-40.0,42.0,fronto-parietal,L,cortical
+IPS 116,32.0,-59.0,41.0,fronto-parietal,R,cortical
+IPS 114,-32.0,-58.0,46.0,fronto-parietal,L,cortical
+aPFC 2,29.0,57.0,18.0,fronto-parietal,R,cortical
+aPFC 3,-29.0,57.0,10.0,fronto-parietal,L,cortical
+dFC 36,-42.0,7.0,36.0,fronto-parietal,L,cortical
+dFC 34,44.0,8.0,34.0,fronto-parietal,R,cortical
+dFC 29,40.0,17.0,40.0,fronto-parietal,R,cortical
+dlPFC 24,-44.0,27.0,33.0,fronto-parietal,L,cortical
+dlPFC 22,46.0,28.0,31.0,fronto-parietal,R,cortical
+dlPFC 16,40.0,36.0,29.0,fronto-parietal,R,cortical
+post parietal 99,-35.0,-46.0,48.0,fronto-parietal,L,cortical
+vPFC 23,-52.0,28.0,17.0,fronto-parietal,L,cortical
+vent aPFC 10,-43.0,47.0,2.0,fronto-parietal,L,cortical
+vent aPFC 9,42.0,48.0,-3.0,fronto-parietal,R,cortical
+vlPFC 12,39.0,42.0,16.0,fronto-parietal,R,cortical
+occipital 149,20.0,-78.0,-2.0,occipital,R,cortical
+occipital 148,15.0,-77.0,32.0,occipital,R,cortical
+occipital 145,-16.0,-76.0,33.0,occipital,L,cortical
+occipital 147,9.0,-76.0,14.0,occipital,R,cortical
+occipital 142,-29.0,-75.0,28.0,occipital,L,cortical
+occipital 139,29.0,-73.0,29.0,occipital,R,cortical
+occipital 135,39.0,-71.0,13.0,occipital,R,cortical
+occipital 133,17.0,-68.0,20.0,occipital,R,cortical
+occipital 129,19.0,-66.0,-1.0,occipital,R,cortical
+occipital 126,-44.0,-63.0,-7.0,occipital,L,cortical
+occipital 118,-34.0,-60.0,-5.0,occipital,L,cortical
+occipital 119,36.0,-60.0,-8.0,occipital,R,cortical
+occipital 106,-18.0,-50.0,1.0,occipital,L,cortical
+post occipital 160,-4.0,-94.0,12.0,occipital,L,cortical
+post occipital 158,13.0,-91.0,2.0,occipital,R,cortical
+post occipital 159,27.0,-91.0,2.0,occipital,R,cortical
+post occipital 157,-29.0,-88.0,8.0,occipital,L,cortical
+post occipital 156,-37.0,-83.0,-2.0,occipital,L,cortical
+post occipital 153,29.0,-81.0,14.0,occipital,R,cortical
+post occipital 154,33.0,-81.0,-2.0,occipital,R,cortical
+post occipital 152,-5.0,-80.0,9.0,occipital,L,cortical
+temporal 123,46.0,-62.0,5.0,occipital,R,cortical
+SMA 43,0.0,-1.0,52.0,sensorimotor,M,cortical
+dFC 35,60.0,8.0,34.0,sensorimotor,R,cortical
+frontal 45,53.0,-3.0,32.0,sensorimotor,R,cortical
+frontal 32,58.0,11.0,14.0,sensorimotor,R,cortical
+mid insula 55,33.0,-12.0,16.0,sensorimotor,R,cortical
+mid insula 56,-36.0,-12.0,15.0,sensorimotor,L,cortical
+mid insula 48,-42.0,-3.0,11.0,sensorimotor,L,cortical
+parietal 77,-24.0,-30.0,64.0,sensorimotor,L,cortical
+parietal 74,18.0,-27.0,62.0,sensorimotor,R,cortical
+parietal 75,-38.0,-27.0,60.0,sensorimotor,L,cortical
+parietal 69,41.0,-23.0,55.0,sensorimotor,R,cortical
+parietal 66,-55.0,-22.0,38.0,sensorimotor,L,cortical
+parietal 65,46.0,-20.0,45.0,sensorimotor,R,cortical
+parietal 64,-47.0,-18.0,50.0,sensorimotor,L,cortical
+parietal 62,-38.0,-15.0,59.0,sensorimotor,L,cortical
+parietal 54,-47.0,-12.0,36.0,sensorimotor,L,cortical
+parietal 50,-26.0,-8.0,54.0,sensorimotor,L,cortical
+post insula 70,42.0,-24.0,17.0,sensorimotor,R,cortical
+post parietal 79,-41.0,-31.0,48.0,sensorimotor,L,cortical
+pre-SMA 41,10.0,5.0,51.0,sensorimotor,R,cortical
+precentral gyrus 67,-54.0,-22.0,22.0,sensorimotor,L,cortical
+precentral gyrus 53,44.0,-11.0,38.0,sensorimotor,R,cortical
+precentral gyrus 52,-54.0,-9.0,23.0,sensorimotor,L,cortical
+precentral gyrus 51,46.0,-8.0,24.0,sensorimotor,R,cortical
+precentral gyrus 49,-44.0,-6.0,49.0,sensorimotor,L,cortical
+precentral gyrus 46,58.0,-3.0,17.0,sensorimotor,R,cortical
+sup parietal 86,34.0,-39.0,65.0,sensorimotor,R,cortical
+temporal 82,-41.0,-37.0,16.0,sensorimotor,L,cortical
+temporal 83,-53.0,-37.0,13.0,sensorimotor,L,cortical
+temporal 68,-54.0,-22.0,9.0,sensorimotor,L,cortical
+temporal 60,59.0,-13.0,8.0,sensorimotor,R,cortical
+vFC 42,43.0,1.0,12.0,sensorimotor,R,cortical
+vFC 37,-55.0,7.0,23.0,sensorimotor,L,cortical
