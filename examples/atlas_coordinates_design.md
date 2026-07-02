@@ -1,16 +1,18 @@
 # Design note: built-in atlas coordinates
 
-**Status:** implemented — `develop`. Bundled atlases (15): Schaefer 100–400 (×7/×17),
+**Status:** implemented — `develop`. Bundled atlases (16): Schaefer 100–400 (×7/×17),
 Power264, Dosenbach160, Seitzman300, **Destrieux148**, **HarvardOxfordCortical**, **AAL116**,
-**Glasser360**. Surface/volumetric atlases use their published *volumetric MNI* versions with
-computed centroids — the reliable route for FreeSurfer-surface atlases:
-Destrieux/Harvard-Oxford via nilearn + `find_parcellation_cut_coords`; AAL from the SPM12
-release (downloaded via curl — the host `gin.cnrs.fr` ships a broken TLS chain that
-urllib/requests reject); Glasser MMP-360 from the volumetric-MNI FSL version
-(`mbedini/The-HCP-MMP1.0-atlas-in-FSL`), centroids via centre-of-mass (`find_parcellation_cut_coords`
-is too slow for 360 ROIs). Still not bundled: **Desikan-Killiany** (no reliable named
-volumetric-MNI source; Destrieux serves as the FreeSurfer-surface exemplar). Regenerate all via
-`scripts/generate_atlas_data.py`.
+**Glasser360**, **DesikanKilliany68**. Surface/volumetric atlases use published *volumetric
+MNI* versions with computed centroids: Destrieux/Harvard-Oxford via nilearn +
+`find_parcellation_cut_coords`; AAL from the SPM12 release (downloaded via curl — the host
+`gin.cnrs.fr` ships a broken TLS chain that urllib/requests reject); Glasser MMP-360 from the
+volumetric-MNI FSL version (`mbedini/The-HCP-MMP1.0-atlas-in-FSL`), centroids via centre-of-mass.
+**Desikan-Killiany** comes from the ENIGMA Toolbox's DK labels resampled onto the conte69
+(fs_LR, ≈MNI) surface — ENIGMA ships per-vertex label vectors, not centroids, so we average
+vertices per parcel and assign the 68 region names by matching each parcel to the nearest
+published DK centroid (Hungarian assignment, residual-asserted). All coordinate sets pass an
+L/R-flip + MNI-bounding-box sanity check; Glasser's conte69-vs-volumetric centroids agree to
+~3 mm. Regenerate all via `scripts/generate_atlas_data.py`.
 **Author:** design draft
 **Scope:** how CCCPM should provide ready-to-use brain-region names and MNI coordinates for
 the HTML-report brain plots, while keeping user-supplied custom atlases working.

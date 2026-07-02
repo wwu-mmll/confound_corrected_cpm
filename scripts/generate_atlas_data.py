@@ -58,23 +58,33 @@ def _hemisphere_from_x(x: float, tol: float = 1.0) -> str:
     return "M"
 
 
+def _looks_like_html(content: bytes) -> bool:
+    """Heuristic: a redirect/error page served instead of the real binary."""
+    head = content[:200].lstrip().lower()
+    return head.startswith(b"<!doctype") or head.startswith(b"<html")
+
+
 def _download(url: str, dest: Path) -> bool:
-    """Download ``url`` to ``dest``. Falls back to curl when requests' TLS
-    verification fails (some atlas hosts ship an incomplete cert chain that
-    curl tolerates but urllib/requests reject)."""
+    """Download ``url`` to ``dest``. Falls back to curl when requests fails or
+    returns an HTML redirect/error page instead of the real content — some atlas
+    hosts ship an incomplete TLS chain (or an inconsistent redirect) that curl
+    tolerates but urllib/requests do not."""
     try:
         r = requests.get(url, timeout=90)
         r.raise_for_status()
-        dest.write_bytes(r.content)
-        return True
+        if not _looks_like_html(r.content):
+            dest.write_bytes(r.content)
+            return True
     except Exception:
-        try:
-            subprocess.run(["curl", "-sL", "--max-time", "180", url, "-o", str(dest)],
-                           check=True)
-            return dest.exists() and dest.stat().st_size > 0
-        except Exception as e:  # noqa: BLE001
-            print(f"  download failed for {url}: {e}")
-            return False
+        pass
+    try:
+        subprocess.run(["curl", "-sL", "--max-time", "180", url, "-o", str(dest)],
+                       check=True)
+        return (dest.exists() and dest.stat().st_size > 0
+                and not _looks_like_html(dest.read_bytes()))
+    except Exception as e:  # noqa: BLE001
+        print(f"  download failed for {url}: {e}")
+        return False
 
 
 def _volume_centroids(img):
@@ -346,8 +356,12 @@ def generate_aal116() -> None:
         if not _download(url, tarball):
             print("  SKIP AAL116: download failed")
             return
-        with tarfile.open(tarball) as tf:
-            tf.extractall(tmp)  # noqa: S202 — trusted, well-known archive
+        try:
+            with tarfile.open(tarball) as tf:
+                tf.extractall(tmp)  # noqa: S202 — trusted, well-known archive
+        except tarfile.ReadError:
+            print("  SKIP AAL116: downloaded file is not a valid archive")
+            return
         nii = tmp / "aal" / "atlas" / "AAL.nii"
         xml = tmp / "aal" / "atlas" / "AAL.xml"
         if not nii.exists():
@@ -401,6 +415,107 @@ def generate_glasser360() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Desikan-Killiany — a FreeSurfer *surface* atlas. The ENIGMA toolbox ships the
+# DK labels resampled onto the conte69 (fs_LR 32k) surface as a per-vertex label
+# vector; we average vertex coordinates per parcel to get centroids in conte69
+# space (which is close to MNI152 — validated at ~3 mm against the volumetric
+# Glasser). ENIGMA gives numeric parcel ids, not names, and its id ordering has
+# a medial-wall gap, so region names are assigned by matching each parcel to the
+# nearest published DK centroid (Hungarian assignment) and asserting the fit is
+# tight — this is robust to the exact id convention and self-checks.
+# ---------------------------------------------------------------------------
+
+# Approximate published left-hemisphere DK centroids (MNI mm). Used only to map
+# parcels -> names by proximity; the *shipped* coordinates are the conte69
+# centroids. Right hemisphere is the mirror (x -> -x). Values need only be
+# closer to the right region than to any other (DK parcels are >~15 mm apart).
+_DK_LH_REF = {
+    "bankssts": (-52, -44, 6), "caudalanteriorcingulate": (-5, 18, 27),
+    "caudalmiddlefrontal": (-35, 12, 44), "cuneus": (-6, -80, 27),
+    "entorhinal": (-24, -6, -30), "fusiform": (-35, -45, -20),
+    "inferiorparietal": (-42, -68, 32), "inferiortemporal": (-50, -40, -22),
+    "isthmuscingulate": (-8, -44, 20), "lateraloccipital": (-32, -88, 2),
+    "lateralorbitofrontal": (-22, 30, -18), "lingual": (-14, -70, -6),
+    "medialorbitofrontal": (-6, 40, -18), "middletemporal": (-56, -38, -10),
+    "parahippocampal": (-24, -28, -18), "paracentral": (-8, -26, 60),
+    "parsopercularis": (-46, 14, 16), "parsorbitalis": (-40, 42, -10),
+    "parstriangularis": (-46, 30, 6), "pericalcarine": (-10, -78, 10),
+    "postcentral": (-42, -26, 52), "posteriorcingulate": (-6, -24, 34),
+    "precentral": (-38, -12, 48), "precuneus": (-8, -58, 40),
+    "rostralanteriorcingulate": (-6, 34, 2), "rostralmiddlefrontal": (-32, 42, 22),
+    "superiorfrontal": (-12, 28, 48), "superiorparietal": (-22, -62, 52),
+    "superiortemporal": (-54, -22, 4), "supramarginal": (-52, -42, 32),
+    "frontalpole": (-8, 62, -10), "temporalpole": (-38, 14, -32),
+    "transversetemporal": (-44, -24, 8), "insula": (-36, -6, 4),
+}
+
+
+def _assign_dk_names(centroids, ref_names, ref_xyz):
+    """Match parcel centroids to reference DK regions by Hungarian assignment.
+    Returns (name_per_parcel, max_residual_mm). The one leftover parcel (medial
+    wall) is named ``None``."""
+    from scipy.optimize import linear_sum_assignment
+    cost = np.linalg.norm(ref_xyz[:, None, :] - centroids[None, :, :], axis=2)
+    rows, cols = linear_sum_assignment(cost)
+    out = [None] * len(centroids)
+    resid = 0.0
+    for r, c in zip(rows, cols):
+        out[c] = ref_names[r]
+        resid = max(resid, cost[r, c])
+    return out, resid
+
+
+def generate_desikan_killiany() -> None:
+    import nibabel as nib
+    print("DesikanKilliany68:")
+    base = ("https://raw.githubusercontent.com/MICA-MNI/ENIGMA/master/"
+            "enigmatoolbox/datasets")
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        files = {
+            "lh": (f"{base}/surfaces/conte69_32k_lh.gii", tmp / "lh.gii"),
+            "rh": (f"{base}/surfaces/conte69_32k_rh.gii", tmp / "rh.gii"),
+            "lab": (f"{base}/parcellations/aparc_conte69.csv", tmp / "aparc.csv"),
+        }
+        if not all(_download(url, dest) for url, dest in files.values()):
+            print("  SKIP DesikanKilliany68: download failed")
+            return
+        lh = nib.load(str(files["lh"][1])).darrays[0].data
+        rh = nib.load(str(files["rh"][1])).darrays[0].data
+        coords = np.vstack([lh, rh])
+        lab = np.loadtxt(str(files["lab"][1])).astype(int)
+
+    ref_names = list(_DK_LH_REF)
+    lh_ref = np.array([_DK_LH_REF[n] for n in ref_names], dtype=float)
+    rh_ref = lh_ref * np.array([-1, 1, 1])  # mirror to right hemisphere
+    n_lh = len(lh)
+
+    rows = []
+    for side, ref, vmask in [("L", lh_ref, np.arange(len(coords)) < n_lh),
+                             ("R", rh_ref, np.arange(len(coords)) >= n_lh)]:
+        ids = [p for p in np.unique(lab[vmask]) if p != 0]
+        cent = np.array([coords[lab == p].mean(0) for p in ids])
+        names, resid = _assign_dk_names(cent, ref_names, ref)
+        # A clean DK match is a few mm; a large residual means the id convention
+        # or source changed and names can no longer be trusted -> refuse to ship.
+        if resid > 15.0:
+            print(f"  SKIP DesikanKilliany68: {side} name match residual "
+                  f"{resid:.1f} mm exceeds 15 mm — cannot trust region names")
+            return
+        for p, c, nm in zip(ids, cent, names):
+            if nm is None:
+                continue  # medial-wall / unknown parcel
+            rows.append((f"{side}_{nm}", c[0], c[1], c[2], side, "cortical"))
+
+    df = pd.DataFrame(rows, columns=["region", "x", "y", "z", "hemisphere", "structure"])
+    _write("DesikanKilliany68", df,
+           f"{base}/parcellations/aparc_conte69.csv "
+           "(names assigned by proximity to published DK centroids)",
+           "Desikan et al. (2006), NeuroImage; conte69 mapping via ENIGMA Toolbox "
+           "(Larivière et al. 2021).")
+
+
+# ---------------------------------------------------------------------------
 # Provenance sidecar
 # ---------------------------------------------------------------------------
 
@@ -431,6 +546,7 @@ def main() -> int:
     generate_harvard_oxford()
     generate_aal116()
     generate_glasser360()
+    generate_desikan_killiany()
     if not _PROVENANCE:
         print("No atlases generated (network unavailable?).", file=sys.stderr)
         return 1

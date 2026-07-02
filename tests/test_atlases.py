@@ -50,7 +50,7 @@ def test_expected_atlases_are_bundled():
     expected = {
         "Schaefer100-7", "Schaefer400-17", "Power264", "Dosenbach160",
         "Seitzman300", "Destrieux148", "HarvardOxfordCortical",
-        "AAL116", "Glasser360",
+        "AAL116", "Glasser360", "DesikanKilliany68",
     }
     assert expected <= set(list_atlases())
 
@@ -69,6 +69,12 @@ def test_surface_derived_atlases_have_node_counts_and_hemispheres():
 def test_volumetric_atlases_node_counts():
     assert len(load_atlas("AAL116")) == 116
     assert len(load_atlas("Glasser360")) == 360
+    dk = load_atlas("DesikanKilliany68")
+    assert len(dk) == 68
+    assert set(dk["hemisphere"]) == {"L", "R"}
+    # Names were assigned by anatomy; spot-check a landmark lands where it should.
+    prec = dk.loc[dk.region == "L_precentral", ["x", "y", "z"]].to_numpy()[0]
+    assert prec[0] < 0 and prec[2] > 30  # left, dorsal — motor strip
     # AAL spans cortex, subcortex and cerebellum; Glasser is cortical only.
     assert set(load_atlas("AAL116")["structure"]) >= {"cortical", "subcortical", "cerebellum"}
     assert set(load_atlas("Glasser360")["hemisphere"]) == {"L", "R"}

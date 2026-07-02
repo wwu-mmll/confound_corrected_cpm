@@ -6,6 +6,7 @@ Coordinates are in MNI space (mm). This file is auto-generated — do not edit b
 | Atlas | Nodes | Source | Citation |
 |---|---|---|---|
 | `AAL116` | 116 | https://www.gin.cnrs.fr/AAL_files/aal_for_SPM12.tar.gz | Tzourio-Mazoyer et al. (2002), NeuroImage; AAL for SPM12. |
+| `DesikanKilliany68` | 68 | https://raw.githubusercontent.com/MICA-MNI/ENIGMA/master/enigmatoolbox/datasets/parcellations/aparc_conte69.csv (names assigned by proximity to published DK centroids) | Desikan et al. (2006), NeuroImage; conte69 mapping via ENIGMA Toolbox (Larivière et al. 2021). |
 | `Destrieux148` | 148 | nilearn.datasets.fetch_atlas_destrieux_2009 (volumetric MNI) + find_parcellation_cut_coords | Destrieux et al. (2010), NeuroImage (aparc.a2009s). |
 | `Dosenbach160` | 160 | nilearn.datasets.fetch_coords_dosenbach_2010 | Dosenbach et al. (2010), Science. |
 | `Glasser360` | 360 | https://raw.githubusercontent.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL/master/MNI_Glasser_HCP_v1.0.nii.gz | Glasser et al. (2016), Nature; volumetric MNI version Bedini et al. (2023), Brain Struct Funct. |
