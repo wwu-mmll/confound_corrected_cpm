@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **RepeatedKFold individual-level outputs.** Predictions and network strengths are now
+  tagged with a `repeat` id (and network strengths with a `sample_index`), and the HTML
+  report averages each subject's values across the repeats of a `RepeatedKFold` before
+  plotting. Previously every subject appeared `n_repeats` times in the predicted-vs-observed
+  scatter and its pooled-correlation annotation. Edge stability and the fold-level metric
+  summary are unchanged — they still pool all folds and repeats.
+- **GPU device mismatch in confound-controlled edge selection.** `get_residuals`
+  built the intercept column on the CPU, so the `*_partial` edge statistics crashed
+  with `Expected all tensors to be on the same device` when running on `device='cuda'`.
+  The intercept is now created on the inputs' device, and the numpy-return path moves
+  through `.cpu()` first. Added a CUDA-guarded regression test.
+
+### Added
+- **Presence filter for edge selection** (`UnivariateEdgeSelection(presence_filter=...)`).
+  Optionally keeps only edges that are nonzero in at least a given fraction of subjects
+  (`True` = majority/0.5, or a float), dropping structural/near-zero edges before
+  selection. Intended for sparse structural connectomes (e.g. DTI streamline counts);
+  computed per fold on the training subjects from the connectome only, so it adds no
+  target leakage, and is additive to the existing near-zero-variance gate. Leave off
+  (default `False`) for functional data whose edges vary around a mean of ~0.
+
+### Deprecated
+- The never-functional `t_test_filter` argument is replaced by `presence_filter`.
+  Passing `t_test_filter` now warns and is ignored.
+
+### Removed
+- Dead code cleanup (no behavior change): the broken/unused `vector_to_matrix_3d`,
+  `matrix_to_upper_triangular_vector`, and `vector_to_upper_triangular_matrix` helpers and a
+  duplicate `import`; the uncallable `ResultsManager.collect_results` (referenced undefined
+  names) and the unused `_save_inner_cv_to_csv`; the non-functional `SelectPercentile` /
+  `SelectKBest` edge-selector stubs; and the unused `simulation/simulate_multivariate`
+  module. `cv_predictions.csv` is now written once (was written twice per run).
+
 ## [0.4.1] — 2026-07-02
 
 Correctness fixes and dead-code cleanup.

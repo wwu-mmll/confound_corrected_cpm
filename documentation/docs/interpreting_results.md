@@ -103,8 +103,8 @@ Everything in the report is also available as plain files for your own analysis.
 |------|----------|
 | `cv_results_summary.csv` | Mean ± std of every metric, indexed by `(model, network)`. The numbers behind the Main Results page. |
 | `cv_results_full.csv` | Per-fold metric values (before averaging) — use these for your own error bars / tests. |
-| `cv_predictions.csv` | Out-of-sample predictions per subject: columns `sample_index, model, network, y_pred, y_true, fold`. |
-| `cv_network_strengths.csv` | Summed positive/negative network strength per subject, with the target: `y_true, network_strength, model, network, fold`. |
+| `cv_predictions.csv` | Out-of-sample predictions per subject: columns `sample_index, model, network, y_pred, y_true, fold, repeat`. With a `RepeatedKFold` each subject has one row per repeat; the report averages them so every subject is plotted once. |
+| `cv_network_strengths.csv` | Summed positive/negative network strength per subject, with the target: `sample_index, y_true, network_strength, model, network, fold, repeat`. |
 
 ### Significance (only if `n_permutations > 0`)
 

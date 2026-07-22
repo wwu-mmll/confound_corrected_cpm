@@ -1,3 +1,4 @@
+import warnings
 import numpy as np
 from typing import Union
 
@@ -40,7 +41,9 @@ def get_residuals(data, confounds):
     confounds = torch.as_tensor(confounds, dtype=torch.float64)
 
     n_samples = confounds.shape[0]
-    ones = torch.ones(n_samples, 1, dtype=confounds.dtype)
+    # Create the intercept column on the same device as the inputs so this works
+    # when X/confounds live on the GPU (otherwise torch.cat mixes cpu + cuda).
+    ones = torch.ones(n_samples, 1, dtype=confounds.dtype, device=confounds.device)
     Z = torch.cat((ones, confounds), dim=1)
 
     # 2. Compute the Projector (Hat Matrix component)
@@ -54,7 +57,8 @@ def get_residuals(data, confounds):
     # Data is usually [N_samples, Features] OR [N_perms, N_samples]
 
     def _maybe_to_numpy(result):
-        return result.numpy() if return_numpy else result
+        # .cpu() is a no-op on CPU tensors but required before .numpy() on GPU.
+        return result.cpu().numpy() if return_numpy else result
 
     # CASE A: Data is [N_samples, Features] (Like X)
     if data.shape[0] == n_samples:
@@ -190,6 +194,26 @@ def correlations_and_pvalues(X, Y_perms,
 
 
 
+def resolve_presence_threshold(presence_filter):
+    """
+    Resolve the ``presence_filter`` argument to a nonzero-fraction threshold.
+
+    Returns ``None`` when the filter is off, otherwise the fraction of subjects
+    that must have a nonzero value for an edge to be kept (``True`` -> ``0.5``).
+    """
+    if presence_filter is False or presence_filter is None:
+        return None
+    if presence_filter is True:
+        return 0.5
+    threshold = float(presence_filter)
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(
+            f"presence_filter must be a bool or a fraction in [0, 1], "
+            f"got {presence_filter!r}."
+        )
+    return threshold
+
+
 class BaseEdgeSelector(BaseEstimator):
     def select(self, r, p):
         pass
@@ -210,14 +234,6 @@ class PThreshold(BaseEdgeSelector):
                           (e.g. ``[0.01, 0.05]``) to tune via inner CV.
         :param correction: multiple-comparison correction, or ``None`` for no
                             correction. Can be one of statsmodels' methods:
-                            bonferroni : one-step correction
-                            sidak : one-step correction
-                            holm-sidak : step down method using Sidak adjustments
-                            holm : step-down method using Bonferroni adjustments
-                            simes-hochberg : step-up method (independent)
-                            hommel : closed method based on Simes tests (non-negative)
-                            fdr_bh : Benjamini/Hochberg (non-negative)
-                            fdr_by : Benjamini/Yekutieli (negative)
                             bonferroni : one-step correction
                             sidak : one-step correction
                             holm-sidak : step down method using Sidak adjustments
@@ -286,20 +302,12 @@ class PThreshold(BaseEdgeSelector):
         return torch.stack([torch.as_tensor(pos_mask, device=r.device),
                             torch.as_tensor(neg_mask, device=r.device)], dim=1)
 
-class SelectPercentile(BaseEdgeSelector):
-    def __init__(self, percentile: Union[float, list] = 0.05):
-        self.percentile = percentile
-
-
-class SelectKBest(BaseEdgeSelector):
-    def __init__(self, k: Union[int, list] = None):
-        self.k = k
-
 
 class EdgeStatistic(BaseEstimator):
-    def __init__(self, edge_statistic: str = 'spearman', t_test_filter: bool = False):
+    def __init__(self, edge_statistic: str = 'spearman',
+                 presence_filter: Union[bool, float] = False):
         self.edge_statistic = edge_statistic
-        self.t_test_filter = t_test_filter
+        self.presence_filter = presence_filter
 
     def fit_transform(self,
                       X,
@@ -320,6 +328,18 @@ class EdgeStatistic(BaseEstimator):
         # Remove features with ~0 variance to avoid NaNs in correlation
         variances = torch.var(X, dim=0)
         valid_edges = variances > 1e-6
+
+        # 3b. Presence filter (optional): drop edges that are zero for more than
+        # (1 - threshold) of the subjects. Intended for sparse structural
+        # connectomes (e.g. DTI streamline counts) where structural zeros should
+        # not enter the model; leave off for functional data whose edges have a
+        # real signed distribution around a mean of ~0. Uses X only (no target),
+        # computed here on the training subjects, so it adds no leakage. This is
+        # additive to the variance gate above, which already drops all-zero edges.
+        presence_threshold = resolve_presence_threshold(self.presence_filter)
+        if presence_threshold is not None:
+            presence = (X != 0).float().mean(dim=0)
+            valid_edges = valid_edges & (presence >= presence_threshold)
 
         if self.edge_statistic == 'pearson':
             r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
@@ -368,20 +388,41 @@ class UnivariateEdgeSelection(BaseEstimator):
         (continuous target), or ``'point_biserial'`` / ``'point_biserial_partial'``
         (binary target). The ``*_partial`` variants control for the covariates
         during selection.
-    t_test_filter: bool, default=False
-        Reserved for an optional pre-filtering step (currently inactive).
+    presence_filter: bool or float, default=False
+        Optional pre-filter that keeps only edges which are nonzero in at least a
+        given fraction of subjects, dropping structural/near-zero edges before
+        selection. ``True`` uses a fraction of ``0.5`` (present in the majority);
+        a float sets the fraction explicitly (e.g. ``0.75``). Intended for sparse
+        structural connectomes (e.g. DTI streamline counts); leave off
+        (``False``) for functional data, whose edges have a real signed
+        distribution around a mean of ~0. Computed per fold on the training
+        subjects from the connectome only, so it adds no target leakage. Note:
+        with ``CPMAnalysis(calculate_residuals=True)`` the connectome is
+        residualized before selection, so the filter then sees residualized (not
+        raw) values.
     edge_selection: list of selectors (e.g. PThreshold), default=None
         One or more selection strategies. Provide a list of multiple
         configurations to tune them via an inner CV.
     """
     def __init__(self,
                  edge_statistic: str = 'spearman',
-                 t_test_filter: bool = False,
-                 edge_selection: Union[list, None, PThreshold] = None):
+                 presence_filter: Union[bool, float] = False,
+                 edge_selection: Union[list, None, PThreshold] = None,
+                 t_test_filter=None):
         self.r_edges = None
         self.p_edges = None
+        if t_test_filter is not None:
+            warnings.warn(
+                "`t_test_filter` never functioned and has been replaced by "
+                "`presence_filter` (keep edges nonzero in at least a fraction of "
+                "subjects). Ignoring `t_test_filter`; use `presence_filter` "
+                "instead.",
+                DeprecationWarning, stacklevel=2,
+            )
+        self.presence_filter = presence_filter
         self.t_test_filter = t_test_filter
-        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic, t_test_filter=t_test_filter)
+        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic,
+                                            presence_filter=presence_filter)
         self.edge_selection = edge_selection
         if isinstance(edge_selection, (list, tuple)):
             self.edge_selection = edge_selection

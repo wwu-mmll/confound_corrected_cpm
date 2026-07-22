@@ -9,10 +9,11 @@ import pandas as pd
 import pytest
 import torch
 
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, RepeatedKFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
 from cccpm.utils import check_data
+from cccpm.reporting.reporting_utils import average_over_repeats
 
 
 def _make_cpm(results_directory, **kwargs):
@@ -65,6 +66,64 @@ def test_nan_in_y(simulated_data):
     # values in y should never be missing
     with pytest.raises(ValueError):
         check_data(X, y_nan, covariates, impute_missings=True)
+
+
+# --- Repeated k-fold ---
+
+def test_average_over_repeats_collapses_per_subject():
+    """The helper averages a subject's value over repeats, keeping y_true."""
+    df = pd.DataFrame({
+        "sample_index": [0, 0, 1, 1],
+        "model": "connectome",
+        "network": "both",
+        "y_pred": [1.0, 3.0, 10.0, 20.0],
+        "y_true": [2.0, 2.0, 5.0, 5.0],
+        "repeat": [0, 1, 0, 1],
+    })
+    out = average_over_repeats(df, ["y_pred"])
+    assert len(out) == 2  # one row per subject
+    by_subject = out.set_index("sample_index")
+    assert by_subject.loc[0, "y_pred"] == 2.0   # mean(1, 3)
+    assert by_subject.loc[1, "y_pred"] == 15.0  # mean(10, 20)
+    assert by_subject.loc[0, "y_true"] == 2.0   # constant, preserved
+
+
+def test_repeated_kfold_averages_individual_outputs(tmp_path, simulated_data):
+    """RepeatedKFold must tag predictions with a repeat id and, after the
+    report's per-subject averaging, plot each subject exactly once."""
+    X, y, covariates = simulated_data
+    n_samples = X.shape[0]
+    n_splits, n_repeats = 5, 3
+
+    edge_selection = UnivariateEdgeSelection(
+        edge_statistic="pearson",
+        edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
+    )
+    cpm = CPMAnalysis(
+        results_directory=str(tmp_path),
+        task_type="regression",
+        cv=RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0),
+        edge_selection=edge_selection,
+        n_permutations=0,
+        impute_missing_values=False,
+    )
+    cpm.run(X, y, covariates)
+
+    # Raw CSV keeps every repeat: a repeat id spanning 0..n_repeats-1, and each
+    # subject appears once per repeat for a given model/network.
+    preds = pd.read_csv(tmp_path / "cv_predictions.csv")
+    assert "repeat" in preds.columns
+    assert set(preds["repeat"].unique()) == set(range(n_repeats))
+    conn_both = preds[(preds["model"] == "connectome") & (preds["network"] == "both")]
+    assert (conn_both["sample_index"].value_counts() == n_repeats).all()
+
+    # After the report's averaging, every subject is represented once.
+    averaged = average_over_repeats(conn_both, ["y_pred"])
+    assert len(averaged) == n_samples
+    assert averaged["sample_index"].nunique() == n_samples
+
+    # Edge stability still pools all folds+repeats (folds axis == n_splits*n_repeats).
+    assert cpm.results_manager.dims["folds"] == n_splits * n_repeats
 
 
 # --- Reproducibility ---

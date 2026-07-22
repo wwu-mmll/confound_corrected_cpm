@@ -6,6 +6,28 @@ from pathlib import Path
 import pandas as pd
 
 
+def average_over_repeats(df, value_cols):
+    """
+    Collapse a per-fold individual-level frame to one row per subject.
+
+    With a ``RepeatedKFold`` outer CV, each subject is a test case once per
+    repeat, so the raw predictions / network-strength frames contain
+    ``n_repeats`` rows per (subject, model, network). Averaging the value
+    column(s) over the repeats yields the single per-subject value that the
+    report plots expect; ``y_true`` is constant per subject and kept as-is. For
+    a plain (non-repeated) CV this is a no-op (one row per group already).
+
+    Returns ``df`` unchanged if it lacks the grouping keys (e.g. an empty frame).
+    """
+    keys = ['sample_index', 'model', 'network']
+    if df is None or df.empty or not set(keys).issubset(df.columns):
+        return df
+    agg = {c: 'mean' for c in value_cols if c in df.columns}
+    if 'y_true' in df.columns:
+        agg['y_true'] = 'first'
+    return df.groupby(keys, as_index=False).agg(agg)
+
+
 def format_results_table(df, precision=2):
     """
     Format a MultiIndex DataFrame:

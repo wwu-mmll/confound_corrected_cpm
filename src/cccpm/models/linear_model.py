@@ -359,7 +359,6 @@ class LinearCPM:
         """
         # 1. Convert Inputs to Tensors
         X_tensor = torch.as_tensor(X, device=self.device, dtype=torch.float32)
-        # FIX: Convert covariates to Tensor here
         cov_tensor = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
 
         # 2. Vectorized Strength Calculation
@@ -372,18 +371,12 @@ class LinearCPM:
         neg_str = all_strengths[:, Networks.negative, :]
 
         # 4. Calculate Predictions from Covariates
-        # Note: We pass cov_tensor (Tensor) instead of covariates (NumPy)
         pred_pos = self._pred_shared(cov_tensor, self.resid_models['pos'])
         pred_neg = self._pred_shared(cov_tensor, self.resid_models['neg'])
 
-        # --- IMPORTANT LOGIC CORRECTION ---
-        # Your original code attempted to view these as (-1, 1).
-        # However, your residual models were trained on [N, P] targets in fit(),
-        # so they produce [N, P] predictions. Reshaping to (-1, 1) will break
-        # the subtraction if N_perms > 1.
-
-        # 5. Calculate Residuals
-        # Direct subtraction works because shapes match: [N, P] - [N, P]
+        # 5. Calculate Residuals. The residual models were trained on [N, P]
+        # targets in fit(), so they produce [N, P] predictions and the shapes
+        # match for N_perms > 1.
         pos_resid = pos_str - pred_pos
         neg_resid = neg_str - pred_neg
 

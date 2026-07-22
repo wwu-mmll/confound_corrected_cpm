@@ -7,6 +7,7 @@ from scipy.stats import pointbiserialr
 from cccpm.edge_selection import (
     correlations_and_pvalues,
     get_residuals,
+    resolve_presence_threshold,
     EdgeStatistic,
     UnivariateEdgeSelection,
     PThreshold,
@@ -48,6 +49,29 @@ def test_partial_path_matches_glm_coefficient(simulated_data):
         sr = np.dot(x_res, yc) / (np.linalg.norm(x_res) * np.linalg.norm(yc))
         np.testing.assert_allclose(r[i], sr, atol=1e-6)
         assert np.sign(r[i]) == np.sign(m.params[-1])
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_partial_edge_selection_runs_on_gpu():
+    """The confound-controlled path must run when X/y/confounds live on the GPU.
+
+    Regression test for a device mismatch: get_residuals built the intercept
+    column on the CPU, so torch.cat(ones, confounds) crashed with confounds on
+    cuda. GPU results must also match the CPU computation.
+    """
+    dev = torch.device('cuda')
+    rng = np.random.RandomState(0)
+    X = torch.as_tensor(rng.randn(80, 30), dtype=torch.float32, device=dev)
+    y = torch.as_tensor(rng.randn(80, 1), dtype=torch.float32, device=dev)
+    Z = torch.as_tensor(rng.randn(80, 2), dtype=torch.float32, device=dev)
+
+    r, p = correlations_and_pvalues(X, y, correlation_type='pearson', confounds=Z)
+    assert r.device.type == 'cuda' and p.device.type == 'cuda'
+
+    r_cpu, p_cpu = correlations_and_pvalues(
+        X.cpu(), y.cpu(), correlation_type='pearson', confounds=Z.cpu())
+    torch.testing.assert_close(r.cpu(), r_cpu, rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(p.cpu(), p_cpu, rtol=1e-4, atol=1e-5)
 
 
 def test_get_residuals_matches_ols():
@@ -183,3 +207,95 @@ def test_edge_selection_recovers_signed_edges(statistic, binary_target):
     assert bool(edges[1, Networks.negative, 0]), f"{statistic}: feature 1 should be negative"
     assert not bool(edges[0, Networks.negative, 0]), f"{statistic}: feature 0 should not be negative"
     assert not bool(edges[1, Networks.positive, 0]), f"{statistic}: feature 1 should not be positive"
+
+
+# --- Presence filter (sparse/structural-zero edge removal) ---------------------
+
+def test_resolve_presence_threshold():
+    """bool/float/None inputs map to the right nonzero-fraction threshold."""
+    assert resolve_presence_threshold(False) is None
+    assert resolve_presence_threshold(None) is None
+    assert resolve_presence_threshold(True) == 0.5
+    assert resolve_presence_threshold(0.75) == 0.75
+    assert resolve_presence_threshold(0.0) == 0.0
+    with pytest.raises(ValueError):
+        resolve_presence_threshold(1.5)
+    with pytest.raises(ValueError):
+        resolve_presence_threshold(-0.1)
+
+
+def _sparse_presence_data(seed=0):
+    """X whose columns are nonzero in known fractions of the 100 subjects.
+
+    Column j is nonzero in exactly ``(j + 1) * 10 %`` of subjects (10%..100%),
+    with strong correlation to y on the nonzero rows so that, absent the
+    presence filter, every column would be selectable.
+    """
+    rng = np.random.RandomState(seed)
+    n = 100
+    y = rng.randn(n).astype(np.float32)
+    n_features = 10
+    X = np.zeros((n, n_features), dtype=np.float32)
+    for j in range(n_features):
+        k = (j + 1) * 10  # number of nonzero subjects: 10, 20, ..., 100
+        rows = rng.choice(n, size=k, replace=False)
+        X[rows, j] = (y[rows] * 2.0 + rng.randn(k) * 0.1).astype(np.float32)
+    return X, y.reshape(-1, 1)
+
+
+@pytest.mark.parametrize("threshold,expected_min_fraction", [
+    (0.5, 0.5),
+    (0.3, 0.3),
+    (0.75, 0.75),
+])
+def test_presence_filter_drops_sparse_edges(threshold, expected_min_fraction):
+    """Only edges nonzero in >= threshold of subjects survive the filter."""
+    X, y = _sparse_presence_data()
+    stat = EdgeStatistic(edge_statistic='pearson', presence_filter=threshold)
+    r, p = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+
+    presence = (X != 0).mean(axis=0)
+    kept = (p[:, 0].numpy() < 1.0)  # p==1 marks a filtered/invalid edge
+    for j in range(X.shape[1]):
+        if presence[j] + 1e-9 >= expected_min_fraction:
+            assert kept[j], f"edge {j} (presence {presence[j]:.2f}) should survive"
+        else:
+            assert not kept[j], f"edge {j} (presence {presence[j]:.2f}) should be filtered"
+
+
+def test_presence_filter_off_by_default_keeps_all():
+    """With the filter off, sparse-but-variable edges are still evaluated."""
+    X, y = _sparse_presence_data()
+    stat = EdgeStatistic(edge_statistic='pearson')  # default: no presence filter
+    r, p = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    # Every column has variance > 0, so none is dropped by the variance gate.
+    assert bool((p[:, 0].numpy() < 1.0).all()), "no edge should be filtered when off"
+
+
+def test_presence_filter_adds_to_variance_gate():
+    """An edge with variance but present in a minority is kept by the variance
+    gate yet dropped by the presence filter (shows the filter is additive)."""
+    rng = np.random.RandomState(1)
+    n = 100
+    y = rng.randn(n, 1).astype(np.float32)
+    X = np.zeros((n, 1), dtype=np.float32)
+    X[:20, 0] = rng.randn(20).astype(np.float32) + 5.0  # nonzero in 20% only
+
+    no_filter = EdgeStatistic(edge_statistic='pearson')
+    _, p_off = no_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    assert p_off[0, 0].item() < 1.0  # survives the variance gate
+
+    with_filter = EdgeStatistic(edge_statistic='pearson', presence_filter=0.5)
+    _, p_on = with_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    assert p_on[0, 0].item() == 1.0  # dropped by the presence filter
+
+
+def test_t_test_filter_deprecated():
+    """The old, never-functional t_test_filter keyword warns and is ignored."""
+    with pytest.warns(DeprecationWarning):
+        sel = UnivariateEdgeSelection(
+            edge_statistic='pearson', t_test_filter=True,
+            edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
+        )
+    # presence_filter stays at its default (off) — t_test_filter is not mapped.
+    assert sel.presence_filter is False

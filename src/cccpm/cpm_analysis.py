@@ -15,7 +15,7 @@ from sklearn.linear_model import LinearRegression
 from cccpm.inner_fold import run_inner_folds
 from cccpm.logging import setup_logging
 from cccpm.models.linear_model import LinearCPM
-from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold, resolve_presence_threshold
 from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import (train_test_split, check_data, impute_missing_values,
                          select_stable_edges, generate_data_insights, detect_task_type,
@@ -148,6 +148,16 @@ class CPMAnalysis:
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
         self.calculate_residuals = calculate_residuals
+
+        # The presence filter is meant to drop structural zeros from the raw
+        # connectome; with global residualization the connectome is mean-centred
+        # before selection, so the filter would see residualized values instead.
+        if calculate_residuals and resolve_presence_threshold(
+                getattr(self.edge_selection, 'presence_filter', False)) is not None:
+            self.logger.warning(
+                "Both calculate_residuals=True and a presence_filter are set: the "
+                "presence filter will see residualized (not raw) connectome values."
+            )
         self.n_permutations = n_permutations
         self.edge_significance_method = edge_significance_method
         self.nbs_threshold = nbs_threshold
@@ -356,6 +366,13 @@ class CPMAnalysis:
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
                                          device=self.device)
 
+        # For a RepeatedKFold the outer split index runs 0..(n_splits*n_repeats-1)
+        # with all folds of repeat 0 first, then repeat 1, etc. Derive the repeat
+        # id so individual-level outputs can be averaged across repeats; plain
+        # (non-repeated) CVs have n_repeats == 1, so every fold is repeat 0.
+        n_repeats = getattr(self.cv, 'n_repeats', 1)
+        splits_per_repeat = max(self.cv.get_n_splits() // n_repeats, 1)
+
         iterator = tqdm(
             enumerate(self.cv.split(X, y[:, 0])),
             total=self.cv.get_n_splits(),
@@ -363,7 +380,8 @@ class CPMAnalysis:
             unit="fold",
         )
         for outer_fold, (train, test) in iterator:
-            self._run_outer_fold(outer_fold, train, test, X, y, covariates,
+            repeat = outer_fold // splits_per_repeat
+            self._run_outer_fold(outer_fold, repeat, train, test, X, y, covariates,
                                  results_manager, perm_run)
 
         # Aggregate across folds
@@ -376,7 +394,7 @@ class CPMAnalysis:
             results_manager.save_network_strengths()
             self.results_manager = results_manager
 
-    def _run_outer_fold(self, outer_fold, train, test, X, y, covariates,
+    def _run_outer_fold(self, outer_fold, repeat, train, test, X, y, covariates,
                         results_manager, perm_run):
         """
         Execute a single outer CV fold: preprocess, select edges, fit model,
@@ -409,10 +427,12 @@ class CPMAnalysis:
 
         if not perm_run:
             results_manager.store_predictions(y_pred=y_pred, y_true=y_test,
-                                              fold=outer_fold, test_indices=test)
+                                              fold=outer_fold, test_indices=test,
+                                              repeat=repeat)
             network_strengths = model.get_network_strengths(X_test, cov_test)
             results_manager.store_network_strengths(network_strengths=network_strengths,
-                                                    y_true=y_test, fold=outer_fold)
+                                                    y_true=y_test, fold=outer_fold,
+                                                    test_indices=test, repeat=repeat)
 
         # Score and store metrics
         metrics = score_models(y_true=y_test, y_pred=y_pred,
