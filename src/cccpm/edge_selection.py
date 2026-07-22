@@ -2,6 +2,7 @@ import warnings
 import numpy as np
 from typing import Union
 
+import networkx as nx
 import torch
 
 from sklearn.base import BaseEstimator
@@ -214,6 +215,65 @@ def resolve_presence_threshold(presence_filter):
     return threshold
 
 
+def resolve_min_component_size(connected_components):
+    """
+    Resolve the ``connected_components`` argument to a minimum component size
+    (in edges), or ``None`` when the filter is off (``True`` -> ``2``, i.e. drop
+    lone single edges).
+    """
+    if connected_components is False or connected_components is None:
+        return None
+    if connected_components is True:
+        return 2
+    size = int(connected_components)
+    if size < 1:
+        raise ValueError(
+            f"connected_components must be a bool or an int >= 1, "
+            f"got {connected_components!r}."
+        )
+    return size
+
+
+def filter_connected_components(mask, min_edges):
+    """
+    Keep only selected edges that belong to a connected component with at least
+    ``min_edges`` edges, per network layer and run; drop the rest.
+
+    Edges are nodes-in-common connections of a graph built per (network, run)
+    from the selected edges. Isolated single edges form a one-edge component and
+    are removed when ``min_edges >= 2``. ``mask`` is the ``[Features, 2, Runs]``
+    selection tensor (dim 1 = positive/negative); the returned tensor has the
+    same shape/dtype with dropped edges set to 0.
+    """
+    from cccpm.utils import infer_n_nodes
+
+    n_features = mask.shape[0]
+    n_nodes = infer_n_nodes(n_features)
+    if n_nodes is None:
+        return mask
+
+    rows, cols = np.triu_indices(n_nodes, k=1)
+    out = mask.clone()
+    selected = mask.detach().cpu().numpy() > 0
+    for layer in range(selected.shape[1]):
+        for run in range(selected.shape[2]):
+            edge_idx = np.nonzero(selected[:, layer, run])[0]
+            if edge_idx.size == 0:
+                continue
+            graph = nx.Graph()
+            graph.add_edges_from(zip(rows[edge_idx].tolist(), cols[edge_idx].tolist()))
+            drop = set()
+            for component in nx.connected_components(graph):
+                sub = graph.subgraph(component)
+                if sub.number_of_edges() < min_edges:
+                    drop.update(tuple(sorted(e)) for e in sub.edges())
+            if drop:
+                for e in edge_idx:
+                    if (rows[e], cols[e]) in drop:
+                        out[e, layer, run] = 0
+    return out
+
+
 class BaseEdgeSelector(BaseEstimator):
     def select(self, r, p):
         pass
@@ -400,6 +460,12 @@ class UnivariateEdgeSelection(BaseEstimator):
         with ``CPMAnalysis(calculate_residuals=True)`` the connectome is
         residualized before selection, so the filter then sees residualized (not
         raw) values.
+    connected_components: bool or int, default=False
+        If set, keep only selected edges that belong to a connected component
+        with at least this many edges (per positive/negative network), dropping
+        isolated edges — this can improve edge stability. ``True`` uses a minimum
+        of ``2`` edges (drop lone single edges); an int sets the minimum
+        explicitly. Applied per fold and per permutation after thresholding.
     edge_selection: list of selectors (e.g. PThreshold), default=None
         One or more selection strategies. Provide a list of multiple
         configurations to tune them via an inner CV.
@@ -407,6 +473,7 @@ class UnivariateEdgeSelection(BaseEstimator):
     def __init__(self,
                  edge_statistic: str = 'spearman',
                  presence_filter: Union[bool, float] = False,
+                 connected_components: Union[bool, int] = False,
                  edge_selection: Union[list, None, PThreshold] = None,
                  t_test_filter=None):
         self.r_edges = None
@@ -420,6 +487,7 @@ class UnivariateEdgeSelection(BaseEstimator):
                 DeprecationWarning, stacklevel=2,
             )
         self.presence_filter = presence_filter
+        self.connected_components = connected_components
         self.t_test_filter = t_test_filter
         self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic,
                                             presence_filter=presence_filter)
@@ -446,4 +514,7 @@ class UnivariateEdgeSelection(BaseEstimator):
 
     def return_selected_edges(self):
         selected_edges = self.edge_selection.select(r=self.r_edges, p=self.p_edges)
+        min_edges = resolve_min_component_size(self.connected_components)
+        if min_edges is not None:
+            selected_edges = filter_connected_components(selected_edges, min_edges)
         return selected_edges

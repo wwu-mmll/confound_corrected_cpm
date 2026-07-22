@@ -54,6 +54,19 @@ real signed distribution around a mean of ~0. With `calculate_residuals=True` th
 connectome is residualized before selection, so the filter then sees residualized (not
 raw) values.
 
+#### Keeping only connected edges
+
+```python
+UnivariateEdgeSelection(edge_statistic="pearson", connected_components=True)
+```
+
+`connected_components` keeps only edges that belong to a connected component (per
+positive/negative network) with at least a minimum number of edges, dropping isolated
+single edges. `True` uses a minimum of 2 edges (drop lone edges); an int sets the
+minimum explicitly. Applied per fold (and per permutation) after thresholding, this
+favours coherent subnetworks over scattered one-off edges and can improve edge
+stability.
+
 ### 2. Confound control
 
 CCCPM offers two complementary ways to control for nuisance variables:

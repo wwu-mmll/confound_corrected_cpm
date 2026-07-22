@@ -15,17 +15,45 @@ and within sections.
 
 ## Correctness & statistical validity
 
+- [ ] **Clear error when no confound is provided.** A missing/`None` `covariates`
+      argument currently crashes deep in `check_data`/`get_residuals` instead of
+      failing fast. Catch it early in `check_data`/`CPMAnalysis.run` and raise a
+      clear message that a confound is currently required (the covariates/full/
+      residuals variants and the `*_partial` statistics all assume one). Add a
+      test. (Longer term: consider a real no-confound mode.)
 - [~] **Edge-selection p-value approximation** (decision #6). The normal
       approximation to the t-tail in `correlations_and_pvalues` is
       anti-conservative at small N (~13% too low at N=20, negligible at N≥100).
       Pick (a) keep, (b) on-GPU exact t-tail, or (c) scipy `t.sf` on CPU for the
       threshold step only. Needs sign-off.
+- [x] **Connected-component edge selection** (2026-07-22).
+      `UnivariateEdgeSelection(connected_components=True|int)` drops selected edges
+      not in a connected component with ≥ N edges (N=2 by default), per network,
+      per fold and permutation (`filter_connected_components`, networkx). Tested.
 - [ ] **External reference validation** vs Shen MATLAB / GenCPM on ≥1 dataset, so
       paper numbers are defensible (this is what the `cccpm_paper` benchmark is
       for — feed the result back here once numbers agree).
 - [ ] **Classification path:** expand tests (probabilities, AUC, class imbalance,
       StratifiedKFold edge cases).
 - [ ] **Verify MPS (Apple) / CUDA** run end-to-end on real hardware.
+
+## Performance
+
+- [x] **VRAM blow-up in edge-stability aggregation (GPU OOM)** (2026-07-22).
+      Edge bookkeeping moved to CPU and reduced to a running fold-sum
+      (`cv_edge_sum`); node×node densification built on CPU; per-fold `edges.npy`
+      written for the real run only (permutations keep just the fold-averaged
+      `stability_edges.npy`). Verified on a real GPU: 100 nodes × 10 folds × 200
+      perms now peaks at ~69 MB VRAM for this step. Small-GPU guidance added to
+      `installation.md`.
+- [x] **GPU-vs-CPU speed test + investigation** (2026-07-22).
+      `scripts/benchmark_cpu_gpu.py` times edge selection + model fit on CPU vs
+      CUDA across sizes/permutations. **Finding:** CPU≈GPU is expected at
+      `perms=1` (a plain run) — the matmuls are tiny and GPU launch/transfer
+      overhead cancels the win; the GPU only pulls ahead with a large permutation
+      batch and/or big connectomes (e.g. ~23× at 200 nodes × 1000 perms on an
+      RTX 3090, but ~0.95× at 100 nodes × 1 perm). A full `run()` also has fixed
+      CPU-bound overhead (IO, report, networkx) that dilutes the kernel speedup.
 
 ## Code health & cleanup
 *Done 2026-07-22 (no behavior change, suite green): removed the dead/broken
@@ -58,6 +86,12 @@ No open code-health items. (Future: consolidate the duplicate
 
 ## Docs & report
 
+- [x] **Brain-plot edge thresholding + in-report selector** (2026-07-22). Brain &
+      Edges defaults to significant edges (NBS/TFCE p<alpha) with an in-report
+      button group to switch the matrix/hub/chord views between Significant / Top
+      5% / Top 10% (`masked_signed_stability_matrix` + self-contained JS/CSS).
+      Glass brain renders the default subset. *Follow-up: make the glass brain
+      switch too if netplotbrain render cost is addressed.*
 - [ ] Show key variations in both quickstarts: confound control (partial vs
       residuals), nested CV with p-threshold tuning, stable-edge selection,
       permutation testing, and passing `atlas` for brain plots.

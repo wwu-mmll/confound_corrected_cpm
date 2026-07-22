@@ -362,9 +362,13 @@ class CPMAnalysis:
         else:
             results_directory = self.results_directory
 
+        # Retain per-fold edge masks (for edges.npy) only on the real run; the
+        # permutation pass keeps just the fold-sum for the stability null, which
+        # avoids a [Features, 2, Folds, n_permutations] tensor (huge for big
+        # parcellations × many folds × many permutations).
         results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
-                                         device=self.device)
+                                         device=self.device, store_fold_edges=not perm_run)
 
         # For a RepeatedKFold the outer split index runs 0..(n_splits*n_repeats-1)
         # with all folds of repeat 0 first, then repeat 1, etc. Derive the repeat

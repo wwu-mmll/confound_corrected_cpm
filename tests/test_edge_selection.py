@@ -8,6 +8,8 @@ from cccpm.edge_selection import (
     correlations_and_pvalues,
     get_residuals,
     resolve_presence_threshold,
+    resolve_min_component_size,
+    filter_connected_components,
     EdgeStatistic,
     UnivariateEdgeSelection,
     PThreshold,
@@ -299,3 +301,60 @@ def test_t_test_filter_deprecated():
         )
     # presence_filter stays at its default (off) — t_test_filter is not mapped.
     assert sel.presence_filter is False
+
+
+# --- Connected-component edge filtering ---------------------------------------
+
+def test_resolve_min_component_size():
+    assert resolve_min_component_size(False) is None
+    assert resolve_min_component_size(None) is None
+    assert resolve_min_component_size(True) == 2
+    assert resolve_min_component_size(3) == 3
+    with pytest.raises(ValueError):
+        resolve_min_component_size(0)
+    with pytest.raises(ValueError):
+        resolve_min_component_size(-2)
+
+
+def test_filter_connected_components_drops_lone_edges():
+    """A lone edge is dropped; a connected chain of edges is kept.
+
+    5 nodes -> 10 upper-triangular edges. Feature index 0 = (0,1), 4 = (1,2)
+    (a 2-edge chain sharing node 1), and 9 = (3,4) (an isolated pair).
+    """
+    mask = torch.zeros(10, 2, 1, dtype=torch.bool)
+    mask[[0, 4, 9], Networks.positive, 0] = True
+
+    out = filter_connected_components(mask, min_edges=2)
+    assert bool(out[0, Networks.positive, 0])       # chain edge kept
+    assert bool(out[4, Networks.positive, 0])       # chain edge kept
+    assert not bool(out[9, Networks.positive, 0])   # lone edge dropped
+
+
+def _sel_with_edges(connected_components):
+    sel = UnivariateEdgeSelection(
+        edge_statistic='pearson',
+        connected_components=connected_components,
+        edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
+    )
+    sel.set_params(**list(sel.param_grid)[0])
+    # 5 nodes / 10 edges: positive edges 0=(0,1), 4=(1,2) form a chain; 9=(3,4)
+    # is isolated. All are strongly, significantly positive.
+    r = torch.zeros(10, 1)
+    p = torch.ones(10, 1)
+    for e in (0, 4, 9):
+        r[e, 0] = 0.5
+        p[e, 0] = 0.001
+    sel.r_edges, sel.p_edges = r, p
+    return sel
+
+
+def test_connected_components_filter_end_to_end():
+    """With connected_components on, the isolated edge is not selected; off, it is."""
+    edges_on = _sel_with_edges(True).return_selected_edges()
+    assert bool(edges_on[0, Networks.positive, 0])
+    assert bool(edges_on[4, Networks.positive, 0])
+    assert not bool(edges_on[9, Networks.positive, 0])  # lone edge removed
+
+    edges_off = _sel_with_edges(False).return_selected_edges()
+    assert bool(edges_off[9, Networks.positive, 0])     # lone edge kept

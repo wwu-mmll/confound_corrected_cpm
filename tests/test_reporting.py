@@ -9,9 +9,11 @@ sections — with and without an atlas.
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from cccpm.reporting.html_report import HTMLReporter
+from cccpm.reporting.plots.connectome_utils import masked_signed_stability_matrix
 
 REPO_ROOT = Path(__file__).parent.parent
 FIXTURE_RESULTS = REPO_ROOT / "examples" / "results" / "regression_quickstart"
@@ -66,15 +68,58 @@ def test_report_generates_without_atlas(results_dir):
 
     # Atlas-free graceful degradation: matrix + hubs render, chord does not.
     # (Check the figure captions, not the explanatory text which names every figure.)
-    assert "Connectivity matrix of stable edges" in html
+    assert "Connectivity matrix (" in html
     assert "Hub nodes —" in html
     assert "Chord diagram of between-network connectivity" not in html
+
+    # Edge-subset selector (significant / top 5% / top 10%) is present.
+    assert 'class="brain-controls"' in html
+    assert 'data-mode="top5"' in html
+    assert 'data-mode="top10"' in html
 
 
 def test_report_generates_with_atlas(results_dir):
     html = _generate(results_dir, atlas=str(ATLAS_CSV))
 
     # Atlas-dependent figures now appear
-    assert "Connectivity matrix of stable edges" in html
+    assert "Connectivity matrix (" in html
     assert "aggregated by canonical brain network" in html
     assert "Chord diagram of between-network connectivity" in html
+
+
+def test_masked_signed_stability_matrix_modes():
+    """The edge-subset mask keeps the right edges and preserves network sign."""
+    n = 4
+    stab = np.zeros((n, n, 2))
+    stab[0, 1, 0] = 1.0   # positive network
+    stab[0, 2, 0] = 0.6
+    stab[0, 3, 0] = 0.2
+    stab[1, 2, 1] = 0.9   # negative network
+
+    sig = np.ones((n, n, 2))
+    sig[0, 1, 0] = 0.01   # significant
+    sig[0, 2, 0] = 0.20   # not significant
+    sig[0, 3, 0] = 0.30   # not significant
+    sig[1, 2, 1] = 0.02   # significant
+
+    # all: every stable edge, signed by network (positive +, negative -)
+    all_m = masked_signed_stability_matrix(stab, sig, mode="all")
+    assert all_m[0, 1] == 1.0
+    assert all_m[0, 2] == 0.6
+    assert all_m[1, 2] == -0.9
+
+    # significant: only p < 0.05 survive
+    sig_m = masked_signed_stability_matrix(stab, sig, mode="significant")
+    assert sig_m[0, 1] == 1.0
+    assert sig_m[0, 2] == 0.0
+    assert sig_m[1, 2] == -0.9
+
+    # top10: within the positive layer only the most stable edge survives
+    top_m = masked_signed_stability_matrix(stab, sig, mode="top10")
+    assert top_m[0, 1] == 1.0
+    assert top_m[0, 2] == 0.0
+    assert top_m[1, 2] == -0.9  # sole negative edge is its own top
+
+    # significant without significance data falls back to all stable edges
+    nosig = masked_signed_stability_matrix(stab, None, mode="significant")
+    assert nosig[0, 2] == 0.6

@@ -6,7 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Connected-component edge selection** (`UnivariateEdgeSelection(connected_components=...)`).
+  Optionally keeps only selected edges that belong to a connected component (per
+  positive/negative network) with at least a minimum number of edges, dropping isolated
+  single edges to favour coherent subnetworks and improve stability. `True` drops lone
+  edges (min 2 edges); an int sets the minimum. Applied per fold and per permutation.
+- **Brain-plot edge thresholding + in-report selector.** The Brain & Edges section now
+  defaults to the *significantly stable* edges (NBS/TFCE p < 0.05) instead of all stable
+  edges, and offers buttons to switch the connectivity matrix, hub, network-summary and
+  chord views between **Significant**, **Top 5%** and **Top 10%** (by stability). Without
+  permutation-based significance the default is all stable edges. The glass brain renders
+  the default subset. Fully self-contained (inline JS/CSS, no external requests).
+
 ### Fixed
+- **GPU out-of-memory in edge-stability aggregation.** `ResultsManager` preallocated the
+  per-fold edge masks `[Features, 2, Folds, Runs]` on the compute device and densified
+  them to node×node arrays there, so large parcellations × many folds × many permutations
+  could need tens of GB of VRAM (e.g. ~25 GB just for `cv_edges` at 500 nodes × 100 folds
+  × 1000 permutations, before a ~200 GB `edges.npy` densification). Edge bookkeeping now
+  lives on the CPU and is reduced to a running fold-sum (all that stability needs), the
+  node×node arrays are built on the CPU, and per-fold `edges.npy` is written for the real
+  run only — the permutation pass keeps just the fold-averaged `stability_edges.npy` it
+  needs for the null. Peak VRAM for this step is now negligible. See the installation
+  guide for running big analyses on limited-VRAM GPUs.
 - **RepeatedKFold individual-level outputs.** Predictions and network strengths are now
   tagged with a `repeat` id (and network strengths with a `sample_index`), and the HTML
   report averages each subject's values across the repeats of a `RepeatedKFold` before

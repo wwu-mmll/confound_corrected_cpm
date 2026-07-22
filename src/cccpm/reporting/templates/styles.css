@@ -367,6 +367,26 @@ tr:nth-child(even) td { background: var(--surface-2); }
 .figure-wrap { margin: var(--sp-4) 0; }
 .figure-wrap svg, .figure-wrap img { max-width: 100%; height: auto; display: block; }
 
+/* Brain & Edges: edge-subset selector */
+.brain-controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-3) 0; }
+.brain-mode-btn {
+  padding: 4px 14px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.brain-mode-btn:hover { border-color: var(--accent-border); color: var(--text); }
+.brain-mode-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.brain-mode-panel.hidden { display: none; }
+
 figcaption, .caption {
   font-size: var(--fs-xs);
   color: var(--text-muted);

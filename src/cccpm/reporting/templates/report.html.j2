@@ -196,51 +196,66 @@
             networks (needs a <code>network</code> column in the atlas).</li>
           <li><strong>Chord diagram</strong> — between-network connectivity as a ring; arc width is
             the aggregated stability.</li>
-          <li><strong>Glass brain</strong> — the significantly stable edges drawn on a brain
-            (needs node coordinates <code>x, y, z</code>).</li>
+          <li><strong>Glass brain</strong> — the selected edges drawn on a brain
+            (needs node coordinates <code>x, y, z</code>); shown for the default
+            subset.</li>
         </ul>
+        <p>Use the buttons to choose which edges the matrix, hub and chord views
+          show: <em>significant</em> (stability p&nbsp;&lt;&nbsp;0.05, needs
+          permutations), or the <em>top&nbsp;5%</em>&nbsp;/&nbsp;<em>10%</em> most
+          stable edges.</p>
       </div>
 
-      <div class="figure-grid">
-        {% if conn_matrix %}
+      {% if has_brain_figures %}
+      <div class="brain-controls" role="group" aria-label="Edge subset">
+        {% for m in brain_modes %}
+        <button type="button" class="brain-mode-btn{% if m.default %} active{% endif %}"
+                data-mode="{{ m.key }}">{{ m.label }}</button>
+        {% endfor %}
+      </div>
+      {% for m in brain_modes %}
+      <div class="figure-grid brain-mode-panel{% if not m.default %} hidden{% endif %}" data-mode="{{ m.key }}">
+        {% if m.conn_matrix %}
         <div class="figure-wrap">
-          {{ conn_matrix }}
-          <p class="caption">Connectivity matrix of stable edges (node × node).</p>
+          {{ m.conn_matrix }}
+          <p class="caption">Connectivity matrix ({{ m.label|lower }} edges, node × node).</p>
         </div>
         {% endif %}
-        {% if node_degree %}
+        {% if m.node_degree %}
         <div class="figure-wrap">
-          {{ node_degree }}
-          <p class="caption">Hub nodes — number of stable edges per node.</p>
+          {{ m.node_degree }}
+          <p class="caption">Hub nodes — number of {{ m.label|lower }} edges per node.</p>
         </div>
         {% endif %}
-        {% if network_summary %}
+        {% if m.network_summary %}
         <div class="figure-wrap">
-          {{ network_summary }}
+          {{ m.network_summary }}
           <p class="caption">Edges aggregated by canonical brain network.</p>
         </div>
         {% endif %}
-        {% if chord %}
+        {% if m.chord %}
         <div class="figure-wrap">
-          {{ chord }}
+          {{ m.chord }}
           <p class="caption">Chord diagram of between-network connectivity.</p>
         </div>
         {% endif %}
-        {% if brain_positive %}
+        {% if m.brain_positive %}
         <div class="figure-wrap">
-          {{ brain_positive }}
-          <p class="caption">Glass brain — stable positive edges.</p>
+          {{ m.brain_positive }}
+          <p class="caption">Glass brain — {{ m.label|lower }} positive edges.</p>
         </div>
         {% endif %}
-        {% if brain_negative %}
+        {% if m.brain_negative %}
         <div class="figure-wrap">
-          {{ brain_negative }}
-          <p class="caption">Glass brain — stable negative edges.</p>
+          {{ m.brain_negative }}
+          <p class="caption">Glass brain — {{ m.label|lower }} negative edges.</p>
         </div>
         {% endif %}
       </div>
+      {% endfor %}
+      {% endif %}
 
-      {% if not conn_matrix and not node_degree %}
+      {% if not has_brain_figures %}
       <div class="missing-asset">
         No edge-stability data found to build brain figures. Run the analysis with
         edge stability enabled to populate this section.
@@ -416,6 +431,22 @@
       });
     }, { rootMargin: '-20% 0px -70% 0px' });
     sections.forEach(s => observer.observe(s));
+  })();
+
+  // Brain & Edges: switch the displayed edge subset (significant / top 5% / 10%)
+  (function () {
+    document.querySelectorAll('.brain-controls').forEach(ctrl => {
+      const section = ctrl.closest('section');
+      ctrl.querySelectorAll('.brain-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const mode = btn.getAttribute('data-mode');
+          ctrl.querySelectorAll('.brain-mode-btn').forEach(
+            b => b.classList.toggle('active', b === btn));
+          section.querySelectorAll('.brain-mode-panel').forEach(
+            p => p.classList.toggle('hidden', p.getAttribute('data-mode') !== mode));
+        });
+      });
+    });
   })();
 </script>
 

@@ -415,79 +415,92 @@ def build_brain_plots_context(
     glass-brain render additionally needs node coordinates (x, y, z).
     """
     from cccpm.reporting.plots import brain_figures as bf
-    from cccpm.reporting.plots.connectome_utils import (
-        signed_stability_matrix,
-        significant_edge_matrices,
-    )
+    from cccpm.reporting.plots.connectome_utils import masked_signed_stability_matrix
     from cccpm.reporting.plots.figure_style import NEG, POS
 
+    has_atlas = atlas_labels is not None
+    has_network_labels = has_atlas and "network" in atlas_labels.columns
     ctx = {
-        "has_atlas": atlas_labels is not None,
-        "has_network_labels": atlas_labels is not None and "network" in atlas_labels.columns,
-        "brain_positive": "",
-        "brain_negative": "",
-        "conn_matrix": "",
-        "network_summary": "",
-        "chord": "",
-        "node_degree": "",
+        "has_atlas": has_atlas,
+        "has_network_labels": has_network_labels,
+        "brain_modes": [],
+        "has_brain_figures": False,
     }
+    if edge_stability is None:
+        return ctx
 
-    # ── Matrix-based figures (built from the stability matrices) ──
-    if edge_stability is not None:
+    # Which edge subsets the reader can switch between. "significant" needs
+    # permutation-based significance; without it we default to all stable edges.
+    if edge_significance is not None:
+        modes = [("significant", "Significant", True),
+                 ("top5", "Top 5%", False),
+                 ("top10", "Top 10%", False)]
+    else:
+        modes = [("all", "All stable", True),
+                 ("top5", "Top 5%", False),
+                 ("top10", "Top 10%", False)]
+
+    for key, label, default in modes:
         try:
-            signed = signed_stability_matrix(edge_stability)
+            signed = masked_signed_stability_matrix(
+                edge_stability, edge_significance, mode=key)
         except Exception:
-            signed = None
+            continue
 
-        if signed is not None:
+        figset = {"key": key, "label": label, "default": default,
+                  "conn_matrix": "", "node_degree": "", "network_summary": "",
+                  "chord": "", "brain_positive": "", "brain_negative": ""}
+
+        # ── Matrix-based figures (cheap SVGs) ──
+        try:
+            figset["conn_matrix"] = _svg_to_html(bf.connectivity_matrix(
+                signed, plots_dir, atlas=atlas_labels, name=f"connectivity_matrix_{key}"))
+        except Exception:
+            pass
+        try:
+            figset["node_degree"] = _svg_to_html(bf.node_degree_plot(
+                signed, plots_dir, atlas=atlas_labels, name=f"node_degree_{key}"))
+        except Exception:
+            pass
+        if has_network_labels:
             try:
-                ctx["conn_matrix"] = _svg_to_html(
-                    bf.connectivity_matrix(signed, plots_dir, atlas=atlas_labels)
-                )
+                p = bf.network_summary_matrix(
+                    signed, atlas_labels, plots_dir, name=f"network_summary_matrix_{key}")
+                if p:
+                    figset["network_summary"] = _svg_to_html(p)
             except Exception:
                 pass
             try:
-                ctx["node_degree"] = _svg_to_html(
-                    bf.node_degree_plot(signed, plots_dir, atlas=atlas_labels)
-                )
+                p = bf.chord_diagram(
+                    signed, atlas_labels, plots_dir, name=f"chord_diagram_{key}")
+                if p:
+                    figset["chord"] = _svg_to_html(p)
             except Exception:
                 pass
-            if ctx["has_network_labels"]:
+
+        # ── Glass-brain renders (netplotbrain; need atlas with x/y/z) ──
+        # Only for the default subset: netplotbrain is slow (~seconds/render), so
+        # rendering it for every mode would triple report time for little gain.
+        # The cheap matrix/chord figures above still switch across all modes.
+        if has_atlas and default:
+            for mat, color, fname, fkey in [
+                (np.where(signed > 0, 1.0, 0.0), POS, f"netplotbrain_positive_{key}", "brain_positive"),
+                (np.where(signed < 0, 1.0, 0.0), NEG, f"netplotbrain_negative_{key}", "brain_negative"),
+            ]:
+                if not mat.any():
+                    continue
                 try:
-                    p = bf.network_summary_matrix(signed, atlas_labels, plots_dir)
-                    if p:
-                        ctx["network_summary"] = _svg_to_html(p)
+                    path = bf.glass_brain(mat, atlas_labels, plots_dir,
+                                          edge_color=color, name=fname)
+                    if path:
+                        figset[fkey] = _png_to_html(path)
                 except Exception:
                     pass
-                try:
-                    p = bf.chord_diagram(signed, atlas_labels, plots_dir)
-                    if p:
-                        ctx["chord"] = _svg_to_html(p)
-                except Exception:
-                    pass
 
-    # ── Glass-brain renders (netplotbrain; need atlas with x/y/z) ──
-    # Built directly from the significant-edge matrices, not from the
-    # `sig_stability_*` .npy files (which the pipeline no longer writes).
-    if atlas_labels is not None and edge_stability is not None:
-        try:
-            pos_mat, neg_mat = significant_edge_matrices(edge_stability, edge_significance)
-        except Exception:
-            pos_mat = neg_mat = None
-        for mat, color, fname, key in [
-            (pos_mat, POS, "netplotbrain_positive", "brain_positive"),
-            (neg_mat, NEG, "netplotbrain_negative", "brain_negative"),
-        ]:
-            if mat is None:
-                continue
-            try:
-                path = bf.glass_brain(mat, atlas_labels, plots_dir,
-                                      edge_color=color, name=fname)
-                if path:
-                    ctx[key] = _png_to_html(path)
-            except Exception:
-                pass
+        ctx["brain_modes"].append(figset)
 
+    ctx["has_brain_figures"] = any(
+        m["conn_matrix"] or m["node_degree"] for m in ctx["brain_modes"])
     return ctx
 
 

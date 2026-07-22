@@ -24,9 +24,11 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
     n_folds = inner_cv.get_n_splits()
     n_perms = y.shape[1]
 
+    # Inner CV only needs the fold-averaged stability of the best param, so keep
+    # just the fold-sum (no per-fold edges.npy) — cheaper for many params/perms.
     results_manager = ResultsManager(output_dir=results_directory, n_runs=n_perms,
                                      n_folds=n_folds, n_features=n_features, n_params=n_params,
-                                     device=device)
+                                     device=device, store_fold_edges=False)
 
     for fold_id, (train, test) in enumerate(inner_cv.split(X, y[:, 0])):
         # split according to single fold
