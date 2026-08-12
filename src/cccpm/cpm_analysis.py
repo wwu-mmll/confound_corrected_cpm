@@ -379,6 +379,23 @@ class CPMAnalysis:
             splits = list(self.cv.split(X, y[:, 0]))
             self._run_outer_folds_batched(splits, X, y, covariates, results_manager, perm_run)
         else:
+            # Move the full dataset to the compute device ONCE, instead of
+            # leaving X/y/covariates on the CPU for the whole outer-fold loop:
+            # previously each of the (up to hundreds of) outer folds re-sliced
+            # X on the CPU and every downstream torch.as_tensor(..., device=...)
+            # call (inside run_inner_folds, model.fit, model.predict) re-uploaded
+            # that fold's slice from scratch. With X/y/covariates already
+            # device-resident here, torch_train_test_split's per-fold slicing
+            # (and every downstream torch.as_tensor call, which is a no-op when
+            # the input is already the right device/dtype) happens on-device
+            # instead -- pure data placement, doesn't touch any statistic.
+            # (self.cv.split still runs on the original CPU X/y: sklearn
+            # splitters only derive index arrays from it, and some -- e.g.
+            # StratifiedKFold -- aren't guaranteed to accept a CUDA tensor.)
+            X_dev = torch.as_tensor(X, device=self.device, dtype=torch.float32)
+            y_dev = torch.as_tensor(y, device=self.device, dtype=torch.float32)
+            cov_dev = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
+
             iterator = tqdm(
                 enumerate(self.cv.split(X, y[:, 0])),
                 total=self.cv.get_n_splits(),
@@ -386,7 +403,7 @@ class CPMAnalysis:
                 unit="fold",
             )
             for outer_fold, (train, test) in iterator:
-                self._run_outer_fold(outer_fold, train, test, X, y, covariates,
+                self._run_outer_fold(outer_fold, train, test, X_dev, y_dev, cov_dev,
                                      results_manager, perm_run)
 
         # Aggregate across folds

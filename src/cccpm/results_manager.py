@@ -210,7 +210,7 @@ class ResultsManager:
 
     def store_predictions(self, y_pred, y_true, fold, test_indices):
         y_pred = y_pred.detach().cpu().numpy().squeeze(-1)
-        y_true = y_true.reshape(-1)
+        y_true = torch.as_tensor(y_true).detach().cpu().numpy().reshape(-1)
 
         batch_size = y_pred.shape[0]
         n_models = len(Models)
@@ -244,10 +244,11 @@ class ResultsManager:
 
 
     def store_network_strengths(self, network_strengths, y_true, fold):
+        y_true = torch.as_tensor(y_true).detach().cpu().numpy().squeeze()
         # Use a list comprehension to build data more concisely
         data = [
             pd.DataFrame({
-                'y_true': y_true.squeeze(),
+                'y_true': y_true,
                 'network_strength': np.squeeze(network_strengths[m][n].cpu().numpy()),
                 'model': m,
                 'network': n,
