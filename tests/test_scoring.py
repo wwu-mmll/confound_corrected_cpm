@@ -11,7 +11,7 @@ from sklearn.metrics import (
     f1_score as sklearn_f1_score,
     roc_auc_score
 )
-from cccpm.scoring import FastCPMMetrics, FastCPMClassificationMetrics, score_models
+from cccpm.scoring import FastCPMMetrics, FastCPMClassificationMetrics, score_models, score_models_batched
 from cccpm.constants import Networks, Models, Metrics, TaskType
 
 
@@ -422,3 +422,62 @@ class TestFastCPMClassificationMetricsVsSklearn:
         for metric in [Metrics.accuracy, Metrics.balanced_accuracy, Metrics.f1_score, Metrics.roc_auc]:
             vals = scores[metric]
             assert (vals >= 0).all() and (vals <= 1).all()
+
+
+# ============================================================
+# Batched-over-params/folds score_models_batched
+# ============================================================
+
+class TestScoreModelsBatched:
+    """
+    score_models_batched's y_true convention is [B_folds, N_samples, N_runs]
+    -- matching utils.build_fold_batch's FoldBatch.y_test layout -- NOT
+    [N_samples, B_folds, N_runs]. Getting this backwards silently produces
+    plausible-looking but wrong scores (this was caught as a real bug during
+    development), so these tests pin the convention down explicitly.
+    """
+
+    @pytest.mark.parametrize("task_type", [TaskType.regression, TaskType.classification])
+    def test_matches_unbatched_reference_with_padding(self, task_type):
+        torch.manual_seed(9)
+        N_max, P, B, R = 14, 2, 3, 2
+        n_test = [14, 10, 6]  # ragged -> real padding
+
+        y_pred_full = torch.rand(N_max, N_MODELS, N_NETWORKS, P, B, R)
+        if task_type == TaskType.classification:
+            y_true_full = (torch.rand(B, N_max, R) > 0.5).float()
+        else:
+            y_true_full = torch.randn(B, N_max, R)
+
+        valid_mask = torch.zeros(B, N_max, dtype=torch.bool)
+        for b, n in enumerate(n_test):
+            valid_mask[b, :n] = True
+
+        scores = score_models_batched(y_true_full, y_pred_full, task_type, valid_mask=valid_mask)
+        assert scores.shape == (N_METRICS, N_MODELS, N_NETWORKS, P, B, R)
+
+        for p in range(P):
+            for b, n in enumerate(n_test):
+                yt = y_true_full[b, :n, :]
+                yp = y_pred_full[:n, :, :, p, b, :]
+                ref = score_models(yt, yp, task_type)
+                got = scores[:, :, :, p, b, :]
+                np.testing.assert_allclose(got.numpy(), ref.numpy(), atol=1e-4)
+
+    def test_y_true_axis_order_matters(self):
+        """Regression guard for a real bug caught during development:
+        score_models_batched must treat y_true as [B_folds, N_samples, N_runs]
+        -- if the (B_folds, N_samples) axes were accidentally swapped
+        internally again, predictions would be compared against the wrong
+        fold's labels and this perfectly-predictable setup would stop
+        scoring as a near-perfect pearson correlation per fold."""
+        N, B, R, P = 12, 5, 1, 1
+        # y_true is fold-specific and easy to predict exactly: fold b's
+        # labels are all equal to b (impossible to confuse with another
+        # fold's labels, and B != N so a silent axis swap can't hide).
+        y_true = torch.stack([torch.full((N, R), float(b)) for b in range(B)], dim=0)  # [B,N,R]
+        y_pred = y_true.permute(1, 0, 2).view(N, 1, 1, 1, B, R).expand(N, N_MODELS, N_NETWORKS, P, B, R).clone()
+
+        scores = score_models_batched(y_true, y_pred, TaskType.regression)
+        mse = scores[Metrics.mean_squared_error]
+        assert torch.allclose(mse, torch.zeros_like(mse), atol=1e-5)

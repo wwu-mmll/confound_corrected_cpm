@@ -67,6 +67,7 @@ jinja2 = "*"
 pycirclize = "*"
 tqdm = "*"
 pygam = "*"
+psutil = "*"
 
 # the following packages are requirements for netplotbrain
 netplotbrain = "*"

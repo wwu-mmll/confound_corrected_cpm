@@ -76,38 +76,56 @@ class ResultsManager:
         self.cv_network_strengths = pd.DataFrame()
         self.agg_results = None
 
-    def store_edges(self, param_idx: int, fold_idx: int, edges_tensor):
+    @staticmethod
+    def estimate_slice_bytes(n_features: int, n_params: int, n_folds: int, n_runs: int) -> int:
+        """
+        Bytes needed for a `[..., n_params, n_folds, n_runs]`-shaped slice of
+        `self.results` (float32) and `self.cv_edges` (bool), using the exact
+        same shape formulas as the tensors allocated in `__init__`. Shared
+        with `batch_planning.py` so the byte-size arithmetic is defined once.
+        """
+        results_bytes = len(Metrics) * len(Models) * len(Networks) * n_params * n_folds * n_runs * 4
+        cv_edges_bytes = n_features * 2 * n_params * n_folds * n_runs
+        return results_bytes + cv_edges_bytes
+
+    def store_edges(self, param_idx, fold_idx, edges_tensor, run_idx=slice(None)):
         """
         Stores the edge masks for Positive and Negative networks.
 
         Args:
-            param_idx: Index of current parameter.
-            fold_idx: Index of current fold.
-            edges_tensor: Boolean Tensor of shape [Features, 2, Runs].
+            param_idx: Index (int or slice) of current parameter(s).
+            fold_idx: Index (int or slice) of current fold(s).
+            edges_tensor: Boolean Tensor of shape [Features, 2, (Params,) (Folds,) Runs],
+                          matching whatever param_idx/fold_idx/run_idx slice out.
                           Dimension 1 must correspond to [Positive, Negative].
+            run_idx: Index (int or slice) of current run(s)/permutation(s).
+                     Defaults to every run (today's behaviour).
         """
-        # We assume edges_tensor comes in as [Features, 2, Runs]
+        # We assume edges_tensor comes in as [Features, 2, (Params,) (Folds,) Runs]
         # This matches cv_edges shape directly
 
-        # Target Slice: [:, :, param, fold, :]
-        self.cv_edges[:, :, param_idx, fold_idx, :] = torch.as_tensor(edges_tensor, dtype=torch.bool)
+        # Target Slice: [:, :, param, fold, run]
+        self.cv_edges[:, :, param_idx, fold_idx, run_idx] = torch.as_tensor(edges_tensor, dtype=torch.bool)
 
 
-    def store_metrics(self, param_idx: int, fold_idx: int, metrics_tensor: torch.Tensor):
+    def store_metrics(self, param_idx, fold_idx, metrics_tensor: torch.Tensor, run_idx=slice(None)):
         """
         Stores a batch of metrics returned by FastCPMMetrics.
 
         Args:
-            param_idx: Index of the current parameter configuration.
-            fold_idx: Index of the current CV fold.
-            metrics_tensor: 4D Tensor [Metrics, Models, Networks, Runs]
+            param_idx: Index (int or slice) of the current parameter configuration(s).
+            fold_idx: Index (int or slice) of the current CV fold(s).
+            metrics_tensor: Tensor [Metrics, Models, Networks, (Params,) (Folds,) Runs],
+                            matching whatever param_idx/fold_idx/run_idx slice out.
+            run_idx: Index (int or slice) of the current run(s)/permutation(s).
+                     Defaults to every run (today's behaviour).
         """
-        # We assign the entire 4D block into the 6D tensor at the specific param/fold slice.
+        # We assign the entire block into the 6D tensor at the specific param/fold/run slice.
         # This replaces the need for nested loops.
 
-        # Destination slice: [:, :, :, param_idx, fold_idx, :]
-        # Source shape:      [Metrics, Models, Networks, Runs]
-        self.results[:, :, :, param_idx, fold_idx, :] = metrics_tensor.cpu()
+        # Destination slice: [:, :, :, param_idx, fold_idx, run_idx]
+        # Source shape:      [Metrics, Models, Networks, (Params,) (Folds,) Runs]
+        self.results[:, :, :, param_idx, fold_idx, run_idx] = metrics_tensor.to(self.results.device)
 
     def calculate_edge_stability(self, write: bool = True, best_param_id: int = None):
         """
@@ -208,15 +226,29 @@ class ResultsManager:
         results.columns = results.columns.droplevel(1)
         return results
 
-    def save_predictions(self):  # update save function to sort by index prior to saving
+    def save_predictions(self):
         """
-        Save predictions to CSV.
+        Save predictions to CSV, sorted by sample index.
         """
-        df = self.cv_predictions.copy()
-        df.sort_values(by='sample_index', inplace=True)
-        #df.drop(columns='sample_index', inplace=True)
-        df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
-        # self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
+        if isinstance(self.cv_predictions, list):
+            if not self.cv_predictions:
+                return
+            self.cv_predictions = pd.concat(self.cv_predictions, ignore_index=True)
+
+        df = self.cv_predictions.sort_values(by='sample_index')
+        df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'), index=False)
+
+    # def save_predictions(self):
+    #     """
+    #     Save predictions to CSV, sorted by sample index.
+    #     """
+    #     if isinstance(self.cv_predictions, list):
+    #         if not self.cv_predictions:
+    #             return
+    #         self.cv_predictions = pd.concat(self.cv_predictions, ignore_index=True)
+    #
+    #     df = self.cv_predictions.sort_values(by='sample_index')
+    #     df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'), index=False)
 
     def save_network_strengths(self):
         """

@@ -36,8 +36,17 @@ def get_residuals(data, confounds):
 
     # Convert numpy to torch if needed, track for conversion back
     return_numpy = isinstance(data, np.ndarray)
-    data = torch.as_tensor(data, dtype=torch.float64)
-    confounds = torch.as_tensor(confounds, dtype=torch.float64)
+    #data = torch.as_tensor(data, dtype=torch.float64)
+    #confounds = torch.as_tensor(confounds, dtype=torch.float64)
+    dtype = data.dtype
+    device = data.device
+
+    data = torch.as_tensor(data, dtype=dtype, device=device)
+    confounds = torch.as_tensor(
+        confounds,
+        dtype=dtype,
+        device=device
+    )
 
     n_samples = confounds.shape[0]
     ones = torch.ones(n_samples, 1, dtype=confounds.dtype)
@@ -76,6 +85,167 @@ def get_residuals(data, confounds):
 
     else:
         raise ValueError(f"Data shape {data.shape} incompatible with confounds {confounds.shape}")
+
+
+def _masked_rankdata(data, valid_mask):
+    """
+    Batched-over-folds rank transform (see utils.build_fold_batch): ranks
+    each fold's REAL (valid) rows along the samples axis (dim 1), ignoring
+    padded rows.
+
+    Padded rows are set to +inf before ranking, so they always sort after
+    every real value and never disturb the ranks of real values (a real
+    element's rank among reals is unaffected by appending sentinels that
+    always sort last), then masked back to exactly 0 afterward.
+
+    Args:
+        data: [B, N_max, F] -- padded, samples axis = dim 1.
+        valid_mask: [B, N_max] bool.
+
+    Returns:
+        ranks: same shape as `data`; padded rows 0, real rows ranked 1..n_valid[b].
+    """
+    mask = valid_mask.unsqueeze(-1)  # [B, N_max, 1]
+    sentinel = torch.full_like(data, float('inf'))
+    data_for_rank = torch.where(mask, data, sentinel)
+    ranks = data_for_rank.argsort(dim=1).argsort(dim=1).to(data.dtype) + 1.0
+    return ranks * mask.to(data.dtype)
+
+
+def get_residuals_batched(data, confounds, valid_mask):
+    """
+    Batched-over-folds version of `get_residuals` for zero-padded, ragged
+    fold batches (see utils.build_fold_batch). Mathematically identical to
+    calling `get_residuals` once per fold on that fold's real (unpadded)
+    rows: padding is purely a memory-layout device, made inert by re-masking
+    after every step that could disturb it.
+
+    Args:
+        data: [B, N_max, Features_or_Perms] -- padded, samples axis = dim 1.
+        confounds: [B, N_max, N_confounds] -- padded, samples axis = dim 1.
+        valid_mask: [B, N_max] bool -- True where the row is a real (non-pad) sample.
+
+    Returns:
+        residuals: same shape as `data`, padded rows exactly 0.
+    """
+    dtype = data.dtype
+    mask = valid_mask.to(dtype).unsqueeze(-1)  # [B, N_max, 1]
+
+    # The intercept column must ALSO be 0 on padded rows -- otherwise a
+    # padded row of Z would be [1, 0, ..., 0] (not all-zero), which would
+    # corrupt Z^T Z. Using the mask itself as the intercept column achieves
+    # this "masked ones" property directly.
+    Z = torch.cat([mask, confounds], dim=-1)  # [B, N_max, C+1], padded rows all-zero
+
+    # Since padded rows of Z are exactly 0, Z^T Z naturally excludes their
+    # contribution -- the batched pinv equals the pinv computed on each
+    # fold's real rows only.
+    Z_pinv = torch.linalg.pinv(Z)              # [B, C+1, N_max]
+
+    beta = torch.matmul(Z_pinv, data)          # [B, C+1, Features_or_Perms]
+    preds = torch.matmul(Z, beta)              # [B, N_max, Features_or_Perms]
+    return (data - preds) * mask
+
+
+def correlations_and_pvalues_batched(X, Y_perms, valid_mask,
+                                      correlation_type='pearson', confounds=None):
+    """
+    Batched-over-folds version of `correlations_and_pvalues` for zero-padded,
+    ragged fold batches (see utils.build_fold_batch). Mathematically
+    identical to calling `correlations_and_pvalues` once per fold on that
+    fold's real (unpadded) rows -- see `get_residuals_batched`/`_masked_rankdata`
+    for how padding is kept inert throughout.
+
+    Args:
+        X: [B, N_max, N_features] -- padded, samples axis = dim 1.
+        Y_perms: [B, N_max, N_perms] -- padded, samples axis = dim 1.
+        valid_mask: [B, N_max] bool.
+        correlation_type: 'pearson' or 'spearman'.
+        confounds: optional [B, N_max, N_confounds] -- padded.
+
+    Returns:
+        r_matrix, p_matrix: [N_features, B_folds, N_perms].
+    """
+    X = torch.as_tensor(X)
+    Y = torch.as_tensor(Y_perms, dtype=X.dtype, device=X.device)
+    valid_mask = valid_mask.to(X.device)
+    mask = valid_mask.to(X.dtype).unsqueeze(-1)   # [B, N_max, 1]
+    n_valid = valid_mask.sum(dim=1).to(X.dtype)   # [B]
+
+    if correlation_type == 'spearman':
+        X = _masked_rankdata(X, valid_mask)
+        Y = _masked_rankdata(Y, valid_mask)
+        if confounds is not None:
+            confounds = _masked_rankdata(
+                torch.as_tensor(confounds, dtype=X.dtype, device=X.device), valid_mask)
+
+    if confounds is not None:
+        confounds = torch.as_tensor(confounds, dtype=X.dtype, device=X.device)
+        k_confounds = confounds.size(-1)
+        X_res = get_residuals_batched(X, confounds, valid_mask)
+        Y_res = get_residuals_batched(Y, confounds, valid_mask)
+    else:
+        k_confounds = 0
+        X_mean = (X * mask).sum(dim=1, keepdim=True) / n_valid.view(-1, 1, 1)
+        Y_mean = (Y * mask).sum(dim=1, keepdim=True) / n_valid.view(-1, 1, 1)
+        X_res = (X - X_mean) * mask
+        Y_res = (Y - Y_mean) * mask
+
+    # Redundant re-centring (X_res/Y_res are already centred), kept for
+    # numerical parity with the unbatched implementation.
+    X_mean2 = (X_res * mask).sum(dim=1, keepdim=True) / n_valid.view(-1, 1, 1)
+    Y_mean2 = (Y_res * mask).sum(dim=1, keepdim=True) / n_valid.view(-1, 1, 1)
+    X_res = (X_res - X_mean2) * mask
+    Y_res = (Y_res - Y_mean2) * mask
+
+    Y_mean_raw = (Y * mask).sum(dim=1, keepdim=True) / n_valid.view(-1, 1, 1)
+    Y_centered = (Y - Y_mean_raw) * mask
+
+    cross = torch.matmul(X_res.transpose(-1, -2), Y_centered)  # [B, F, P]
+    sxx = (X_res ** 2).sum(dim=1)     # [B, F]
+    sse_y = (Y_res ** 2).sum(dim=1)   # [B, P]
+    ssy = (Y_centered ** 2).sum(dim=1)  # [B, P]
+
+    partial_r = cross / (torch.sqrt(sxx.unsqueeze(-1) * sse_y.unsqueeze(1)) + 1e-12)
+    partial_r = torch.clamp(partial_r, -0.999999, 0.999999)
+
+    semipartial_r = cross / (torch.sqrt(sxx.unsqueeze(-1) * ssy.unsqueeze(1)) + 1e-12)
+    semipartial_r = torch.clamp(semipartial_r, -0.999999, 0.999999)
+
+    df = (n_valid - 2 - k_confounds).view(-1, 1, 1)  # [B, 1, 1], broadcasts vs [B, F, P]
+    t_stats = partial_r * torch.sqrt(df / (1 - partial_r ** 2))
+    z = t_stats / torch.sqrt(df / (df + 1))
+    val = -torch.abs(z) / 1.41421356
+    p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
+
+    # [B, F, P] -> [F, B, P] to match the (Features, Folds, Perms) convention.
+    r_matrix = semipartial_r.permute(1, 0, 2)
+    p_matrix = p_matrix.permute(1, 0, 2)
+    return r_matrix, p_matrix
+
+
+def torch_bonferroni(p, alpha=0.05):
+    """
+    Bonferroni multiple-comparisons correction, computed entirely in torch.
+
+    Equivalent to
+    ``statsmodels.stats.multitest.multipletests(p.flatten(), alpha=alpha, method='bonferroni')``,
+    but stays on-device (no CPU/GPU sync): p_corrected = min(p * n, 1), where n
+    is the total number of tests (i.e. ``p.numel()``, matching statsmodels'
+    behaviour of correcting over the flattened array).
+
+    Args:
+        p: p-values tensor, any shape.
+        alpha: significance level used for the reject mask.
+
+    Returns:
+        reject: bool tensor, same shape as p — True where p_corrected < alpha.
+        p_corrected: tensor, same shape as p, clamped to at most 1.
+    """
+    n = p.numel()
+    p_corrected = torch.clamp(p * n, max=1.0)
+    reject = p_corrected < alpha
+    return reject, p_corrected
 
 
 def correlations_and_pvalues(X, Y_perms,
@@ -218,14 +388,6 @@ class PThreshold(BaseEdgeSelector):
                             hommel : closed method based on Simes tests (non-negative)
                             fdr_bh : Benjamini/Hochberg (non-negative)
                             fdr_by : Benjamini/Yekutieli (negative)
-                            bonferroni : one-step correction
-                            sidak : one-step correction
-                            holm-sidak : step down method using Sidak adjustments
-                            holm : step-down method using Bonferroni adjustments
-                            simes-hochberg : step-up method (independent)
-                            hommel : closed method based on Simes tests (non-negative)
-                            fdr_bh : Benjamini/Hochberg (non-negative)
-                            fdr_by : Benjamini/Yekutieli (negative)
                             fdr_tsbh : two stage fdr correction (non-negative)
                             fdr_tsbky : two stage fdr correction (non-negative)
         """
@@ -268,23 +430,67 @@ class PThreshold(BaseEdgeSelector):
         else:
             raise ValueError("correction must be None, str, or list")
 
+    def _apply_correction(self, p):
+        """Multiple-comparison-correct `p`, returning a tensor of the same shape."""
+        if self._correction is None:
+            return p
+        if self._correction == 'bonferroni':
+            # Stays on-device (no CPU/GPU sync), unlike the statsmodels path below.
+            _, p_corrected = torch_bonferroni(p)
+            return p_corrected
+        # Other statsmodels corrections still require a CPU round-trip.
+        from statsmodels.stats import multitest
+        shape = p.shape
+        p_np = p.detach().cpu().numpy() if isinstance(p, torch.Tensor) else p
+        _, p_flat, _, _ = multitest.multipletests(p_np.flatten(), alpha=0.05, method=self._correction)
+        p_flat = p_flat.reshape(shape)
+        return torch.as_tensor(p_flat, device=p.device, dtype=p.dtype) if isinstance(p, torch.Tensor) else p_flat
+
     def select(self, r, p):
-        # Correction logic (requires p to be flat/numpy usually, ensure compatibility)
-        if self._correction is not None:
-            # Assuming p is passed as or converted to numpy for statsmodels
-            from statsmodels.stats import multitest
-            # You might need to flatten and reshape if p is multidimensional
-            shape = p.shape
-            _, p_flat, _, _ = multitest.multipletests(p.flatten(), alpha=0.05, method=self._correction)
-            p = p_flat.reshape(shape)  # Reshape back or keep as tensor depending on input type
+        p_corrected = self._apply_correction(p)
 
         # Calculate boolean masks
-        pos_mask = (p < self.threshold[0]) & (r > 0)
-        neg_mask = (p < self.threshold[0]) & (r < 0)
+        pos_mask = (p_corrected < self.threshold[0]) & (r > 0)
+        neg_mask = (p_corrected < self.threshold[0]) & (r < 0)
 
         # Stack into a single tensor: [Features, 2, ...]
         return torch.stack([torch.as_tensor(pos_mask, device=r.device),
                             torch.as_tensor(neg_mask, device=r.device)], dim=1)
+
+    def select_batch(self, r, p, thresholds=None):
+        """
+        Batched version of `select()`: apply this selector's correction to
+        `(r, p)` once, then compare against multiple threshold values at
+        once, adding a "params" batch dimension to the returned edge mask
+        instead of requiring one `select()` call per threshold. All
+        thresholds must share this selector's single `correction` method
+        (different correction methods need separate calls, since they use
+        different formulas).
+
+        Args:
+            r, p: [N_features, *rest] (rest = any already-present batch dims,
+                  e.g. folds/perms).
+            thresholds: sequence of float p-value thresholds. Defaults to
+                        `self.threshold` (already a list).
+
+        Returns:
+            Boolean tensor [N_features, 2, N_params, *rest], N_params = len(thresholds).
+        """
+        if thresholds is None:
+            thresholds = self.threshold
+
+        p_corrected = self._apply_correction(p)
+        rest_shape = p_corrected.shape[1:]
+        thresholds_t = torch.as_tensor(list(thresholds), device=r.device, dtype=p_corrected.dtype)
+        thresh_view = thresholds_t.view(1, -1, *([1] * len(rest_shape)))
+
+        p_exp = p_corrected.unsqueeze(1)  # [N_features, 1, *rest]
+        r_exp = r.unsqueeze(1)            # [N_features, 1, *rest]
+        pos_mask = (p_exp < thresh_view) & (r_exp > 0)
+        neg_mask = (p_exp < thresh_view) & (r_exp < 0)
+
+        # Stack into a single tensor: [Features, 2, N_params, *rest]
+        return torch.stack([pos_mask, neg_mask], dim=1)
 
 class SelectPercentile(BaseEdgeSelector):
     def __init__(self, percentile: Union[float, list] = 0.05):
@@ -294,6 +500,19 @@ class SelectPercentile(BaseEdgeSelector):
 class SelectKBest(BaseEdgeSelector):
     def __init__(self, k: Union[int, list] = None):
         self.k = k
+
+
+# edge_statistic name -> (correlation_type, use_confounds). Shared by
+# EdgeStatistic.fit_transform_batched; fit_transform's own if/elif chain is
+# left untouched to avoid any risk to its already-verified behaviour.
+_EDGE_STATISTIC_DISPATCH = {
+    'pearson': ('pearson', False),
+    'spearman': ('spearman', False),
+    'pearson_partial': ('pearson', True),
+    'spearman_partial': ('spearman', True),
+    'point_biserial': ('pearson', False),
+    'point_biserial_partial': ('pearson', True),
+}
 
 
 class EdgeStatistic(BaseEstimator):
@@ -322,32 +541,82 @@ class EdgeStatistic(BaseEstimator):
         valid_edges = variances > 1e-6
 
         if self.edge_statistic == 'pearson':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
                                                                       correlation_type='pearson')
         elif self.edge_statistic == 'spearman':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
                                                                       correlation_type='spearman')
         elif self.edge_statistic == 'pearson_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
                                                                       confounds=covariates,
                                                                       correlation_type='pearson')
         elif self.edge_statistic == 'spearman_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
                                                                       confounds=covariates,
                                                                       correlation_type='spearman')
         elif self.edge_statistic == 'point_biserial':
             # Point-biserial is Pearson against a binary 0/1 target; the unified
             # OLS path handles it with no special-casing.
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
                                                                       correlation_type='pearson')
         elif self.edge_statistic == 'point_biserial_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
+            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
                                                                       confounds=covariates,
                                                                       correlation_type='pearson')
         else:
             raise NotImplementedError("Unsupported edge selection method")
-        r_edges[valid_edges] = r_edges_masked.to(r_edges.dtype)
-        p_edges[valid_edges] = p_edges_masked.to(p_edges.dtype)
+        # no dynamic shape change
+        mask = valid_edges.to(r_edges_masked.dtype).unsqueeze(1)
+        r_edges = r_edges_masked.to(r_edges.dtype) * mask
+        p_edges = p_edges_masked.to(p_edges.dtype) * mask + (1.0 - mask)
+        return r_edges, p_edges
+
+    def fit_transform_batched(self, X, y, covariates, valid_mask, device):
+        """
+        Batched-over-folds version of `fit_transform` for zero-padded,
+        ragged fold batches (see utils.build_fold_batch). Same
+        edge_statistic dispatch as `fit_transform`, but operating on
+        `[B, N_max, ...]` padded inputs and returning an extra folds
+        dimension: `[N_features, B_folds, N_perms]` instead of
+        `[N_features, N_perms]`.
+
+        Args:
+            X: [B, N_max, N_features] -- padded, samples axis = dim 1.
+            y: [B, N_max, N_perms] -- padded.
+            covariates: optional [B, N_max, N_cov] -- padded.
+            valid_mask: [B, N_max] bool.
+            device: torch device.
+
+        Returns:
+            r_edges, p_edges: [N_features, B_folds, N_perms].
+        """
+        X = torch.as_tensor(X, device=device, dtype=torch.float32)
+        y = torch.as_tensor(y, device=device, dtype=torch.float32)
+        valid_mask = torch.as_tensor(valid_mask, device=device, dtype=torch.bool)
+        if covariates is not None:
+            covariates = torch.as_tensor(covariates, device=device, dtype=torch.float32)
+
+        if self.edge_statistic not in _EDGE_STATISTIC_DISPATCH:
+            raise NotImplementedError("Unsupported edge selection method")
+        correlation_type, use_confounds = _EDGE_STATISTIC_DISPATCH[self.edge_statistic]
+
+        # Variance threshold (masked, per fold): drop near-constant edges to
+        # avoid NaNs, mirroring fit_transform's torch.var(X, dim=0) but
+        # restricted to each fold's real (valid) rows.
+        mask = valid_mask.to(X.dtype).unsqueeze(-1)                        # [B, N_max, 1]
+        n_valid = valid_mask.sum(dim=1).to(X.dtype)                        # [B]
+        X_mean = (X * mask).sum(dim=1, keepdim=True) / n_valid.view(-1, 1, 1)
+        X_var = ((X - X_mean) * mask).pow(2).sum(dim=1) / (n_valid.view(-1, 1) - 1).clamp(min=1)
+        valid_edges = X_var > 1e-6                                          # [B, N_features]
+
+        r_edges_masked, p_edges_masked = correlations_and_pvalues_batched(
+            X=X, Y_perms=y, valid_mask=valid_mask, correlation_type=correlation_type,
+            confounds=covariates if use_confounds else None)
+
+        # r_edges_masked/p_edges_masked: [N_features, B_folds, N_perms]
+        feat_mask = valid_edges.permute(1, 0).unsqueeze(-1).to(r_edges_masked.dtype)  # [F, B, 1]
+        r_edges = r_edges_masked * feat_mask
+        p_edges = p_edges_masked * feat_mask + (1.0 - feat_mask)
         return r_edges, p_edges
 
 
