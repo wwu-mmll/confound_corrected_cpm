@@ -354,9 +354,13 @@ class CPMAnalysis:
         else:
             results_directory = self.results_directory
 
+        # Retain per-fold edge masks (for edges.npy) only on the real run; the
+        # permutation pass keeps just the fold-sum for the stability null, which
+        # avoids a [Features, 2, Folds, n_permutations] tensor (huge for big
+        # parcellations x many folds x many permutations).
         results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
-                                         device=self.device)
+                                         device=self.device, store_fold_edges=not perm_run)
 
         # The outer-fold loop can only be batched (multiple folds processed in
         # one torch call) when there's a single fixed edge-selection config --

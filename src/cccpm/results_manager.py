@@ -30,10 +30,18 @@ class ResultsManager:
                  n_features: int,
                  n_params: int = None,
                  is_inner_cv: bool = False,
-                 device: torch.device = torch.device('cpu')):
+                 device: torch.device = torch.device('cpu'),
+                 store_fold_edges: bool = True):
         self.results_directory = output_dir
         self.is_inner_cv = is_inner_cv
         self.device = device
+        # Edge bookkeeping is kept on the CPU regardless of the compute device: it
+        # only aggregates stability and (optionally) writes per-fold edges, and a
+        # [Features, 2, Folds, Runs] tensor would otherwise consume huge amounts of
+        # VRAM for large parcellations x many folds x many permutations (this was
+        # a real CUDA OOM source -- see the "develop" branch fix this ports).
+        self.edge_device = torch.device('cpu')
+        self.store_fold_edges = store_fold_edges
 
         # 1. Define Dimensions based on Enums
         self.dims = {
@@ -57,19 +65,28 @@ class ResultsManager:
             device=self.device
         )
 
-        # 3. Handle Edges (Features)
-        # Shape: [N_Features, 2, Params, Folds, Runs]
-        # Only store positive and negative edges (not "both")
+        # 3. Handle Edges (Features) -- kept on the CPU (self.edge_device), never
+        # on the compute device; see the note on self.edge_device above.
         self.n_features = n_features
-        self.cv_edges = torch.zeros(
-            self.n_features,
-            2,  # Only positive and negative networks
-            self.dims['params'],
-            self.dims['folds'],
-            self.dims['runs'],
-            dtype=torch.bool,
-            device=self.device
+        # Running sum of selected-edge masks over folds -> stability = sum / n_folds.
+        # This is all edge stability needs, and dropping the folds axis here (vs.
+        # keeping every fold's mask) is what avoids the VRAM blowup for many
+        # folds x many permutations.
+        # Shape: [N_Features, 2, Params, Runs] (positive/negative only, not "both").
+        self.cv_edge_sum = torch.zeros(
+            self.n_features, 2, self.dims['params'], self.dims['runs'],
+            dtype=torch.float32, device=self.edge_device
         )
+        # Per-fold masks are retained only when we need to write edges.npy (the
+        # real run). Permutation / inner-CV passes keep only the fold-sum above.
+        # Shape: [N_Features, 2, Params, Folds, Runs].
+        self.cv_edges = None
+        if store_fold_edges:
+            self.cv_edges = torch.zeros(
+                self.n_features, 2, self.dims['params'],
+                self.dims['folds'], self.dims['runs'],
+                dtype=torch.bool, device=self.edge_device
+            )
 
         # Placeholder for predictions if you need them later
         self.cv_predictions = []
@@ -79,18 +96,24 @@ class ResultsManager:
     @staticmethod
     def estimate_slice_bytes(n_features: int, n_params: int, n_folds: int, n_runs: int) -> int:
         """
-        Bytes needed for a `[..., n_params, n_folds, n_runs]`-shaped slice of
-        `self.results` (float32) and `self.cv_edges` (bool), using the exact
-        same shape formulas as the tensors allocated in `__init__`. Shared
-        with `batch_planning.py` so the byte-size arithmetic is defined once.
+        Bytes needed, on the COMPUTE DEVICE, for a `[..., n_params, n_folds,
+        n_runs]`-shaped slice of `self.results` (float32) -- using the exact
+        same shape formula as the tensor allocated in `__init__`. Shared with
+        `batch_planning.py` so the byte-size arithmetic is defined once.
+
+        Edge bookkeeping (`cv_edges`/`cv_edge_sum`) is intentionally excluded:
+        it always lives on the CPU (`self.edge_device`), never on the compute
+        device, so it doesn't count against the GPU/CPU compute-device memory
+        budget batch_planning checks.
         """
-        results_bytes = len(Metrics) * len(Models) * len(Networks) * n_params * n_folds * n_runs * 4
-        cv_edges_bytes = n_features * 2 * n_params * n_folds * n_runs
-        return results_bytes + cv_edges_bytes
+        return len(Metrics) * len(Models) * len(Networks) * n_params * n_folds * n_runs * 4
 
     def store_edges(self, param_idx, fold_idx, edges_tensor, run_idx=slice(None)):
         """
-        Stores the edge masks for Positive and Negative networks.
+        Stores the edge masks for Positive and Negative networks: moves the
+        mask to the CPU edge store (frees VRAM) and accumulates the fold-sum
+        used for stability. The per-fold mask itself is retained only when
+        this manager was built with store_fold_edges=True.
 
         Args:
             param_idx: Index (int or slice) of current parameter(s).
@@ -101,11 +124,24 @@ class ResultsManager:
             run_idx: Index (int or slice) of current run(s)/permutation(s).
                      Defaults to every run (today's behaviour).
         """
-        # We assume edges_tensor comes in as [Features, 2, (Params,) (Folds,) Runs]
-        # This matches cv_edges shape directly
+        mask = torch.as_tensor(edges_tensor, dtype=torch.bool, device=self.edge_device)
 
-        # Target Slice: [:, :, param, fold, run]
-        self.cv_edges[:, :, param_idx, fold_idx, run_idx] = torch.as_tensor(edges_tensor, dtype=torch.bool)
+        if self.cv_edges is not None:
+            self.cv_edges[:, :, param_idx, fold_idx, run_idx] = mask
+
+        # cv_edge_sum has no folds axis, so any folds axis present in `mask`
+        # must be summed out before accumulating. `mask`'s axis layout mirrors
+        # cv_edges[:, :, param_idx, fold_idx, run_idx] positionally: Features,
+        # Network, then Params (present unless param_idx is an int, which
+        # collapses it), then Folds (present unless fold_idx is an int).
+        # fold_idx is a plain int only for the single-fold-at-a-time (non-batched)
+        # call pattern, in which case there's no folds axis to sum at all.
+        if isinstance(fold_idx, int):
+            fold_sum = mask.float()
+        else:
+            fold_axis = 2 + (0 if isinstance(param_idx, int) else 1)
+            fold_sum = mask.float().sum(dim=fold_axis)
+        self.cv_edge_sum[:, :, param_idx, run_idx] += fold_sum
 
 
     def store_metrics(self, param_idx, fold_idx, metrics_tensor: torch.Tensor, run_idx=slice(None)):
@@ -127,39 +163,49 @@ class ResultsManager:
         # Source shape:      [Metrics, Models, Networks, (Params,) (Folds,) Runs]
         self.results[:, :, :, param_idx, fold_idx, run_idx] = metrics_tensor.to(self.results.device)
 
-    def calculate_edge_stability(self, write: bool = True, best_param_id: int = None):
+    def calculate_edge_stability(self, write: bool = True, best_param_id=None):
         """
-        Calculate and save edge stability and overlap.
+        Calculate and save edge stability.
 
-        :param cv_edges: Cross-validation edges.
-        :param results_directory: Directory to save the results.
+        Stability is the fraction of outer folds in which each edge was selected,
+        for the chosen hyperparameter of each run -- read straight from the CPU
+        fold-sum accumulator (`cv_edge_sum`), so this never touches the compute
+        device. ``stability_edges.npy`` (``[Nodes, Nodes, 2, Runs]``) is always
+        written; the per-fold ``edges.npy`` is written only when this manager
+        retained the per-fold masks (the real run -- see ``store_fold_edges``).
+
+        Args:
+            write: whether to save the .npy files.
+            best_param_id: None (assume param index 0 for every run), a single
+                           int/0-d tensor (same param for every run), or an
+                           array-like of length n_runs (one winning param per run).
         """
+        n_runs = self.dims['runs']
         if best_param_id is None:
-            best_param_id = torch.arange(1, device=self.cv_edges.device)
+            best_param_id = torch.zeros(n_runs, dtype=torch.long)
+        else:
+            best_param_id = torch.as_tensor(best_param_id, dtype=torch.long).reshape(-1)
+            if best_param_id.numel() == 1:
+                best_param_id = best_param_id.expand(n_runs)
+        best_param_id = best_param_id.to(self.edge_device)
+        run_indices = torch.arange(n_runs, device=self.edge_device)
 
-        run_indices = torch.arange(self.dims['runs'], device=self.cv_edges.device)
-
-        # 1. Advanced Indexing: Select the specific param for each run simultaneously
-        # Input Shape:  [N_Features, 2, Params, Folds, Runs]
-        # We index Dim 2 (Params) and Dim 4 (Runs) with paired vectors.
-        # Result Shape: [Runs, N_Features, 2, Folds]
-        selected_edges = self.cv_edges[:, :, best_param_id, :, run_indices]
-
-        # reshape to [N_Features, 2, Folds, Runs]
-        selected_edges = selected_edges.permute(1, 2, 3, 0)
-
-        # 2. Calculate Stability
-        # Average over Folds (Dim 2)
-        # Shape: [N_Features, 2, Runs]
-        edge_stability = selected_edges.float().mean(dim=2)
+        # Fraction of folds selecting each edge, for the chosen param per run.
+        # cv_edge_sum: [Features, 2, Params, Runs]; paired-index Params x Runs.
+        # Result: [Features, 2, Runs].
+        edge_stability = self.cv_edge_sum[:, :, best_param_id, run_indices] / self.dims['folds']
 
         if write:
-            # Keep shape [Features, 2, Folds, Runs] for edges
-            # Keep shape [Features, 2, Runs] for stability
-            np.save(os.path.join(self.results_directory, f'edges.npy'),
-                    vector_to_matrix_tensor_version(selected_edges, dim=0).float().cpu().numpy())
-            np.save(os.path.join(self.results_directory, f'stability_edges.npy'),
-                    vector_to_matrix_tensor_version(edge_stability, dim=0).cpu().numpy())
+            np.save(os.path.join(self.results_directory, 'stability_edges.npy'),
+                    vector_to_matrix_tensor_version(edge_stability, dim=0).numpy())
+            if self.cv_edges is not None:
+                # Per-fold selected edges for the chosen param -> edges.npy.
+                # [:, :, param, :, run] -> [Runs, Features, 2, Folds] (advanced
+                # indices are non-adjacent, so they lead) -> [Features, 2, Folds, Runs].
+                selected_edges = self.cv_edges[:, :, best_param_id, :, run_indices]
+                selected_edges = selected_edges.permute(1, 2, 3, 0)
+                np.save(os.path.join(self.results_directory, 'edges.npy'),
+                        vector_to_matrix_tensor_version(selected_edges, dim=0).float().numpy())
         return edge_stability
 
     def store_predictions(self, y_pred, y_true, fold, test_indices):

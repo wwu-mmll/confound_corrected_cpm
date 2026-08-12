@@ -44,10 +44,13 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
     n_perms = y.shape[1]
 
     with torch.cuda.nvtx.range("inner_cv:results_manager_init"):
+        # Inner CV only needs the fold-averaged stability of the best param, so
+        # keep just the fold-sum (no per-fold edges.npy) -- cheaper for many
+        # params/folds/perms, and this is called once per outer fold.
         results_manager = ResultsManager(
             output_dir=results_directory, n_runs=n_perms,
             n_folds=n_folds, n_features=n_features, n_params=n_params,
-            device=device)
+            device=device, store_fold_edges=False)
 
     with torch.cuda.nvtx.range("inner_cv:data_to_gpu"):
         X_gpu = torch.as_tensor(X, device=device, dtype=torch.float32)
