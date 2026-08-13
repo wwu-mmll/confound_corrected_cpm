@@ -107,8 +107,7 @@ def plan_batch_sizes(n_params: int, n_folds: int, n_perms: int,
     `available_bytes * safety_factor`, escalating in priority order
     params -> folds -> perms.
 
-    Starts from (1, 1, 1) -- today's exact per-item loop behaviour -- and
-    greedily grows each dimension in turn to the largest size that still
+    Starts from (1, 1, 1) and grows each dimension in turn to the largest size that still
     fits, holding already-decided dimensions fixed and not-yet-visited ones
     at 1. Requires `cost_fn` to be monotonically non-decreasing in each of
     its three arguments (true of `estimate_bytes`).

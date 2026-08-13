@@ -24,7 +24,7 @@ univariate_edge_selection = UnivariateEdgeSelection(
     edge_selection=[PThreshold(threshold=[0.05, 0.01], correction=['bonferroni'])]
 )
 
-DEVICE = 'cpu'
+DEVICE = 'cuda'
 
 cpm = CPMAnalysis(
     results_directory='./tmp/example_simulated_data',
