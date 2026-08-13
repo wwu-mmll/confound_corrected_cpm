@@ -9,7 +9,7 @@ from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
 sim = simulate_data_given_kappa(
     R2_X_y=0.4,
     kappa=0.3,
-    n_features=8001,
+    n_features=8001, # 180*179/2
     n_features_informative=60,
     n_pure_signal_features=30,
     n_confound_only_features=30,
@@ -31,15 +31,15 @@ cpm = CPMAnalysis(
     cv=RepeatedKFold(n_splits=10, n_repeats=10, random_state=42),
     edge_selection=univariate_edge_selection,
     inner_cv=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
-    n_permutations=500,
+    n_permutations=1000,
     select_stable_edges=False,
     device=DEVICE,
 )
 
 _start = time.perf_counter()
-nvtx.range_push("cpm_run")
+#nvtx.range_push("cpm_run")
 cpm.run(X=X, y=y, covariates=covariates)
-nvtx.range_pop()
+#nvtx.range_pop()
 wall_time_s = time.perf_counter() - _start
 
 print(f"Wall time: {wall_time_s:.2f}s")

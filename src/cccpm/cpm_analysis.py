@@ -18,7 +18,7 @@ from cccpm.models.linear_model import LinearCPM
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import (train_test_split, torch_train_test_split, check_data, impute_missing_values, torch_impute_missing_values,
-                         torch_impute_missing_values_batched, build_fold_batch,
+                         torch_impute_missing_values_batched, build_fold_batch, residualize_train_test,
                          select_stable_edges, generate_data_insights, detect_task_type,
                          validate_task_type, infer_n_nodes)
 from cccpm.atlases import resolve_atlas
@@ -369,8 +369,13 @@ class CPMAnalysis:
         # per-fold results directory, so the outer loop stays a plain
         # per-fold Python loop in that case. Non-linear models (no
         # fit_batched/predict_batched) always use the plain per-fold loop too.
+        # calculate_residuals's train-fit/test-apply residualization is only
+        # implemented in the per-fold loop (_run_outer_fold) -- rare enough
+        # an option that a dedicated batched version isn't worth it, so fall
+        # back to the loop rather than silently skip the residualization.
         can_batch_outer_folds = (
             self.inner_cv is None
+            and not self.calculate_residuals
             and hasattr(self.cpm_model, 'fit_batched')
             and hasattr(self.cpm_model, 'predict_batched')
         )
@@ -467,6 +472,10 @@ class CPMAnalysis:
             if self.impute_missing_values:
                 X_train, X_test, cov_train, cov_test = torch_impute_missing_values(
                     X_train, X_test, cov_train, cov_test)
+
+        if self.calculate_residuals:
+            with torch.cuda.nvtx.range("calculate_residuals"):
+                X_train, X_test = residualize_train_test(X_train, X_test, cov_train, cov_test)
 
         with torch.cuda.nvtx.range("edge_selection"):
             edges = self._select_edges(X_train, y_train, cov_train,

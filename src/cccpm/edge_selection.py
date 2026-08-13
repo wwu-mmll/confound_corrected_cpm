@@ -34,14 +34,15 @@ def get_residuals(data, confounds):
     if not hasattr(confounds, 'shape'):  # Safety check
         return data
 
-    # Convert numpy to torch if needed, track for conversion back
+    # Convert numpy to torch if needed, track for conversion back. Convert
+    # `data` first, then read dtype/device off the resulting tensor (not the
+    # raw input): a numpy array's `.dtype` is a numpy dtype object, which
+    # torch.as_tensor's `dtype=` argument rejects.
     return_numpy = isinstance(data, np.ndarray)
-    #data = torch.as_tensor(data, dtype=torch.float64)
-    #confounds = torch.as_tensor(confounds, dtype=torch.float64)
+    data = torch.as_tensor(data)
     dtype = data.dtype
     device = data.device
 
-    data = torch.as_tensor(data, dtype=dtype, device=device)
     confounds = torch.as_tensor(
         confounds,
         dtype=dtype,

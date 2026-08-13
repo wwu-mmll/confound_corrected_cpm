@@ -676,6 +676,41 @@ def torch_impute_missing_values_batched(X_train, X_test, cov_train, cov_test, va
     return X_train, X_test, cov_train, cov_test
 
 
+def residualize_train_test(X_train, X_test, confounds_train, confounds_test):
+    """
+    Regress X ~ intercept + confounds via OLS on the training set only, then
+    subtract the fitted values from both train and test (residualizing test
+    with the train-fit model, never fitting on test data). Pure torch,
+    dtype/device-agnostic (works equally on CPU or GPU tensors) -- same
+    closed-form pseudo-inverse approach as edge_selection.get_residuals,
+    generalized to the fit-on-train/apply-to-both split CPMAnalysis needs
+    for its `calculate_residuals` option.
+
+    Args:
+        X_train, X_test: [N_train, F], [N_test, F].
+        confounds_train, confounds_test: [N_train, C], [N_test, C].
+
+    Returns:
+        X_train_resid, X_test_resid: same shapes as X_train, X_test.
+    """
+    dtype = X_train.dtype
+    device = X_train.device
+    confounds_train = torch.as_tensor(confounds_train, dtype=dtype, device=device)
+    confounds_test = torch.as_tensor(confounds_test, dtype=dtype, device=device)
+
+    ones_train = torch.ones(confounds_train.shape[0], 1, dtype=dtype, device=device)
+    ones_test = torch.ones(confounds_test.shape[0], 1, dtype=dtype, device=device)
+    Z_train = torch.cat([ones_train, confounds_train], dim=1)
+    Z_test = torch.cat([ones_test, confounds_test], dim=1)
+
+    Z_pinv = torch.linalg.pinv(Z_train)
+    beta = torch.matmul(Z_pinv, X_train)
+
+    X_train_resid = X_train - torch.matmul(Z_train, beta)
+    X_test_resid = X_test - torch.matmul(Z_test, beta)
+    return X_train_resid, X_test_resid
+
+
 def select_stable_edges(stability_edges, stability_threshold):
     """
     Threshold per-edge selection stability into a boolean edge mask.
