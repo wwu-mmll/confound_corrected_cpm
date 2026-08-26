@@ -109,6 +109,31 @@ class TestStoreAndRetrieve:
         assert os.path.exists(os.path.join(str(tmp_path), 'edges.npy'))
         assert os.path.exists(os.path.join(str(tmp_path), 'stability_edges.npy'))
 
+    def test_stability_without_fold_edges(self, tmp_path):
+        """With store_fold_edges=False (permutation pass) stability is still
+        computed from the fold-sum accumulator, but no per-fold masks are kept
+        and edges.npy is not written (only stability_edges.npy)."""
+        n_features, n_folds = 6, 3
+        mgr = ResultsManager(
+            output_dir=str(tmp_path), n_runs=1, n_folds=n_folds,
+            n_features=n_features, store_fold_edges=False,
+        )
+        assert mgr.cv_edges is None  # per-fold masks not retained
+
+        for fold in range(n_folds):
+            edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
+            edges[0, Networks.positive, 0] = True          # all folds
+            if fold == 0:
+                edges[2, Networks.positive, 0] = True      # one fold only
+            mgr.store_edges(param_idx=0, fold_idx=fold, edges_tensor=edges)
+
+        stability = mgr.calculate_edge_stability(write=True)
+        assert stability[0, Networks.positive, 0].item() == pytest.approx(1.0)
+        assert stability[2, Networks.positive, 0].item() == pytest.approx(1 / 3)
+
+        assert os.path.exists(os.path.join(str(tmp_path), 'stability_edges.npy'))
+        assert not os.path.exists(os.path.join(str(tmp_path), 'edges.npy'))
+
 
 class TestCalculateFinalCVResults:
     def test_saves_csv_files(self, tmp_path):

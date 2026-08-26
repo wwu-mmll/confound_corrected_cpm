@@ -104,9 +104,19 @@ poetry run pytest         # run the test suite
 - **`pip install cccpm` resolves very slowly or fails on dependency versions** — make
   sure `pip` is up to date (`python -m pip install --upgrade pip`) and that you are on
   a supported Python version.
-- **CUDA out of memory / wrong CUDA version** — install the matching PyTorch build from
-  the [official instructions](https://pytorch.org/get-started/locally/) first, then
-  install CCCPM.
+- **CUDA out of memory / wrong CUDA version** — first make sure you installed the
+  PyTorch build matching your driver (the [official instructions](https://pytorch.org/get-started/locally/)).
+  If the run itself runs out of VRAM, the GPU memory needed scales with the
+  parcellation size (quadratically in the number of regions) and the amount of
+  parallel work (number of permutations). To fit a large analysis on a limited GPU:
+    - **Run on CPU** (`CPMAnalysis(..., device="cpu")`). CCCPM is fast on CPU for
+      typical sizes; the GPU mainly helps with large permutation counts, and CPU RAM
+      is usually far larger than VRAM.
+    - **Lower `n_permutations`** — it is a linear factor on the peak memory.
+    - **Use a coarser atlas** — memory grows with the *square* of the region count.
+    - Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` to reduce fragmentation
+      (this only helps when free VRAM is fragmented, not when a single allocation is
+      genuinely too large).
 - **`_tkinter.TclError: Can't find a usable tk.tcl` (or `init.tcl`) when running an
   analysis or generating the report** — this is a plotting error, usually on **Windows**.
   CCCPM saves all figures to disk, but matplotlib defaults to an interactive GUI backend

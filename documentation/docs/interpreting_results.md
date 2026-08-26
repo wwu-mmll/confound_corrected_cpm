@@ -56,7 +56,7 @@ from the headline result to the supporting detail:
 | **Summary** | The headline cross-validated result as a one-sentence verdict, key-stat chips (samples, nodes, edges, covariates, permutations, edge p-threshold), and predicted-vs-observed scatter plots for the positive, negative, and both networks plus the covariates-only baseline. Each scatter is annotated with its cross-validated effect size (Pearson *r* / AUC) and permutation *p*. **Start here.** |
 | **Model Comparison** | One faceted figure comparing every model (`connectome`, `covariates`, `full`, `residuals`, `increment`) across metrics and networks, plus the APA results table (mean [SD] with permutation *p*-values). Foregrounds the `increment` model — your confound-control evidence. |
 | **Network Strengths** | How the summed positive/negative network strength relates to the target, and the distribution of strength across participants. |
-| **Brain & Edges** | The predictive edges in the brain: a connectivity matrix, a hub (node-degree) plot, and — when an atlas with a `network` column is supplied — a network-summary matrix and a chord diagram. With node coordinates (`x, y, z`) it also renders a glass-brain view. These figures come from the [atlas](atlases.md) you pass to `CPMAnalysis`. |
+| **Brain & Edges** | The predictive edges in the brain: a connectivity matrix, a hub (node-degree) plot, and — when an atlas with a `network` column is supplied — a network-summary matrix and a chord diagram. With node coordinates (`x, y, z`) it also renders a glass-brain view. A button group switches the matrix/hub/chord views between the **significantly** stable edges (default, when permutations were run), the **top 5%** and the **top 10%** most stable edges; the glass brain shows the default subset. These figures come from the [atlas](atlases.md) you pass to `CPMAnalysis`. |
 | **Stable Edges** | All significant edges (region A — region B) per network, the significance method and its diagnostics (e.g. largest NBS component), the permutation null-distribution plots, and a downloadable CSV of every selected edge with its stability and significance. |
 | **Data & Methods** | Appendix: target distribution, covariate scatter matrix, the full run configuration, and (with an inner CV) per-fold hyperparameters. |
 
@@ -103,8 +103,8 @@ Everything in the report is also available as plain files for your own analysis.
 |------|----------|
 | `cv_results_summary.csv` | Mean ± std of every metric, indexed by `(model, network)`. The numbers behind the Main Results page. |
 | `cv_results_full.csv` | Per-fold metric values (before averaging) — use these for your own error bars / tests. |
-| `cv_predictions.csv` | Out-of-sample predictions per subject: columns `sample_index, model, network, y_pred, y_true, fold`. |
-| `cv_network_strengths.csv` | Summed positive/negative network strength per subject, with the target: `y_true, network_strength, model, network, fold`. |
+| `cv_predictions.csv` | Out-of-sample predictions per subject: columns `sample_index, model, network, y_pred, y_true, fold, repeat`. With a `RepeatedKFold` each subject has one row per repeat; the report averages them so every subject is plotted once. |
+| `cv_network_strengths.csv` | Summed positive/negative network strength per subject, with the target: `sample_index, y_true, network_strength, model, network, fold, repeat`. |
 
 ### Significance (only if `n_permutations > 0`)
 

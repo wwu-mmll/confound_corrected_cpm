@@ -35,6 +35,38 @@ and split into a **positive** network (edges that increase with the target) and 
 Use the `*_partial` variants to remove covariate effects **while selecting edges**, so
 that selection is not driven by confounds.
 
+#### Dropping structural zeros (sparse connectomes)
+
+For sparse structural connectomes (e.g. DTI streamline counts), many edges are zero
+for most subjects. The optional **presence filter** removes them before selection:
+
+```python
+UnivariateEdgeSelection(edge_statistic="pearson", presence_filter=0.5)
+```
+
+`presence_filter` keeps an edge only if it is nonzero in at least the given fraction of
+subjects (`True` = `0.5`, the majority; a float sets the fraction). It is computed per
+fold on the training subjects from the connectome alone, so it adds no target leakage,
+and it is *additive* to the built-in near-zero-variance gate. It is **not** a test of
+the mean against zero — an edge present in a small but consistent minority is *dropped*,
+by design. Leave it off (`False`, the default) for functional data, whose edges have a
+real signed distribution around a mean of ~0. With `calculate_residuals=True` the
+connectome is residualized before selection, so the filter then sees residualized (not
+raw) values.
+
+#### Keeping only connected edges
+
+```python
+UnivariateEdgeSelection(edge_statistic="pearson", connected_components=True)
+```
+
+`connected_components` keeps only edges that belong to a connected component (per
+positive/negative network) with at least a minimum number of edges, dropping isolated
+single edges. `True` uses a minimum of 2 edges (drop lone edges); an int sets the
+minimum explicitly. Applied per fold (and per permutation) after thresholding, this
+favours coherent subnetworks over scattered one-off edges and can improve edge
+stability.
+
 ### 2. Confound control
 
 CCCPM offers two complementary ways to control for nuisance variables:

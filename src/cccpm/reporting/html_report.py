@@ -19,7 +19,7 @@ import jinja2
 
 import cccpm
 from cccpm.reporting.data_loader import ReportDataLoader
-from cccpm.reporting.reporting_utils import embed_image_base64
+from cccpm.reporting.reporting_utils import average_over_repeats, embed_image_base64
 from cccpm.reporting.section_builders import (
     build_brain_plots_context,
     build_data_context,
@@ -59,10 +59,15 @@ class HTMLReporter:
 
     def _load_data(self) -> None:
         self.df, self.df_mean = self.data_loader.load_cv_results()
-        self.df_predictions = self.data_loader.load_predictions()
+        # Average each subject's predictions / network strengths across the
+        # repeats of a RepeatedKFold so every subject is plotted once (no-op for
+        # a plain CV). The raw per-fold CSVs on disk are left intact.
+        self.df_predictions = average_over_repeats(
+            self.data_loader.load_predictions(), ['y_pred'])
         self.df_p_values = self.data_loader.load_p_values()
         self.df_permutations = self.data_loader.load_permutations()
-        self.df_network_strengths = self.data_loader.load_network_strengths()
+        self.df_network_strengths = average_over_repeats(
+            self.data_loader.load_network_strengths(), ['network_strength'])
 
     def generate_html_report(self) -> None:
         """Render the HTML report and write it to ``results_directory/report.html``."""

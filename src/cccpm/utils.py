@@ -98,54 +98,6 @@ def train_test_split(train, test, X, y, covariates):
     return X[train], X[test], y[train], y[test], covariates[train], covariates[test]
 
 
-def matrix_to_upper_triangular_vector(matrix):
-    """
-    Convert a 2D square matrix to a vector containing only the elements
-    of the strictly upper triangular part (excluding the diagonal).
-
-    Parameters:
-    matrix (np.ndarray): Input 2D square matrix of shape (n, n).
-
-    Returns:
-    np.ndarray: A vector containing the strictly upper triangular elements.
-    """
-    if not (matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1]):
-        raise ValueError("Input must be a 2D square matrix.")
-
-    n = matrix.shape[0]
-    # Get the indices of the strictly upper triangular part
-    row_indices, col_indices = np.triu_indices(n, k=1)
-    # Extract the elements at these indices
-    upper_triangular_elements = matrix[row_indices, col_indices]
-
-    return upper_triangular_elements
-
-
-def vector_to_upper_triangular_matrix(vector):
-    """
-    Convert a vector containing strictly upper triangular elements back
-    to a 2D square matrix.
-
-    Parameters:
-    vector (np.ndarray): A vector containing the strictly upper triangular elements.
-
-    Returns:
-    np.ndarray: The reconstructed 2D square matrix.
-    """
-    # Calculate the size of the matrix from the vector length
-    size = int((np.sqrt(8 * vector.size + 1) - 1) / 2) + 1
-    if size * (size - 1) // 2 != vector.size:
-        raise ValueError("Vector size does not match the number of elements for a valid square matrix.")
-
-    matrix = np.zeros((size, size))
-    # Get the indices of the strictly upper triangular part
-    row_indices, col_indices = np.triu_indices(size, k=1)
-    # Place the elements into the matrix
-    matrix[row_indices, col_indices] = vector
-    matrix[col_indices, row_indices] = vector
-    return matrix
-
-
 def matrix_to_vector_3d(matrix_3d):
     """
     Convert a 3D connectivity matrix to a 2D array of upper-triangular vectors.
@@ -165,34 +117,6 @@ def matrix_to_vector_3d(matrix_3d):
     flat = matrix_3d.reshape(n_samples, n * n)
     upper = flat[:, np.ravel_multi_index((row_idx, col_idx), (n, n))]
     return upper
-
-
-def vector_to_matrix_3d(vector_2d, shape):
-    """
-    Convert a vector containing strictly upper triangular parts back to a 3D matrix.
-
-    Parameters:
-    vector_2d (np.ndarray): A 2D array where each row is a vector of the strictly upper triangular part of a 2D matrix.
-    shape (tuple): The shape of the original 3D matrix, (n_samples, n, n).
-
-    Returns:
-    np.ndarray: The reconstructed 3D matrix of shape (n_samples, n, n).
-    """
-    n_samples, n, _ = shape
-    # Create an empty 3D matrix to fill
-    matrix_3d = np.zeros((n_samples, n, n))
-
-    # Create an index matrix for the strictly upper triangular indices
-    row_indices, col_indices = np.tril_indices(n, k=-1)  # k=1 excludes the diagonal
-    upper_tri_indices = np.ravel_multi_index((row_indices, col_indices), (n, n))
-
-    # Flatten the 3D matrix along the last two dimensions
-    flat_matrix = matrix_3d.reshape(n_samples, -1)
-
-    # Place the strictly upper triangular elements into the corresponding positions
-    np.put_along_axis(flat_matrix, upper_tri_indices[None, :], vector_2d, axis=1)
-
-    return matrix_3d
 
 
 def vector_to_matrix_tensor_version(tensor, dim):
@@ -240,9 +164,6 @@ def vector_to_matrix_tensor_version(tensor, dim):
     # We moved 'dim' to the end. Now we have two dims at the end (-2, -1).
     # We want to put them back at 'dim' and 'dim+1'.
     return out.movedim((-2, -1), (dim, dim + 1))
-
-
-import torch
 
 
 def matrix_to_vector_tensor_version(tensor, dim):

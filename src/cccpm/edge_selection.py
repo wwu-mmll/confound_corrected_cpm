@@ -1,6 +1,8 @@
+import warnings
 import numpy as np
 from typing import Union
 
+import networkx as nx
 import torch
 
 from sklearn.base import BaseEstimator
@@ -40,7 +42,9 @@ def get_residuals(data, confounds):
     confounds = torch.as_tensor(confounds, dtype=torch.float64)
 
     n_samples = confounds.shape[0]
-    ones = torch.ones(n_samples, 1, dtype=confounds.dtype)
+    # Create the intercept column on the same device as the inputs so this works
+    # when X/confounds live on the GPU (otherwise torch.cat mixes cpu + cuda).
+    ones = torch.ones(n_samples, 1, dtype=confounds.dtype, device=confounds.device)
     Z = torch.cat((ones, confounds), dim=1)
 
     # 2. Compute the Projector (Hat Matrix component)
@@ -54,7 +58,8 @@ def get_residuals(data, confounds):
     # Data is usually [N_samples, Features] OR [N_perms, N_samples]
 
     def _maybe_to_numpy(result):
-        return result.numpy() if return_numpy else result
+        # .cpu() is a no-op on CPU tensors but required before .numpy() on GPU.
+        return result.cpu().numpy() if return_numpy else result
 
     # CASE A: Data is [N_samples, Features] (Like X)
     if data.shape[0] == n_samples:
@@ -190,6 +195,85 @@ def correlations_and_pvalues(X, Y_perms,
 
 
 
+def resolve_presence_threshold(presence_filter):
+    """
+    Resolve the ``presence_filter`` argument to a nonzero-fraction threshold.
+
+    Returns ``None`` when the filter is off, otherwise the fraction of subjects
+    that must have a nonzero value for an edge to be kept (``True`` -> ``0.5``).
+    """
+    if presence_filter is False or presence_filter is None:
+        return None
+    if presence_filter is True:
+        return 0.5
+    threshold = float(presence_filter)
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(
+            f"presence_filter must be a bool or a fraction in [0, 1], "
+            f"got {presence_filter!r}."
+        )
+    return threshold
+
+
+def resolve_min_component_size(connected_components):
+    """
+    Resolve the ``connected_components`` argument to a minimum component size
+    (in edges), or ``None`` when the filter is off (``True`` -> ``2``, i.e. drop
+    lone single edges).
+    """
+    if connected_components is False or connected_components is None:
+        return None
+    if connected_components is True:
+        return 2
+    size = int(connected_components)
+    if size < 1:
+        raise ValueError(
+            f"connected_components must be a bool or an int >= 1, "
+            f"got {connected_components!r}."
+        )
+    return size
+
+
+def filter_connected_components(mask, min_edges):
+    """
+    Keep only selected edges that belong to a connected component with at least
+    ``min_edges`` edges, per network layer and run; drop the rest.
+
+    Edges are nodes-in-common connections of a graph built per (network, run)
+    from the selected edges. Isolated single edges form a one-edge component and
+    are removed when ``min_edges >= 2``. ``mask`` is the ``[Features, 2, Runs]``
+    selection tensor (dim 1 = positive/negative); the returned tensor has the
+    same shape/dtype with dropped edges set to 0.
+    """
+    from cccpm.utils import infer_n_nodes
+
+    n_features = mask.shape[0]
+    n_nodes = infer_n_nodes(n_features)
+    if n_nodes is None:
+        return mask
+
+    rows, cols = np.triu_indices(n_nodes, k=1)
+    out = mask.clone()
+    selected = mask.detach().cpu().numpy() > 0
+    for layer in range(selected.shape[1]):
+        for run in range(selected.shape[2]):
+            edge_idx = np.nonzero(selected[:, layer, run])[0]
+            if edge_idx.size == 0:
+                continue
+            graph = nx.Graph()
+            graph.add_edges_from(zip(rows[edge_idx].tolist(), cols[edge_idx].tolist()))
+            drop = set()
+            for component in nx.connected_components(graph):
+                sub = graph.subgraph(component)
+                if sub.number_of_edges() < min_edges:
+                    drop.update(tuple(sorted(e)) for e in sub.edges())
+            if drop:
+                for e in edge_idx:
+                    if (rows[e], cols[e]) in drop:
+                        out[e, layer, run] = 0
+    return out
+
+
 class BaseEdgeSelector(BaseEstimator):
     def select(self, r, p):
         pass
@@ -210,14 +294,6 @@ class PThreshold(BaseEdgeSelector):
                           (e.g. ``[0.01, 0.05]``) to tune via inner CV.
         :param correction: multiple-comparison correction, or ``None`` for no
                             correction. Can be one of statsmodels' methods:
-                            bonferroni : one-step correction
-                            sidak : one-step correction
-                            holm-sidak : step down method using Sidak adjustments
-                            holm : step-down method using Bonferroni adjustments
-                            simes-hochberg : step-up method (independent)
-                            hommel : closed method based on Simes tests (non-negative)
-                            fdr_bh : Benjamini/Hochberg (non-negative)
-                            fdr_by : Benjamini/Yekutieli (negative)
                             bonferroni : one-step correction
                             sidak : one-step correction
                             holm-sidak : step down method using Sidak adjustments
@@ -286,20 +362,12 @@ class PThreshold(BaseEdgeSelector):
         return torch.stack([torch.as_tensor(pos_mask, device=r.device),
                             torch.as_tensor(neg_mask, device=r.device)], dim=1)
 
-class SelectPercentile(BaseEdgeSelector):
-    def __init__(self, percentile: Union[float, list] = 0.05):
-        self.percentile = percentile
-
-
-class SelectKBest(BaseEdgeSelector):
-    def __init__(self, k: Union[int, list] = None):
-        self.k = k
-
 
 class EdgeStatistic(BaseEstimator):
-    def __init__(self, edge_statistic: str = 'spearman', t_test_filter: bool = False):
+    def __init__(self, edge_statistic: str = 'spearman',
+                 presence_filter: Union[bool, float] = False):
         self.edge_statistic = edge_statistic
-        self.t_test_filter = t_test_filter
+        self.presence_filter = presence_filter
 
     def fit_transform(self,
                       X,
@@ -320,6 +388,18 @@ class EdgeStatistic(BaseEstimator):
         # Remove features with ~0 variance to avoid NaNs in correlation
         variances = torch.var(X, dim=0)
         valid_edges = variances > 1e-6
+
+        # 3b. Presence filter (optional): drop edges that are zero for more than
+        # (1 - threshold) of the subjects. Intended for sparse structural
+        # connectomes (e.g. DTI streamline counts) where structural zeros should
+        # not enter the model; leave off for functional data whose edges have a
+        # real signed distribution around a mean of ~0. Uses X only (no target),
+        # computed here on the training subjects, so it adds no leakage. This is
+        # additive to the variance gate above, which already drops all-zero edges.
+        presence_threshold = resolve_presence_threshold(self.presence_filter)
+        if presence_threshold is not None:
+            presence = (X != 0).float().mean(dim=0)
+            valid_edges = valid_edges & (presence >= presence_threshold)
 
         if self.edge_statistic == 'pearson':
             r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
@@ -368,20 +448,49 @@ class UnivariateEdgeSelection(BaseEstimator):
         (continuous target), or ``'point_biserial'`` / ``'point_biserial_partial'``
         (binary target). The ``*_partial`` variants control for the covariates
         during selection.
-    t_test_filter: bool, default=False
-        Reserved for an optional pre-filtering step (currently inactive).
+    presence_filter: bool or float, default=False
+        Optional pre-filter that keeps only edges which are nonzero in at least a
+        given fraction of subjects, dropping structural/near-zero edges before
+        selection. ``True`` uses a fraction of ``0.5`` (present in the majority);
+        a float sets the fraction explicitly (e.g. ``0.75``). Intended for sparse
+        structural connectomes (e.g. DTI streamline counts); leave off
+        (``False``) for functional data, whose edges have a real signed
+        distribution around a mean of ~0. Computed per fold on the training
+        subjects from the connectome only, so it adds no target leakage. Note:
+        with ``CPMAnalysis(calculate_residuals=True)`` the connectome is
+        residualized before selection, so the filter then sees residualized (not
+        raw) values.
+    connected_components: bool or int, default=False
+        If set, keep only selected edges that belong to a connected component
+        with at least this many edges (per positive/negative network), dropping
+        isolated edges — this can improve edge stability. ``True`` uses a minimum
+        of ``2`` edges (drop lone single edges); an int sets the minimum
+        explicitly. Applied per fold and per permutation after thresholding.
     edge_selection: list of selectors (e.g. PThreshold), default=None
         One or more selection strategies. Provide a list of multiple
         configurations to tune them via an inner CV.
     """
     def __init__(self,
                  edge_statistic: str = 'spearman',
-                 t_test_filter: bool = False,
-                 edge_selection: Union[list, None, PThreshold] = None):
+                 presence_filter: Union[bool, float] = False,
+                 connected_components: Union[bool, int] = False,
+                 edge_selection: Union[list, None, PThreshold] = None,
+                 t_test_filter=None):
         self.r_edges = None
         self.p_edges = None
+        if t_test_filter is not None:
+            warnings.warn(
+                "`t_test_filter` never functioned and has been replaced by "
+                "`presence_filter` (keep edges nonzero in at least a fraction of "
+                "subjects). Ignoring `t_test_filter`; use `presence_filter` "
+                "instead.",
+                DeprecationWarning, stacklevel=2,
+            )
+        self.presence_filter = presence_filter
+        self.connected_components = connected_components
         self.t_test_filter = t_test_filter
-        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic, t_test_filter=t_test_filter)
+        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic,
+                                            presence_filter=presence_filter)
         self.edge_selection = edge_selection
         if isinstance(edge_selection, (list, tuple)):
             self.edge_selection = edge_selection
@@ -405,4 +514,7 @@ class UnivariateEdgeSelection(BaseEstimator):
 
     def return_selected_edges(self):
         selected_edges = self.edge_selection.select(r=self.r_edges, p=self.p_edges)
+        min_edges = resolve_min_component_size(self.connected_components)
+        if min_edges is not None:
+            selected_edges = filter_connected_components(selected_edges, min_edges)
         return selected_edges

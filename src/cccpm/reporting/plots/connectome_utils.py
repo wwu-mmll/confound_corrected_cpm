@@ -88,26 +88,37 @@ def signed_stability_matrix(edge_stability: np.ndarray) -> np.ndarray:
     return pos - neg
 
 
-def significant_edge_matrices(
+def masked_signed_stability_matrix(
     edge_stability: np.ndarray,
     edge_significance: np.ndarray | None = None,
     *,
+    mode: str = "significant",
     alpha: float = 0.05,
-    fallback_to_stable: bool = True,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """
-    Build binary positive/negative node×node matrices of the edges to highlight
-    on the glass brain.
+    Signed node×node stability matrix keeping only the edges selected by *mode*.
 
-    An edge is kept if it was selected (stability > 0) and, when significance is
-    available, its stability p-value is below *alpha*. If significance filtering
-    leaves a network empty but stable edges exist, fall back to all stable edges
-    (so the figure still renders — e.g. with few permutations the p-values can
-    sit just above the threshold). Returns ``(positive_matrix, negative_matrix)``.
+    Positive-network edges appear as ``+stability`` and negative as
+    ``-stability`` (an edge belongs to at most one network, so the layers never
+    overlap). Non-selected edges are set to ``0``. This drives every brain/edge
+    figure so the report can offer the same edge set across views.
+
+    Modes
+    -----
+    ``"all"``
+        Every selected (stable) edge.
+    ``"significant"``
+        Edges whose stability p-value is below *alpha*. Requires
+        *edge_significance*; if it is missing, or if the filter empties a network
+        that had stable edges, fall back to all stable edges for that network
+        (so the figure still renders — e.g. few permutations push p-values just
+        above the threshold).
+    ``"top5"`` / ``"top10"``
+        The top 5% / 10% of stable edges by stability, per network layer.
     """
-    stab = np.asarray(edge_stability, dtype=float)
-    while stab.ndim > 3:
-        stab = stab[..., 0]  # drop trailing run dim(s) -> [n, n, 2]
+    arr = np.asarray(edge_stability, dtype=float)
+    while arr.ndim > 3:
+        arr = arr[..., 0]  # drop trailing run dim(s) -> [n, n, 2]
 
     sig = None
     if edge_significance is not None:
@@ -115,16 +126,25 @@ def significant_edge_matrices(
         while sig.ndim > 3:
             sig = sig[..., 0]
 
-    out = []
+    top_pct = {"top5": 5.0, "top10": 10.0}.get(mode)
+    layers = []
     for layer in (0, 1):
-        stable = stab[:, :, layer] > 1e-9
-        keep = stable
-        if sig is not None:
+        vals = arr[:, :, layer]
+        stable = vals > 1e-9
+        if mode == "significant" and sig is not None:
             keep = stable & (sig[:, :, layer] < alpha)
-            if fallback_to_stable and not keep.any() and stable.any():
+            if not keep.any() and stable.any():
                 keep = stable
-        out.append(np.where(keep, 1.0, 0.0))
-    return out[0], out[1]
+        elif top_pct is not None:
+            keep = np.zeros_like(stable)
+            stable_vals = vals[stable]
+            if stable_vals.size:
+                threshold = np.percentile(stable_vals, 100.0 - top_pct)
+                keep = stable & (vals >= threshold)
+        else:  # "all", or "significant" without significance data
+            keep = stable
+        layers.append(np.where(keep, vals, 0.0))
+    return layers[0] - layers[1]
 
 
 def aggregate_matrix_by_group(

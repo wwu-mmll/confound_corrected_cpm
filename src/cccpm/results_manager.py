@@ -30,10 +30,17 @@ class ResultsManager:
                  n_features: int,
                  n_params: int = None,
                  is_inner_cv: bool = False,
-                 device: torch.device = torch.device('cpu')):
+                 device: torch.device = torch.device('cpu'),
+                 store_fold_edges: bool = True):
         self.results_directory = output_dir
         self.is_inner_cv = is_inner_cv
         self.device = device
+        # Edge bookkeeping is kept on the CPU regardless of the compute device: it
+        # only aggregates stability and (optionally) writes per-fold edges, and a
+        # [Features, 2, Folds, Runs] tensor would otherwise consume huge amounts of
+        # VRAM for large parcellations × many folds × many permutations.
+        self.edge_device = torch.device('cpu')
+        self.store_fold_edges = store_fold_edges
 
         # 1. Define Dimensions based on Enums
         self.dims = {
@@ -58,18 +65,25 @@ class ResultsManager:
         )
 
         # 3. Handle Edges (Features)
-        # Shape: [N_Features, 2, Params, Folds, Runs]
-        # Only store positive and negative edges (not "both")
         self.n_features = n_features
-        self.cv_edges = torch.zeros(
-            self.n_features,
-            2,  # Only positive and negative networks
-            self.dims['params'],
-            self.dims['folds'],
-            self.dims['runs'],
-            dtype=torch.bool,
-            device=self.device
+        # Running sum of selected-edge masks over folds -> stability = sum / n_folds.
+        # This is all edge stability needs, and it avoids keeping every fold's mask
+        # (the folds axis is what blows up memory for many permutations).
+        # Shape: [N_Features, 2, Params, Runs]  (positive/negative only, not "both").
+        self.cv_edge_sum = torch.zeros(
+            self.n_features, 2, self.dims['params'], self.dims['runs'],
+            dtype=torch.float32, device=self.edge_device
         )
+        # Per-fold masks are retained only when we need to write edges.npy (the real
+        # run). Permutation / inner-CV passes keep only the fold-sum above.
+        # Shape: [N_Features, 2, Params, Folds, Runs].
+        self.cv_edges = None
+        if store_fold_edges:
+            self.cv_edges = torch.zeros(
+                self.n_features, 2, self.dims['params'],
+                self.dims['folds'], self.dims['runs'],
+                dtype=torch.bool, device=self.edge_device
+            )
 
         # Placeholder for predictions if you need them later
         self.cv_predictions = []
@@ -86,11 +100,12 @@ class ResultsManager:
             edges_tensor: Boolean Tensor of shape [Features, 2, Runs].
                           Dimension 1 must correspond to [Positive, Negative].
         """
-        # We assume edges_tensor comes in as [Features, 2, Runs]
-        # This matches cv_edges shape directly
-
-        # Target Slice: [:, :, param, fold, :]
-        self.cv_edges[:, :, param_idx, fold_idx, :] = torch.as_tensor(edges_tensor, dtype=torch.bool)
+        # Move the mask to the CPU edge store (frees VRAM) and accumulate the
+        # fold-sum used for stability. Retain the per-fold mask only when needed.
+        mask = torch.as_tensor(edges_tensor, dtype=torch.bool).to(self.edge_device)
+        self.cv_edge_sum[:, :, param_idx, :] += mask.float()
+        if self.cv_edges is not None:
+            self.cv_edges[:, :, param_idx, fold_idx, :] = mask
 
 
     def store_metrics(self, param_idx: int, fold_idx: int, metrics_tensor: torch.Tensor):
@@ -111,40 +126,44 @@ class ResultsManager:
 
     def calculate_edge_stability(self, write: bool = True, best_param_id: int = None):
         """
-        Calculate and save edge stability and overlap.
+        Calculate and save edge stability.
 
-        :param cv_edges: Cross-validation edges.
-        :param results_directory: Directory to save the results.
+        Stability is the fraction of outer folds in which each edge was selected,
+        for the chosen hyperparameter of each run — read straight from the CPU
+        fold-sum accumulator. ``stability_edges.npy`` (``[Nodes, Nodes, 2, Runs]``)
+        is always written; the per-fold ``edges.npy`` is written only when this
+        manager retained the per-fold masks (the real run — see
+        ``store_fold_edges``). Both node×node arrays are built on the CPU.
         """
+        n_runs = self.dims['runs']
         if best_param_id is None:
-            best_param_id = torch.arange(1, device=self.cv_edges.device)
+            best_param_id = torch.zeros(n_runs, dtype=torch.long)
+        else:
+            best_param_id = torch.as_tensor(best_param_id, dtype=torch.long).reshape(-1)
+            if best_param_id.numel() == 1:
+                best_param_id = best_param_id.expand(n_runs)
+        best_param_id = best_param_id.to(self.edge_device)
+        run_indices = torch.arange(n_runs, device=self.edge_device)
 
-        run_indices = torch.arange(self.dims['runs'], device=self.cv_edges.device)
-
-        # 1. Advanced Indexing: Select the specific param for each run simultaneously
-        # Input Shape:  [N_Features, 2, Params, Folds, Runs]
-        # We index Dim 2 (Params) and Dim 4 (Runs) with paired vectors.
-        # Result Shape: [Runs, N_Features, 2, Folds]
-        selected_edges = self.cv_edges[:, :, best_param_id, :, run_indices]
-
-        # reshape to [N_Features, 2, Folds, Runs]
-        selected_edges = selected_edges.permute(1, 2, 3, 0)
-
-        # 2. Calculate Stability
-        # Average over Folds (Dim 2)
-        # Shape: [N_Features, 2, Runs]
-        edge_stability = selected_edges.float().mean(dim=2)
+        # Fraction of folds selecting each edge, for the chosen param per run.
+        # cv_edge_sum: [Features, 2, Params, Runs]; paired-index Params × Runs.
+        # Result: [Features, 2, Runs].
+        edge_stability = self.cv_edge_sum[:, :, best_param_id, run_indices] / self.dims['folds']
 
         if write:
-            # Keep shape [Features, 2, Folds, Runs] for edges
-            # Keep shape [Features, 2, Runs] for stability
-            np.save(os.path.join(self.results_directory, f'edges.npy'),
-                    vector_to_matrix_tensor_version(selected_edges, dim=0).float().cpu().numpy())
-            np.save(os.path.join(self.results_directory, f'stability_edges.npy'),
-                    vector_to_matrix_tensor_version(edge_stability, dim=0).cpu().numpy())
+            np.save(os.path.join(self.results_directory, 'stability_edges.npy'),
+                    vector_to_matrix_tensor_version(edge_stability, dim=0).numpy())
+            if self.cv_edges is not None:
+                # Per-fold selected edges for the chosen param -> edges.npy.
+                # [:, :, param, :, run] -> [Runs, Features, 2, Folds] (advanced
+                # indices are non-adjacent, so they lead) -> [Features, 2, Folds, Runs].
+                selected_edges = self.cv_edges[:, :, best_param_id, :, run_indices]
+                selected_edges = selected_edges.permute(1, 2, 3, 0)
+                np.save(os.path.join(self.results_directory, 'edges.npy'),
+                        vector_to_matrix_tensor_version(selected_edges, dim=0).float().numpy())
         return edge_stability
 
-    def store_predictions(self, y_pred, y_true, fold, test_indices):
+    def store_predictions(self, y_pred, y_true, fold, test_indices, repeat=0):
         y_pred = y_pred.detach().cpu().numpy().squeeze(-1)
         y_true = y_true.reshape(-1)
 
@@ -169,8 +188,12 @@ class ResultsManager:
             'y_true': flat_true
         }, index=multi_index)
 
-        # Add fold metadata
+        # Add fold/repeat metadata. ``repeat`` distinguishes the passes of a
+        # RepeatedKFold so a subject's predictions can be averaged across repeats
+        # before anything is plotted at the individual level (each subject is a
+        # test case once per repeat).
         batch_df['fold'] = fold
+        batch_df['repeat'] = repeat
 
         # Reset index to turn MultiIndex levels into columns
         batch_df = batch_df.reset_index()
@@ -179,15 +202,19 @@ class ResultsManager:
 
 
 
-    def store_network_strengths(self, network_strengths, y_true, fold):
-        # Use a list comprehension to build data more concisely
+    def store_network_strengths(self, network_strengths, y_true, fold, test_indices=None, repeat=0):
+        # Use a list comprehension to build data more concisely. ``sample_index``
+        # and ``repeat`` let a subject's network strengths be averaged across the
+        # repeats of a RepeatedKFold (see ``store_predictions``).
         data = [
             pd.DataFrame({
+                'sample_index': test_indices,
                 'y_true': y_true.squeeze(),
                 'network_strength': np.squeeze(network_strengths[m][n].cpu().numpy()),
                 'model': m,
                 'network': n,
-                'fold': fold
+                'fold': fold,
+                'repeat': repeat,
             })
             for m in ['connectome', 'residuals']
             for n in ['positive', 'negative']
@@ -208,15 +235,15 @@ class ResultsManager:
         results.columns = results.columns.droplevel(1)
         return results
 
-    def save_predictions(self):  # update save function to sort by index prior to saving
+    def save_predictions(self):
         """
-        Save predictions to CSV.
+        Save predictions to CSV, sorted by subject index. This is the single
+        writer of ``cv_predictions.csv`` (``calculate_final_cv_results`` only
+        concatenates the per-fold frames into ``self.cv_predictions``).
         """
         df = self.cv_predictions.copy()
         df.sort_values(by='sample_index', inplace=True)
-        #df.drop(columns='sample_index', inplace=True)
         df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
-        # self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
 
     def save_network_strengths(self):
         """
@@ -291,51 +318,20 @@ class ResultsManager:
         self.agg_results = df_agg.copy()
         df_agg.to_csv(os.path.join(self.results_directory, 'cv_results_summary.csv'), float_format='%.4f')
 
+        # Concatenate the per-fold prediction frames into a single DataFrame;
+        # save_predictions() (real runs only) is what writes it to disk.
         if self.cv_predictions:
             self.cv_predictions = pd.concat(self.cv_predictions, ignore_index=True)
-            self.cv_predictions.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
         return df_agg
 
     def aggregate_inner_folds(self):
         """
-        Calculates increments, aggregates across folds, and saves results.
+        Compute the increment model (full - covariates) across all inner folds.
+
+        The per-fold means are read directly by ``find_best_params``, so nothing
+        else needs to be aggregated or saved here.
         """
-        # 1. Calculate Increments (Full - Covariates) inline
-        # This operates on the entire tensor at once (all params, folds, metrics, perms)
         self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.covariates]
-
-        # 2. Calculate Means across Folds (Dimension 4)
-        inner_means = torch.mean(self.results, dim=4)
-
-        # (Optional) Calculate Stds if you want to save/inspect them
-        # inner_stds = torch.std(self.results, dim=3)
-
-        # 3. Save to CSV (assuming Permutation 0 is the real data)
-        #if self.dims['perms'] > 0:
-        #    self._save_inner_cv_to_csv(inner_means, perm_idx=0)
-
-    def _save_inner_cv_to_csv(self, data_tensor, perm_idx=0):
-        """
-        Helper to flatten the tensor and save to CSV.
-        """
-        import pandas as pd
-
-        # Create MultiIndex for rows: [Models, Networks, Params]
-        iterables = [
-            [m.name for m in Models],
-            [n.name for n in Networks],
-            range(self.dims['params'])
-        ]
-        index = pd.MultiIndex.from_product(iterables, names=['model', 'network', 'param_id'])
-
-        # Flatten: Select perm -> Flatten to [Rows, Metrics]
-        data_slice = data_tensor[..., perm_idx].reshape(-1, self.dims['metrics']).cpu().numpy()
-
-        df = pd.DataFrame(data_slice, index=index, columns=[m.name for m in Metrics])
-
-        path = f"{self.results_directory}/inner_cv_results_mean.csv"
-        df.to_csv(path)
-        print(f"Inner CV means saved to {path}")
 
     def find_best_params(self, task_type=TaskType.regression):
         # Select appropriate metric based on task type
@@ -357,20 +353,6 @@ class ResultsManager:
         # 3. Find Index of Maximum -> Shape: [Perms]
         best_param_idx = torch.argmax(mean_scores, dim=0)
         return best_param_idx
-
-    @staticmethod
-    def collect_results(fold_id, param_id, param, metrics):
-        df = pd.DataFrame()
-        for model_type in ModelDict().keys():
-            for network in NetworkDict().keys():
-                results_dict = metrics[model_type][network]
-                results_dict['model'] = model_type
-                results_dict['network'] = network
-                results_dict['fold'] = fold_id
-                results_dict['param_id'] = param_id
-                results_dict['params'] = [param]
-                df = pd.concat([df, pd.DataFrame(results_dict, index=[0])], ignore_index=True)
-        return df
 
 
 class PermutationManager:
