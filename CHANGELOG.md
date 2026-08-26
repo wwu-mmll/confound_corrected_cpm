@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] — 2026-08-26
 
 ### Added
 - **Connected-component edge selection** (`UnivariateEdgeSelection(connected_components=...)`).
@@ -18,6 +18,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   chord views between **Significant**, **Top 5%** and **Top 10%** (by stability). Without
   permutation-based significance the default is all stable edges. The glass brain renders
   the default subset. Fully self-contained (inline JS/CSS, no external requests).
+- **Presence filter for edge selection** (`UnivariateEdgeSelection(presence_filter=...)`).
+  Optionally keeps only edges that are nonzero in at least a given fraction of subjects
+  (`True` = majority/0.5, or a float), dropping structural/near-zero edges before
+  selection. Intended for sparse structural connectomes (e.g. DTI streamline counts);
+  computed per fold on the training subjects from the connectome only, so it adds no
+  target leakage, and is additive to the existing near-zero-variance gate. Leave off
+  (default `False`) for functional data whose edges vary around a mean of ~0.
 
 ### Fixed
 - **GPU out-of-memory in edge-stability aggregation.** `ResultsManager` preallocated the
@@ -41,15 +48,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with `Expected all tensors to be on the same device` when running on `device='cuda'`.
   The intercept is now created on the inputs' device, and the numpy-return path moves
   through `.cpu()` first. Added a CUDA-guarded regression test.
-
-### Added
-- **Presence filter for edge selection** (`UnivariateEdgeSelection(presence_filter=...)`).
-  Optionally keeps only edges that are nonzero in at least a given fraction of subjects
-  (`True` = majority/0.5, or a float), dropping structural/near-zero edges before
-  selection. Intended for sparse structural connectomes (e.g. DTI streamline counts);
-  computed per fold on the training subjects from the connectome only, so it adds no
-  target leakage, and is additive to the existing near-zero-variance gate. Leave off
-  (default `False`) for functional data whose edges vary around a mean of ~0.
 
 ### Deprecated
 - The never-functional `t_test_filter` argument is replaced by `presence_filter`.
