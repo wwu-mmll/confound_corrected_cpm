@@ -74,6 +74,65 @@ class FastCPMMetrics:
         std_y = torch.sqrt(torch.sum(y_c ** 2, dim=0))
         return cov / (std_x * std_y + 1e-8)
 
+    def score_batched(self, y_true, y_pred, valid_mask=None):
+        """
+        Batched-over-params-and-folds version of `score()`.
+
+        Args:
+            y_true: [B_folds, N_samples, N_runs] -- per-fold test labels
+                    (param-independent; matches utils.build_fold_batch's
+                    FoldBatch.y_test layout, e.g. `fb.y_test`).
+            y_pred: [N_samples, N_models, N_networks, B_params, B_folds, N_runs].
+            valid_mask: optional [B_folds, N_samples] bool -- True on real
+                        (non-pad) test rows. Defaults to all-True (no padding).
+
+        Returns:
+            scores: [N_metrics, N_models, N_networks, B_params, B_folds, N_runs]
+        """
+        y_true = torch.as_tensor(y_true, device=self.device, dtype=torch.float32)
+        y_pred = torch.as_tensor(y_pred, device=self.device, dtype=torch.float32)
+        N, B_folds = y_pred.shape[0], y_pred.shape[4]
+
+        if valid_mask is None:
+            valid_mask = torch.ones(B_folds, N, dtype=torch.bool, device=self.device)
+        # [B_folds, N] -> [N, 1, 1, 1, B_folds, 1]
+        mask = valid_mask.to(y_pred.dtype).transpose(0, 1).view(N, 1, 1, 1, B_folds, 1)
+        n_valid = valid_mask.sum(dim=1).to(y_pred.dtype).view(1, 1, 1, B_folds, 1)
+
+        # [B_folds, N, N_runs] -> [N, 1, 1, 1, B_folds, N_runs]
+        truth_expanded = y_true.transpose(0, 1).reshape(N, 1, 1, 1, B_folds, -1)
+
+        diff = (truth_expanded - y_pred) * mask
+        mse = (diff ** 2).sum(dim=0) / n_valid
+        mae = diff.abs().sum(dim=0) / n_valid
+
+        mean_truth = (truth_expanded * mask).sum(dim=0) / n_valid
+        var_true = ((truth_expanded - mean_truth) ** 2 * mask).sum(dim=0) / n_valid
+        mean_diff = diff.sum(dim=0) / n_valid
+        var_diff = ((diff - mean_diff) ** 2 * mask).sum(dim=0) / n_valid
+        expl_var = 1 - (var_diff / (var_true + 1e-8))
+
+        pearson = self._pearson_vectorized_batched(truth_expanded, y_pred, mask, n_valid)
+
+        zero_placeholder = torch.zeros_like(mse)
+        metrics_list = [zero_placeholder] * len(Metrics)
+        metrics_list[Metrics.explained_variance_score] = expl_var
+        metrics_list[Metrics.pearson_score] = pearson
+        metrics_list[Metrics.mean_squared_error] = mse
+        metrics_list[Metrics.mean_absolute_error] = mae
+
+        return torch.stack(metrics_list, dim=0)
+
+    def _pearson_vectorized_batched(self, x, y, mask, n_valid):
+        x_mean = (x * mask).sum(dim=0) / n_valid
+        y_mean = (y * mask).sum(dim=0) / n_valid
+        x_c = (x - x_mean) * mask
+        y_c = (y - y_mean) * mask
+        cov = (x_c * y_c).sum(dim=0)
+        std_x = torch.sqrt((x_c ** 2).sum(dim=0))
+        std_y = torch.sqrt((y_c ** 2).sum(dim=0))
+        return cov / (std_x * std_y + 1e-8)
+
 
 class FastCPMClassificationMetrics:
     """
@@ -203,6 +262,101 @@ class FastCPMClassificationMetrics:
 
         return auc
 
+    def score_batched(self, y_true, y_pred_proba, valid_mask=None):
+        """
+        Batched-over-params-and-folds version of `score()`.
+
+        Args:
+            y_true: [B_folds, N_samples, N_runs] -- per-fold test labels
+                    (param-independent; matches utils.build_fold_batch's
+                    FoldBatch.y_test layout, e.g. `fb.y_test`).
+            y_pred_proba: [N_samples, N_models, N_networks, B_params, B_folds, N_runs].
+            valid_mask: optional [B_folds, N_samples] bool -- True on real
+                        (non-pad) test rows. Defaults to all-True (no padding).
+
+        Returns:
+            scores: [N_metrics, N_models, N_networks, B_params, B_folds, N_runs]
+        """
+        y_true = torch.as_tensor(y_true, device=self.device, dtype=torch.float32)
+        y_pred_proba = torch.as_tensor(y_pred_proba, device=self.device, dtype=torch.float32)
+        N, B_folds = y_pred_proba.shape[0], y_pred_proba.shape[4]
+
+        if valid_mask is None:
+            valid_mask = torch.ones(B_folds, N, dtype=torch.bool, device=self.device)
+        # [B_folds, N] -> [N, 1, 1, 1, B_folds, 1]
+        mask = valid_mask.transpose(0, 1).view(N, 1, 1, 1, B_folds, 1)
+
+        # [B_folds, N, N_runs] -> [N, 1, 1, 1, B_folds, N_runs]
+        truth_expanded = y_true.transpose(0, 1).reshape(N, 1, 1, 1, B_folds, -1)
+        y_pred_binary = (y_pred_proba > 0.5).float()
+
+        tp = ((truth_expanded == 1) & (y_pred_binary == 1) & mask).float()
+        tn = ((truth_expanded == 0) & (y_pred_binary == 0) & mask).float()
+        fp = ((truth_expanded == 0) & (y_pred_binary == 1) & mask).float()
+        fn = ((truth_expanded == 1) & (y_pred_binary == 0) & mask).float()
+
+        tp_sum = tp.sum(dim=0)
+        tn_sum = tn.sum(dim=0)
+        fp_sum = fp.sum(dim=0)
+        fn_sum = fn.sum(dim=0)
+
+        accuracy = (tp_sum + tn_sum) / (tp_sum + tn_sum + fp_sum + fn_sum + 1e-8)
+        tpr = tp_sum / (tp_sum + fn_sum + 1e-8)
+        tnr = tn_sum / (tn_sum + fp_sum + 1e-8)
+        balanced_accuracy = (tpr + tnr) / 2
+        precision = tp_sum / (tp_sum + fp_sum + 1e-8)
+        recall = tpr
+        f1_score = 2 * (precision * recall) / (precision + recall + 1e-8)
+
+        roc_auc = self._fast_roc_auc_batched(truth_expanded, y_pred_proba, mask)
+
+        zero_placeholder = torch.zeros_like(accuracy)
+        metrics_list = [zero_placeholder] * len(Metrics)
+        metrics_list[Metrics.accuracy] = accuracy
+        metrics_list[Metrics.balanced_accuracy] = balanced_accuracy
+        metrics_list[Metrics.f1_score] = f1_score
+        metrics_list[Metrics.roc_auc] = roc_auc
+
+        return torch.stack(metrics_list, dim=0)
+
+    def _fast_roc_auc_batched(self, y_true, y_pred_proba, mask):
+        """
+        Batched-over-params-and-folds version of `_fast_roc_auc`.
+
+        Args:
+            y_true: [N, 1, 1, 1, B_folds, N_runs] (broadcastable).
+            y_pred_proba: [N, N_models, N_networks, B_params, B_folds, N_runs].
+            mask: [N, 1, 1, 1, B_folds, 1] bool -- True on real (non-pad) rows.
+
+        Returns:
+            ROC AUC scores [N_models, N_networks, B_params, B_folds, N_runs].
+
+        Note: the O(N^2) pairwise comparison below is broadcast across every
+        extra batch dim (models/networks/params/folds/runs), so its memory
+        footprint scales with N^2 times the full batch size -- by far the
+        most memory-hungry op in the batched pipeline (see batch_planning.py).
+        """
+        pos_mask = (y_true == 1) & mask
+        neg_mask = (y_true == 0) & mask
+
+        n_pos = pos_mask.sum(dim=0)  # [1, 1, 1, B_folds, N_runs]
+        n_neg = neg_mask.sum(dim=0)
+
+        y_pred_pos = y_pred_proba.unsqueeze(1)  # [N, 1, Models, Networks, Params, B, R]
+        y_pred_neg = y_pred_proba.unsqueeze(0)  # [1, N, Models, Networks, Params, B, R]
+
+        pos_mask_expanded = pos_mask.unsqueeze(1)  # [N, 1, 1, 1, 1, B, R]
+        neg_mask_expanded = neg_mask.unsqueeze(0)  # [1, N, 1, 1, 1, B, R]
+
+        comparisons = (y_pred_pos > y_pred_neg).float()
+        ties = (y_pred_pos == y_pred_neg).float() * 0.5
+
+        valid_pairs = pos_mask_expanded & neg_mask_expanded
+        weighted_sum = ((comparisons + ties) * valid_pairs).sum(dim=(0, 1))  # [Models, Networks, Params, B, R]
+
+        auc = weighted_sum / (n_pos * n_neg + 1e-8)
+        return auc
+
 
 def score_regression_models(y_true, y_pred, device='cpu', **kwargs):
     evaluator = FastCPMMetrics(device=device)
@@ -245,3 +399,28 @@ def score_models(y_true, y_pred, task_type, device='cpu', **kwargs):
         return score_classification_models(y_true, y_pred, device=device, **kwargs)
     else:
         raise ValueError(f"Unknown task_type: {task_type}")
+
+
+def score_models_batched(y_true, y_pred, task_type, valid_mask=None, device='cpu'):
+    """
+    Batched-over-params-and-folds version of `score_models`.
+
+    Args:
+        y_true: [B_folds, N_samples, N_runs] -- per-fold test labels
+                (matches FoldBatch.y_test's layout, e.g. `fb.y_test`).
+        y_pred: [N_samples, N_models, N_networks, B_params, B_folds, N_runs].
+                For classification, should be probabilities.
+        task_type: TaskType.regression or TaskType.classification.
+        valid_mask: optional [B_folds, N_samples] bool; True on real (non-pad) rows.
+        device: Device for computation.
+
+    Returns:
+        Tensor of metrics [N_metrics, N_models, N_networks, N_params, B_folds, N_runs]
+    """
+    if task_type == TaskType.regression:
+        evaluator = FastCPMMetrics(device=device)
+    elif task_type == TaskType.classification:
+        evaluator = FastCPMClassificationMetrics(device=device)
+    else:
+        raise ValueError(f"Unknown task_type: {task_type}")
+    return evaluator.score_batched(y_true, y_pred, valid_mask=valid_mask)

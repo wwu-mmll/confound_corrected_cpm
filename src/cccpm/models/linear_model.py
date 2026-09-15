@@ -221,6 +221,194 @@ class LinearCPM:
         else:
             return self.predict(X, covariates)
 
+    # --- Batched-over-params-and-folds fit/predict ---
+    #
+    # `fit()`/`predict()` above are left untouched and remain the code path
+    # used whenever B_params == B_folds == 1 (today's exact per-fold,
+    # per-param loop). `fit_batched()`/`predict_batched()` below are used
+    # only when folds and/or params are actually batched (self.edges is 5D
+    # instead of 3D): they solve the SAME linear models via the SAME
+    # `_solve_batched_fast`/`_solve_batched_logistic`/`_pred_batched`
+    # helpers, generalised with extra broadcastable batch dims and an
+    # explicit `row_mask` so zero-padded rows (see utils.build_fold_batch)
+    # never corrupt the fit.
+
+    def fit_batched(self, X, y, covariates, valid_mask=None):
+        """
+        Batched-over-params-and-folds version of `fit()`.
+
+        Requires `self.edges` shape [N_features, 2, B_params, B_folds, N_perms]
+        (5D -- use `fit()` for the plain 3D [N_features, 2, N_perms] case).
+        Mathematically identical to calling `fit()` once per (param, fold)
+        pair with that fold's real (unpadded) rows and that param's edge
+        mask; zero-padding is kept inert via the row_mask discipline
+        documented on `_solve_batched_fast`.
+
+        Args:
+            X: [B_folds, N, N_features] -- padded fold-batch (utils.build_fold_batch).
+            y: [B_folds, N, N_perms] -- padded fold-batch.
+            covariates: [B_folds, N, N_cov] -- padded fold-batch.
+            valid_mask: optional [B_folds, N] bool; True on real (non-pad)
+                        rows. Defaults to all-True (no padding).
+        """
+        X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
+        y = torch.as_tensor(y, device=self.device, dtype=torch.float32)
+        cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
+
+        B_folds, N, n_cov = cov.shape
+        n_features, _, B_params, edges_folds, n_perms = self.edges.shape
+        if edges_folds != B_folds or n_perms != y.shape[-1]:
+            raise ValueError(
+                f"self.edges folds/perms ({edges_folds}, {n_perms}) must match "
+                f"X/y's folds/perms ({B_folds}, {y.shape[-1]})")
+        P, B, R = B_params, B_folds, n_perms
+
+        if valid_mask is None:
+            valid_mask = torch.ones(B_folds, N, dtype=torch.bool, device=self.device)
+        row_mask = valid_mask.to(X.dtype)  # [B, N]
+
+        # 1. Network strengths: combine per-fold X with per-(param,fold,perm)
+        #    edges via einsum -> [P, B, R, N].
+        edges_pos = self.edges[:, Networks.positive].float()  # [F, P, B, R]
+        edges_neg = self.edges[:, Networks.negative].float()
+        pos_str = torch.einsum('bnf,fpbr->pbrn', X, edges_pos)
+        neg_str = torch.einsum('bnf,fpbr->pbrn', X, edges_neg)
+
+        row_mask_pbrn = row_mask.view(1, B, 1, N)
+        pos_str = pos_str * row_mask_pbrn
+        neg_str = neg_str * row_mask_pbrn
+
+        cov_b = cov.view(1, B, 1, N, n_cov).expand(P, B, R, N, n_cov)
+        row_mask_b = row_mask.view(1, B, 1, N).expand(P, B, R, N)
+
+        solve_batched = (self._solve_batched_logistic if self.task_type == TaskType.classification
+                         else self._solve_batched_fast)
+
+        # 2. Residualisers (strength ~ covariates), batched over (P, B, R).
+        pos_str_col = pos_str.unsqueeze(-1)  # [P, B, R, N, 1]
+        neg_str_col = neg_str.unsqueeze(-1)
+        self.resid_models['pos'] = self._solve_batched_fast(cov_b, pos_str_col, row_mask=row_mask_b)
+        self.resid_models['neg'] = self._solve_batched_fast(cov_b, neg_str_col, row_mask=row_mask_b)
+
+        pos_resid = pos_str - self._pred_batched(cov_b, self.resid_models['pos'], row_mask=row_mask_b).squeeze(-1)
+        neg_resid = neg_str - self._pred_batched(cov_b, self.resid_models['neg'], row_mask=row_mask_b).squeeze(-1)
+        pos_resid = pos_resid * row_mask_pbrn
+        neg_resid = neg_resid * row_mask_pbrn
+
+        feats = {
+            'positive': {'conn': pos_str, 'resid': pos_resid},
+            'negative': {'conn': neg_str, 'resid': neg_resid},
+            'both': {'conn': torch.stack([pos_str, neg_str], dim=-1),    # [P, B, R, N, 2]
+                     'resid': torch.stack([pos_resid, neg_resid], dim=-1)}
+        }
+
+        # 3. Covariates-only model (y ~ covariates). Genuinely param-independent
+        #    (no edges involved), so it is solved once per (fold, perm) and the
+        #    result is broadcast across params rather than recomputed P times.
+        y_fr = y.permute(0, 2, 1)                                  # [B, R, N]
+        cov_fr = cov.unsqueeze(1).expand(B, R, N, n_cov)
+        row_mask_fr = row_mask.view(B, 1, N).expand(B, R, N)
+        covariates_beta = solve_batched(cov_fr, y_fr.unsqueeze(-1), row_mask=row_mask_fr)  # [B, R, C+1, 1]
+        self.coefs['covariates'] = covariates_beta.unsqueeze(0).expand(P, B, R, n_cov + 1, 1)
+
+        y_batch = y_fr.unsqueeze(0).expand(P, B, R, N).unsqueeze(-1)  # [P, B, R, N, 1]
+
+        for net in ['positive', 'negative', 'both']:
+            X_conn = feats[net]['conn']
+            X_resid = feats[net]['resid']
+            if X_conn.dim() == 4:  # [P,B,R,N] -> [P,B,R,N,1]
+                X_conn = X_conn.unsqueeze(-1)
+                X_resid = X_resid.unsqueeze(-1)
+            X_full = torch.cat([X_conn, cov_b], dim=-1)
+
+            self.coefs[f'connectome_{net}'] = solve_batched(X_conn, y_batch, row_mask=row_mask_b)
+            self.coefs[f'residuals_{net}'] = solve_batched(X_resid, y_batch, row_mask=row_mask_b)
+            self.coefs[f'full_{net}'] = solve_batched(X_full, y_batch, row_mask=row_mask_b)
+
+        return self
+
+    def predict_batched(self, X, covariates, valid_mask=None, return_proba=False):
+        """
+        Batched-over-params-and-folds version of `predict()`. See `fit_batched`.
+
+        Args:
+            X: [B_folds, N, N_features] -- padded fold-batch (test rows).
+            covariates: [B_folds, N, N_cov] -- padded fold-batch.
+            valid_mask: optional [B_folds, N] bool. Padded rows still get a
+                        (meaningless) prediction value -- callers must ignore
+                        them using the same valid_mask, exactly as they must
+                        already ignore padded rows in scoring/storage.
+            return_proba: as in `predict()`.
+
+        Returns:
+            Tensor [N, N_models, N_networks, B_params, B_folds, N_perms].
+        """
+        X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
+        cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
+
+        B_folds, N, n_cov = cov.shape
+        n_features, _, B_params, edges_folds, n_perms = self.edges.shape
+        P, B, R = B_params, B_folds, n_perms
+
+        if valid_mask is None:
+            valid_mask = torch.ones(B_folds, N, dtype=torch.bool, device=self.device)
+        row_mask = valid_mask.to(X.dtype)
+
+        predictions = torch.zeros(N, len(Models), len(Networks), P, B, R,
+                                  device=self.device, dtype=torch.float32)
+
+        edges_pos = self.edges[:, Networks.positive].float()
+        edges_neg = self.edges[:, Networks.negative].float()
+        pos_str = torch.einsum('bnf,fpbr->pbrn', X, edges_pos)
+        neg_str = torch.einsum('bnf,fpbr->pbrn', X, edges_neg)
+        row_mask_pbrn = row_mask.view(1, B, 1, N)
+        pos_str = pos_str * row_mask_pbrn
+        neg_str = neg_str * row_mask_pbrn
+
+        cov_b = cov.view(1, B, 1, N, n_cov).expand(P, B, R, N, n_cov)
+        row_mask_b = row_mask.view(1, B, 1, N).expand(P, B, R, N)
+
+        pos_resid = pos_str - self._pred_batched(cov_b, self.resid_models['pos'], row_mask=row_mask_b).squeeze(-1)
+        neg_resid = neg_str - self._pred_batched(cov_b, self.resid_models['neg'], row_mask=row_mask_b).squeeze(-1)
+        pos_resid = pos_resid * row_mask_pbrn
+        neg_resid = neg_resid * row_mask_pbrn
+
+        # Covariates model: param-independent, computed once (see fit_batched) and broadcast.
+        cov_fr = cov.unsqueeze(1).expand(B, R, N, n_cov)
+        row_mask_fr = row_mask.view(B, 1, N).expand(B, R, N)
+        covariates_pred = self._pred_batched(cov_fr, self.coefs['covariates'][0], row_mask=row_mask_fr)  # [B,R,N,1]
+        covariates_pred = covariates_pred.squeeze(-1).permute(2, 0, 1)  # [N, B, R]
+        predictions[:, Models.covariates, :, :, :, :] = (
+            covariates_pred.view(N, 1, 1, B, R).expand(N, len(Networks), P, B, R))
+
+        networks = [
+            (Networks.positive, pos_str, pos_resid),
+            (Networks.negative, neg_str, neg_resid),
+            (Networks.both, torch.stack([pos_str, neg_str], dim=-1),
+             torch.stack([pos_resid, neg_resid], dim=-1)),
+        ]
+
+        for net_idx, conn_strength, resid_strength in networks:
+            X_conn = conn_strength if conn_strength.dim() == 5 else conn_strength.unsqueeze(-1)
+            X_resid = resid_strength if resid_strength.dim() == 5 else resid_strength.unsqueeze(-1)
+            X_full = torch.cat([X_conn, cov_b], dim=-1)
+
+            pred_conn = self._pred_batched(X_conn, self.coefs[f'connectome_{net_idx.name}'], row_mask=row_mask_b)
+            pred_resid = self._pred_batched(X_resid, self.coefs[f'residuals_{net_idx.name}'], row_mask=row_mask_b)
+            pred_full = self._pred_batched(X_full, self.coefs[f'full_{net_idx.name}'], row_mask=row_mask_b)
+
+            # pred_*: [P, B, R, N, 1] -> [N, P, B, R]
+            predictions[:, Models.connectome, net_idx, :, :, :] = pred_conn.squeeze(-1).permute(3, 0, 1, 2)
+            predictions[:, Models.residuals, net_idx, :, :, :] = pred_resid.squeeze(-1).permute(3, 0, 1, 2)
+            predictions[:, Models.full, net_idx, :, :, :] = pred_full.squeeze(-1).permute(3, 0, 1, 2)
+
+        if self.task_type == TaskType.classification:
+            predictions = torch.sigmoid(predictions)
+            if not return_proba:
+                predictions = (predictions > 0.5).float()
+
+        return predictions
+
     # --- SOLVERS ---
 
     # --- Logistic Regression (IRLS) ---
@@ -274,33 +462,50 @@ class LinearCPM:
         # Reshape back to [F+1, P]
         return beta.squeeze(2).t()
 
-    def _solve_batched_logistic(self, X, y, max_iter=25, tol=1e-6):
+    def _solve_batched_logistic(self, X, y, row_mask=None, max_iter=25, tol=1e-6):
         """
         Logistic regression via IRLS for batched inputs.
-        X: [P, N, F], y: [P, N, 1] -> Beta: [P, F+1, 1]
+        X: [..., N, F], y: [..., N, 1] -> Beta: [..., F+1, 1]
+        `...` may be zero or more broadcastable leading batch dims (just
+        perms, as in `fit()`, or params/folds/perms when batching those too
+        via `fit_batched()`).
+
+        row_mask: optional [..., N, 1] (broadcastable), 1 on real rows, 0 on
+                  padded rows (see `_solve_batched_fast`). Zeroing padded
+                  rows via X's own zero-padding is NOT sufficient here
+                  (sigmoid(0) = 0.5 != 0, so a padded row would otherwise get
+                  non-zero IRLS weight) -- padded rows are explicitly masked
+                  out of the weights every iteration instead.
         """
-        P, N, F = X.shape
-        ones = torch.ones(P, N, 1, device=self.device, dtype=X.dtype)
-        X_design = torch.cat([ones, X], dim=2)  # [P, N, F+1]
+        if row_mask is None:
+            ones = torch.ones(*X.shape[:-1], 1, device=self.device, dtype=X.dtype)
+            mask = ones
+        else:
+            mask = row_mask.to(X.dtype)
+            if mask.dim() < X.dim():
+                mask = mask.unsqueeze(-1)
+            mask = mask.expand(*X.shape[:-1], 1)
+            ones = mask
+        X_design = torch.cat([ones, X], dim=-1)  # [..., N, F+1]
 
         # Initialize with OLS solution
-        beta = self._solve_batched_fast(X, y)  # [P, F+1, 1]
+        beta = self._solve_batched_fast(X, y, row_mask=row_mask)  # [..., F+1, 1]
 
         for _ in range(max_iter):
-            logits = torch.bmm(X_design, beta)  # [P, N, 1]
+            logits = torch.matmul(X_design, beta)  # [..., N, 1]
             p = torch.sigmoid(logits)
 
-            W = (p * (1 - p)).clamp(min=1e-8)  # [P, N, 1]
+            W = (p * (1 - p)).clamp(min=1e-8) * mask  # [..., N, 1], 0 on padded rows
 
-            z = logits + (y - p) / W  # [P, N, 1]
+            z = logits + (y - p) / W.clamp(min=1e-8)  # [..., N, 1]
 
             sqrt_W = torch.sqrt(W)
-            X_w = X_design * sqrt_W  # [P, N, F+1]
-            z_w = z * sqrt_W  # [P, N, 1]
+            X_w = X_design * sqrt_W  # [..., N, F+1]
+            z_w = z * sqrt_W  # [..., N, 1]
 
-            XtX = torch.bmm(X_w.transpose(1, 2), X_w)
+            XtX = torch.matmul(X_w.transpose(-1, -2), X_w)
             XtX.diagonal(dim1=-2, dim2=-1).add_(1e-8)
-            Xtz = torch.bmm(X_w.transpose(1, 2), z_w)
+            Xtz = torch.matmul(X_w.transpose(-1, -2), z_w)
 
             beta_new = torch.linalg.solve(XtX, Xtz)
 
@@ -332,26 +537,51 @@ class LinearCPM:
         X_design = torch.cat([ones, X], dim=1)
         return X_design @ beta
 
-    def _solve_batched_fast(self, X, y):
+    def _solve_batched_fast(self, X, y, row_mask=None):
         """
-        Fast Batched Solver (Unique X per perm).
-        X: [P, N, F], y: [P, N, 1] -> Beta: [P, F+1, 1]
-        """
-        P, N, F = X.shape
-        ones = torch.ones(P, N, 1, device=self.device, dtype=X.dtype)
-        X_design = torch.cat([ones, X], dim=2)  # [P, N, F+1]
+        Fast Batched Solver (unique X per batch element).
+        X: [..., N, F], y: [..., N, 1] -> Beta: [..., F+1, 1]
+        `...` may be zero or more broadcastable leading batch dims (just
+        perms, as in `fit()`, or params/folds/perms when batching those too
+        via `fit_batched()`).
 
-        XtX = torch.bmm(X_design.transpose(1, 2), X_design)
+        row_mask: optional [..., N] or [..., N, 1] (broadcastable to X's
+                  batch+sample shape), 1 on real rows, 0 on padded rows.
+                  Used AS the intercept column instead of a blanket 1, so a
+                  padded row's design-matrix row is exactly zero and
+                  contributes nothing to X^T X / X^T y (see
+                  edge_selection.get_residuals_batched for why zero-row
+                  padding is exact for this normal-equations OLS). `X`'s own
+                  feature columns must already be zero on padded rows too
+                  (the caller is responsible for that, e.g. via masked
+                  strength/einsum computation).
+        """
+        if row_mask is None:
+            ones = torch.ones(*X.shape[:-1], 1, device=self.device, dtype=X.dtype)
+        else:
+            ones = row_mask.to(X.dtype)
+            if ones.dim() < X.dim():
+                ones = ones.unsqueeze(-1)
+            ones = ones.expand(*X.shape[:-1], 1)
+        X_design = torch.cat([ones, X], dim=-1)  # [..., N, F+1]
+
+        XtX = torch.matmul(X_design.transpose(-1, -2), X_design)
         XtX.diagonal(dim1=-2, dim2=-1).add_(1e-8)
-        Xty = torch.bmm(X_design.transpose(1, 2), y)
+        Xty = torch.matmul(X_design.transpose(-1, -2), y)
 
         return torch.linalg.solve(XtX, Xty)
 
-    def _pred_batched(self, X, beta):
-        P, N, F = X.shape
-        ones = torch.ones(P, N, 1, device=self.device, dtype=X.dtype)
-        X_design = torch.cat([ones, X], dim=2)
-        return torch.bmm(X_design, beta)
+    def _pred_batched(self, X, beta, row_mask=None):
+        """X: [..., N, F], beta: [..., F+1, 1] -> [..., N, 1]. See `_solve_batched_fast`."""
+        if row_mask is None:
+            ones = torch.ones(*X.shape[:-1], 1, device=self.device, dtype=X.dtype)
+        else:
+            ones = row_mask.to(X.dtype)
+            if ones.dim() < X.dim():
+                ones = ones.unsqueeze(-1)
+            ones = ones.expand(*X.shape[:-1], 1)
+        X_design = torch.cat([ones, X], dim=-1)
+        return torch.matmul(X_design, beta)
 
     def get_network_strengths(self, X: np.ndarray, covariates: np.ndarray):
         """

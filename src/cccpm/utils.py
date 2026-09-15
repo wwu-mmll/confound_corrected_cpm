@@ -97,6 +97,120 @@ def validate_task_type(y, task_type):
 def train_test_split(train, test, X, y, covariates):
     return X[train], X[test], y[train], y[test], covariates[train], covariates[test]
 
+def torch_train_test_split(train, test, X, y, covariates):
+    """Wie utils.train_test_split, aber X/y/covariates sind bereits GPU-Tensoren."""
+    train_idx = torch.as_tensor(train, device=X.device)
+    test_idx = torch.as_tensor(test, device=X.device)
+    return (X[train_idx], X[test_idx], y[train_idx], y[test_idx],
+            covariates[train_idx], covariates[test_idx])
+
+
+class FoldBatch:
+    """
+    B folds' train/test splits, stacked into padded batch tensors.
+
+    Real (train/test) sample counts differ per fold (ragged CV splits), so
+    each fold's rows are padded with zeros up to the batch max and a boolean
+    validity mask marks which rows are real. All returned train/test tensors
+    are already zero-masked (padded rows are exactly 0).
+
+    Attributes
+    ----------
+    X_train, y_train, cov_train : [B, N_train_max, ...]
+    train_valid : [B, N_train_max] bool
+    n_train : [B] int64, real (unpadded) training sample count per fold
+    X_test, y_test, cov_test : [B, N_test_max, ...]
+    test_valid : [B, N_test_max] bool
+    n_test : [B] int64, real (unpadded) test sample count per fold
+    """
+    def __init__(self, X_train, y_train, cov_train, train_valid, n_train,
+                 X_test, y_test, cov_test, test_valid, n_test):
+        self.X_train = X_train
+        self.y_train = y_train
+        self.cov_train = cov_train
+        self.train_valid = train_valid
+        self.n_train = n_train
+        self.X_test = X_test
+        self.y_test = y_test
+        self.cov_test = cov_test
+        self.test_valid = test_valid
+        self.n_test = n_test
+
+
+def _padded_index_matrix(idx_arrays, n_max):
+    """CPU/numpy: ragged list of 1D index arrays -> padded [B, n_max] index
+    matrix (pad value 0, harmless since padded rows get zero-masked after
+    gathering) + boolean [B, n_max] validity mask."""
+    B = len(idx_arrays)
+    idx_matrix = np.zeros((B, n_max), dtype=np.int64)
+    valid = np.zeros((B, n_max), dtype=bool)
+    for b, idx in enumerate(idx_arrays):
+        n = len(idx)
+        idx_matrix[b, :n] = idx
+        valid[b, :n] = True
+    return idx_matrix, valid
+
+
+def build_fold_batch(X, y, covariates, splits):
+    """
+    Stack B folds' train/test splits into padded batch tensors + validity
+    masks, so a batch of folds with different (ragged) sizes can be
+    processed by ONE batched torch op instead of one call per fold.
+
+    Padded rows are exactly 0 in every returned tensor. Any downstream
+    operation that could turn a zero row non-zero (mean-centring, rank
+    transforms, residualisation, ...) MUST re-multiply by the corresponding
+    valid mask afterwards, or padded rows will corrupt sums/matmuls.
+
+    Args:
+        X, y, covariates: full-dataset tensors [N_total, ...], already on
+                           the target device.
+        splits: list of B (train_idx, test_idx) index-array pairs, as
+                yielded by a sklearn CV splitter's .split().
+
+    Returns:
+        FoldBatch.
+    """
+    device = X.device
+    train_idxs = [np.asarray(tr) for tr, _ in splits]
+    test_idxs = [np.asarray(te) for _, te in splits]
+
+    n_train_max = max(len(a) for a in train_idxs)
+    n_test_max = max(len(a) for a in test_idxs)
+
+    train_idx_np, train_valid_np = _padded_index_matrix(train_idxs, n_train_max)
+    test_idx_np, test_valid_np = _padded_index_matrix(test_idxs, n_test_max)
+
+    train_idx = torch.as_tensor(train_idx_np, device=device)
+    test_idx = torch.as_tensor(test_idx_np, device=device)
+    train_valid = torch.as_tensor(train_valid_np, device=device)
+    test_valid = torch.as_tensor(test_valid_np, device=device)
+    n_train = torch.as_tensor([len(a) for a in train_idxs], device=device, dtype=torch.long)
+    n_test = torch.as_tensor([len(a) for a in test_idxs], device=device, dtype=torch.long)
+
+    def _gather_and_mask(source, idx, valid):
+        gathered = source[idx]  # [B, N_max, *F]
+        mask_shape = valid.shape + (1,) * (gathered.dim() - valid.dim())
+        valid_b = valid.view(mask_shape).expand_as(gathered)
+        # torch.where, not gathered * mask: the pad-index row (index 0) can
+        # itself contain NaN (e.g. missing data pre-imputation), and
+        # NaN * 0 == NaN, not 0 -- multiplying would leave NaN in padded
+        # positions instead of zeroing them.
+        return torch.where(valid_b, gathered, torch.zeros((), dtype=gathered.dtype, device=gathered.device))
+
+    X_train = _gather_and_mask(X, train_idx, train_valid)
+    y_train = _gather_and_mask(y, train_idx, train_valid)
+    cov_train = _gather_and_mask(covariates, train_idx, train_valid)
+
+    X_test = _gather_and_mask(X, test_idx, test_valid)
+    y_test = _gather_and_mask(y, test_idx, test_valid)
+    cov_test = _gather_and_mask(covariates, test_idx, test_valid)
+
+    return FoldBatch(X_train=X_train, y_train=y_train, cov_train=cov_train,
+                      train_valid=train_valid, n_train=n_train,
+                      X_test=X_test, y_test=y_test, cov_test=cov_test,
+                      test_valid=test_valid, n_test=n_test)
+
 
 def matrix_to_vector_3d(matrix_3d):
     """
@@ -429,9 +543,111 @@ def impute_missing_values(X_train, X_test, cov_train, cov_test):
     cov_test = cov_imputer.transform(cov_test)
     return X_train, X_test, cov_train, cov_test
 
+def torch_impute_missing_values(X_train, X_test, cov_train, cov_test):
+    def _impute(train, test):
+        train = torch.as_tensor(train, dtype=torch.float32)
+        test = torch.as_tensor(test, dtype=torch.float32)
+        col_mean = torch.nanmean(train, dim=0)
+        col_mean = torch.nan_to_num(col_mean, nan=0.0)
+        train_filled = torch.where(torch.isnan(train), col_mean.unsqueeze(0), train)
+        test_filled = torch.where(torch.isnan(test), col_mean.unsqueeze(0), test)
+        return train_filled, test_filled
+
+    X_train, X_test = _impute(X_train, X_test)
+    cov_train, cov_test = _impute(cov_train, cov_test)
+    return X_train, X_test, cov_train, cov_test
+
+
+def torch_impute_missing_values_batched(X_train, X_test, cov_train, cov_test, valid_mask):
+    """
+    Batched-over-folds version of `torch_impute_missing_values` for
+    zero-padded fold batches (see `build_fold_batch`). Padded rows are
+    excluded from each fold's per-column training mean (they are structural
+    padding, not missing data) and are left untouched (already 0) in the
+    output -- `torch.isnan` is False for them, so `torch.where` never
+    replaces them.
+
+    Args:
+        X_train, cov_train: [B, N_train_max, F] -- padded; real NaNs may
+                             still be present within valid rows.
+        X_test, cov_test: [B, N_test_max, F] -- padded.
+        valid_mask: [B, N_train_max] bool -- True on real (non-pad) train rows.
+
+    Returns:
+        X_train, X_test, cov_train, cov_test with NaNs filled by each fold's
+        own (mask-restricted) per-column training mean.
+    """
+    def _impute(train, test):
+        train = torch.as_tensor(train, dtype=torch.float32)
+        test = torch.as_tensor(test, dtype=torch.float32)
+        row_mask = valid_mask.to(train.dtype).unsqueeze(-1)               # [B, N_train_max, 1]
+        not_nan = (~torch.isnan(train)).to(train.dtype)                    # [B, N_train_max, F]
+        combined = row_mask * not_nan
+        train_zero_nan = torch.nan_to_num(train, nan=0.0)
+        col_sum = (train_zero_nan * combined).sum(dim=1)                   # [B, F]
+        col_count = combined.sum(dim=1).clamp(min=1)                       # [B, F]
+        col_mean = (col_sum / col_count).unsqueeze(1)                      # [B, 1, F]
+
+        train_filled = torch.where(torch.isnan(train), col_mean.expand_as(train), train)
+        test_filled = torch.where(torch.isnan(test), col_mean.expand(-1, test.shape[1], -1), test)
+        return train_filled, test_filled
+
+    X_train, X_test = _impute(X_train, X_test)
+    cov_train, cov_test = _impute(cov_train, cov_test)
+    return X_train, X_test, cov_train, cov_test
+
+
+def residualize_train_test(X_train, X_test, confounds_train, confounds_test):
+    """
+    Regress X ~ intercept + confounds via OLS on the training set only, then
+    subtract the fitted values from both train and test (residualizing test
+    with the train-fit model, never fitting on test data). Pure torch,
+    dtype/device-agnostic (works equally on CPU or GPU tensors) -- same
+    closed-form pseudo-inverse approach as edge_selection.get_residuals,
+    generalized to the fit-on-train/apply-to-both split CPMAnalysis needs
+    for its `calculate_residuals` option.
+
+    Args:
+        X_train, X_test: [N_train, F], [N_test, F].
+        confounds_train, confounds_test: [N_train, C], [N_test, C].
+
+    Returns:
+        X_train_resid, X_test_resid: same shapes as X_train, X_test.
+    """
+    dtype = X_train.dtype
+    device = X_train.device
+    confounds_train = torch.as_tensor(confounds_train, dtype=dtype, device=device)
+    confounds_test = torch.as_tensor(confounds_test, dtype=dtype, device=device)
+
+    ones_train = torch.ones(confounds_train.shape[0], 1, dtype=dtype, device=device)
+    ones_test = torch.ones(confounds_test.shape[0], 1, dtype=dtype, device=device)
+    Z_train = torch.cat([ones_train, confounds_train], dim=1)
+    Z_test = torch.cat([ones_test, confounds_test], dim=1)
+
+    Z_pinv = torch.linalg.pinv(Z_train)
+    beta = torch.matmul(Z_pinv, X_train)
+
+    X_train_resid = X_train - torch.matmul(Z_train, beta)
+    X_test_resid = X_test - torch.matmul(Z_test, beta)
+    return X_train_resid, X_test_resid
+
+
 def select_stable_edges(stability_edges, stability_threshold):
-    return {'positive': np.where(stability_edges['positive'] > stability_threshold)[0],
-            'negative': np.where(stability_edges['negative'] > stability_threshold)[0]}
+    """
+    Threshold per-edge selection stability into a boolean edge mask.
+
+    Args:
+        stability_edges: Tensor [N_features, 2, N_runs] (fraction of folds each
+                          edge was selected in; dim 1 = [Positive, Negative]),
+                          as returned by ResultsManager.calculate_edge_stability.
+        stability_threshold: float; edges selected in more than this fraction
+                              of folds are kept.
+
+    Returns:
+        Boolean tensor [N_features, 2, N_runs], same convention as every other
+        edge mask in the pipeline (e.g. PThreshold.select's return value).
+    """
+    return stability_edges > stability_threshold
 
 
 def generate_data_insights(X, y, covariates, results_directory):

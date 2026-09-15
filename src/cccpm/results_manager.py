@@ -90,50 +90,92 @@ class ResultsManager:
         self.cv_network_strengths = pd.DataFrame()
         self.agg_results = None
 
-    def store_edges(self, param_idx: int, fold_idx: int, edges_tensor):
+    @staticmethod
+    def estimate_slice_bytes(n_features: int, n_params: int, n_folds: int, n_runs: int) -> int:
         """
-        Stores the edge masks for Positive and Negative networks.
+        Bytes needed, on the COMPUTE DEVICE, for a `[..., n_params, n_folds,
+        n_runs]`-shaped slice of `self.results` (float32) -- using the exact
+        same shape formula as the tensor allocated in `__init__`. Shared with
+        `batch_planning.py` so the byte-size arithmetic is defined once.
+
+        Edge bookkeeping (`cv_edges`/`cv_edge_sum`) is intentionally excluded:
+        it always lives on the CPU (`self.edge_device`), never on the compute
+        device, so it doesn't count against the GPU/CPU compute-device memory
+        budget batch_planning checks.
+        """
+        return len(Metrics) * len(Models) * len(Networks) * n_params * n_folds * n_runs * 4
+
+    def store_edges(self, param_idx, fold_idx, edges_tensor, run_idx=slice(None)):
+        """
+        Stores the edge masks for Positive and Negative networks: moves the
+        mask to the CPU edge store (frees VRAM) and accumulates the fold-sum
+        used for stability. The per-fold mask itself is retained only when
+        this manager was built with store_fold_edges=True.
 
         Args:
-            param_idx: Index of current parameter.
-            fold_idx: Index of current fold.
-            edges_tensor: Boolean Tensor of shape [Features, 2, Runs].
+            param_idx: Index (int or slice) of current parameter(s).
+            fold_idx: Index (int or slice) of current fold(s).
+            edges_tensor: Boolean Tensor of shape [Features, 2, (Params,) (Folds,) Runs],
+                          matching whatever param_idx/fold_idx/run_idx slice out.
                           Dimension 1 must correspond to [Positive, Negative].
+            run_idx: Index (int or slice) of current run(s)/permutation(s).
+                     Defaults to every run (today's behaviour).
         """
-        # Move the mask to the CPU edge store (frees VRAM) and accumulate the
-        # fold-sum used for stability. Retain the per-fold mask only when needed.
-        mask = torch.as_tensor(edges_tensor, dtype=torch.bool).to(self.edge_device)
-        self.cv_edge_sum[:, :, param_idx, :] += mask.float()
+        mask = torch.as_tensor(edges_tensor, dtype=torch.bool, device=self.edge_device)
+
         if self.cv_edges is not None:
-            self.cv_edges[:, :, param_idx, fold_idx, :] = mask
+            self.cv_edges[:, :, param_idx, fold_idx, run_idx] = mask
+
+        # cv_edge_sum has no folds axis, so any folds axis present in `mask`
+        # must be summed out before accumulating. `mask`'s axis layout mirrors
+        # cv_edges[:, :, param_idx, fold_idx, run_idx] positionally: Features,
+        # Network, then Params (present unless param_idx is an int, which
+        # collapses it), then Folds (present unless fold_idx is an int).
+        # fold_idx is a plain int only for the single-fold-at-a-time (non-batched)
+        # call pattern, in which case there's no folds axis to sum at all.
+        if isinstance(fold_idx, int):
+            fold_sum = mask.float()
+        else:
+            fold_axis = 2 + (0 if isinstance(param_idx, int) else 1)
+            fold_sum = mask.float().sum(dim=fold_axis)
+        self.cv_edge_sum[:, :, param_idx, run_idx] += fold_sum
 
 
-    def store_metrics(self, param_idx: int, fold_idx: int, metrics_tensor: torch.Tensor):
+    def store_metrics(self, param_idx, fold_idx, metrics_tensor: torch.Tensor, run_idx=slice(None)):
         """
         Stores a batch of metrics returned by FastCPMMetrics.
 
         Args:
-            param_idx: Index of the current parameter configuration.
-            fold_idx: Index of the current CV fold.
-            metrics_tensor: 4D Tensor [Metrics, Models, Networks, Runs]
+            param_idx: Index (int or slice) of the current parameter configuration(s).
+            fold_idx: Index (int or slice) of the current CV fold(s).
+            metrics_tensor: Tensor [Metrics, Models, Networks, (Params,) (Folds,) Runs],
+                            matching whatever param_idx/fold_idx/run_idx slice out.
+            run_idx: Index (int or slice) of the current run(s)/permutation(s).
+                     Defaults to every run (today's behaviour).
         """
-        # We assign the entire 4D block into the 6D tensor at the specific param/fold slice.
+        # We assign the entire block into the 6D tensor at the specific param/fold/run slice.
         # This replaces the need for nested loops.
 
-        # Destination slice: [:, :, :, param_idx, fold_idx, :]
-        # Source shape:      [Metrics, Models, Networks, Runs]
-        self.results[:, :, :, param_idx, fold_idx, :] = metrics_tensor.cpu()
+        # Destination slice: [:, :, :, param_idx, fold_idx, run_idx]
+        # Source shape:      [Metrics, Models, Networks, (Params,) (Folds,) Runs]
+        self.results[:, :, :, param_idx, fold_idx, run_idx] = metrics_tensor.to(self.results.device)
 
-    def calculate_edge_stability(self, write: bool = True, best_param_id: int = None):
+    def calculate_edge_stability(self, write: bool = True, best_param_id=None):
         """
         Calculate and save edge stability.
 
-        Stability is the fraction of outer folds in which each edge was selected,
         for the chosen hyperparameter of each run — read straight from the CPU
-        fold-sum accumulator. ``stability_edges.npy`` (``[Nodes, Nodes, 2, Runs]``)
-        is always written; the per-fold ``edges.npy`` is written only when this
-        manager retained the per-fold masks (the real run — see
-        ``store_fold_edges``). Both node×node arrays are built on the CPU.
+        fold-sum accumulator (``cv_edge_sum``), so this never touches the compute
+        device. ``stability_edges.npy`` (``[Nodes, Nodes, 2, Runs]``) is always
+        written; the per-fold ``edges.npy`` is written only when this manager
+        retained the per-fold masks (the real run — see ``store_fold_edges``).
+        Both node×node arrays are built on the CPU.
+
+        Args:
+            write: whether to save the .npy files.
+            best_param_id: None (assume param index 0 for every run), a single
+                           int/0-d tensor (same param for every run), or an
+                           array-like of length n_runs (one winning param per run).
         """
         n_runs = self.dims['runs']
         if best_param_id is None:
@@ -165,7 +207,7 @@ class ResultsManager:
 
     def store_predictions(self, y_pred, y_true, fold, test_indices, repeat=0):
         y_pred = y_pred.detach().cpu().numpy().squeeze(-1)
-        y_true = y_true.reshape(-1)
+        y_true = torch.as_tensor(y_true).detach().cpu().numpy().reshape(-1)
 
         batch_size = y_pred.shape[0]
         n_models = len(Models)
@@ -203,13 +245,14 @@ class ResultsManager:
 
 
     def store_network_strengths(self, network_strengths, y_true, fold, test_indices=None, repeat=0):
+        y_true = torch.as_tensor(y_true).detach().cpu().numpy().squeeze()
         # Use a list comprehension to build data more concisely. ``sample_index``
         # and ``repeat`` let a subject's network strengths be averaged across the
         # repeats of a RepeatedKFold (see ``store_predictions``).
         data = [
             pd.DataFrame({
                 'sample_index': test_indices,
-                'y_true': y_true.squeeze(),
+                'y_true': y_true,
                 'network_strength': np.squeeze(network_strengths[m][n].cpu().numpy()),
                 'model': m,
                 'network': n,
@@ -237,13 +280,17 @@ class ResultsManager:
 
     def save_predictions(self):
         """
-        Save predictions to CSV, sorted by subject index. This is the single
+        Save predictions to CSV, sorted by sample index. This is the single
         writer of ``cv_predictions.csv`` (``calculate_final_cv_results`` only
         concatenates the per-fold frames into ``self.cv_predictions``).
         """
-        df = self.cv_predictions.copy()
-        df.sort_values(by='sample_index', inplace=True)
-        df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'))
+        if isinstance(self.cv_predictions, list):
+            if not self.cv_predictions:
+                return
+            self.cv_predictions = pd.concat(self.cv_predictions, ignore_index=True)
+
+        df = self.cv_predictions.sort_values(by='sample_index')
+        df.to_csv(os.path.join(self.results_directory, 'cv_predictions.csv'), index=False)
 
     def save_network_strengths(self):
         """

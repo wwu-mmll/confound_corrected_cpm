@@ -110,8 +110,11 @@ class TestStoreAndRetrieve:
         assert os.path.exists(os.path.join(str(tmp_path), 'stability_edges.npy'))
 
     def test_stability_without_fold_edges(self, tmp_path):
-        """With store_fold_edges=False (permutation pass) stability is still
-        computed from the fold-sum accumulator, but no per-fold masks are kept
+        """With store_fold_edges=False (permutation / inner-CV passes) stability
+        is still computed correctly from the CPU fold-sum accumulator, but no
+        per-fold masks are kept (this is the CUDA-OOM fix: a persistent
+        [Features, 2, Folds, Runs] tensor on the compute device was the source
+        of the OOM for large parcellations × many folds × many permutations)
         and edges.npy is not written (only stability_edges.npy)."""
         n_features, n_folds = 6, 3
         mgr = ResultsManager(
@@ -119,6 +122,7 @@ class TestStoreAndRetrieve:
             n_features=n_features, store_fold_edges=False,
         )
         assert mgr.cv_edges is None  # per-fold masks not retained
+        assert mgr.cv_edge_sum.device == torch.device('cpu')
 
         for fold in range(n_folds):
             edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
@@ -133,6 +137,37 @@ class TestStoreAndRetrieve:
 
         assert os.path.exists(os.path.join(str(tmp_path), 'stability_edges.npy'))
         assert not os.path.exists(os.path.join(str(tmp_path), 'edges.npy'))
+
+    def test_cv_edges_and_edge_sum_stay_on_cpu_regardless_of_compute_device(self, tmp_path):
+        """Edge bookkeeping must never be allocated on the compute device --
+        that persistent allocation was the actual CUDA OOM source."""
+        mgr = ResultsManager(
+            output_dir=str(tmp_path), n_runs=1, n_folds=2, n_features=6,
+            device=torch.device('cpu'),  # can't assume CUDA is present in CI
+        )
+        assert mgr.edge_device == torch.device('cpu')
+        assert mgr.cv_edge_sum.device == torch.device('cpu')
+        assert mgr.cv_edges.device == torch.device('cpu')
+
+    def test_store_edges_batched_across_multiple_folds_matches_per_fold_calls(self, tmp_path):
+        """store_edges called once with a folds-batch (slice fold_idx, an extra
+        folds axis in edges_tensor) must accumulate the same cv_edge_sum as
+        calling it once per individual fold."""
+        n_features, n_folds = 5, 4
+        torch.manual_seed(0)
+        per_fold_masks = [torch.rand(n_features, 2, 1) > 0.5 for _ in range(n_folds)]
+
+        mgr_looped = ResultsManager(output_dir=str(tmp_path / "a"), n_runs=1,
+                                    n_folds=n_folds, n_features=n_features, store_fold_edges=False)
+        for fold, mask in enumerate(per_fold_masks):
+            mgr_looped.store_edges(param_idx=0, fold_idx=fold, edges_tensor=mask)
+
+        mgr_batched = ResultsManager(output_dir=str(tmp_path / "b"), n_runs=1,
+                                     n_folds=n_folds, n_features=n_features, store_fold_edges=False)
+        batched_mask = torch.stack(per_fold_masks, dim=2)  # [F,2,1]xFolds -> [F,2,Folds,1]
+        mgr_batched.store_edges(param_idx=0, fold_idx=slice(0, n_folds), edges_tensor=batched_mask)
+
+        assert torch.equal(mgr_looped.cv_edge_sum, mgr_batched.cv_edge_sum)
 
 
 class TestCalculateFinalCVResults:

@@ -42,7 +42,7 @@ cpm = CPMAnalysis(results_directory='./tmp/example_simulated_data',
                   n_permutations=100,
                   #atlas='Schaefer100-17',  # built-in atlas, or a path to a custom CSV
                   select_stable_edges=False,
-                  device='cpu')
+                  device='cuda')
 
 cpm.run(X=X, y=y, covariates=covariates)
 cpm.generate_html_report()
