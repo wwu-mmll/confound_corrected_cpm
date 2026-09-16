@@ -629,11 +629,9 @@ class CPMAnalysis:
             edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
                                 device=self.device)
 
-        torch.cuda.synchronize()
         with torch.cuda.nvtx.range("edge_sel:fit_transform"):
             r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
                 X=X_train, y=y_train, covariates=cov_train, device=self.device)
-        torch.cuda.synchronize()
 
         if all(p == best_params[0] for p in best_params):
             with torch.cuda.nvtx.range("edge_sel:threshold_single"):
