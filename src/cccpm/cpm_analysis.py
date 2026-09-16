@@ -17,14 +17,13 @@ from cccpm.models.linear_model import LinearCPM
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold, resolve_presence_threshold
 from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import (torch_train_test_split, check_data, torch_impute_missing_values,
-                         torch_impute_missing_values_batched, build_fold_batch, residualize_train_test,
-                         select_stable_edges, generate_data_insights, detect_task_type,
+                         residualize_train_test, select_stable_edges,
+                         generate_data_insights, detect_task_type,
                          validate_task_type, infer_n_nodes)
 from cccpm.atlases import resolve_atlas
-from cccpm.scoring import score_models, score_models_batched
+from cccpm.scoring import score_models
 from cccpm.reporting import HTMLReporter
 from cccpm.constants import Networks, TaskType
-from cccpm.batch_planning import plan_batch_sizes, make_cpm_cost_fn, available_memory_bytes
 
 
 class CPMAnalysis:
@@ -355,8 +354,8 @@ class CPMAnalysis:
         """
         Perform a full cross-validation run (real data or permuted targets).
 
-        Sets up the ResultsManager, iterates over outer folds, then
-        aggregates and saves results.
+        Sets up the ResultsManager, iterates over outer folds, then aggregates
+        and saves results.
         """
         if perm_run:
             results_directory = os.path.join(self.results_directory, "permutation")
@@ -366,7 +365,7 @@ class CPMAnalysis:
         # Retain per-fold edge masks (for edges.npy) only on the real run; the
         # permutation pass keeps just the fold-sum for the stability null, which
         # avoids a [Features, 2, Folds, n_permutations] tensor (huge for big
-        # parcellations × many folds × many permutations).
+        # parcellations x many folds x many permutations).
         results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
                                          device=self.device, store_fold_edges=not perm_run)
@@ -378,63 +377,26 @@ class CPMAnalysis:
         n_repeats = getattr(self.cv, 'n_repeats', 1)
         splits_per_repeat = max(self.cv.get_n_splits() // n_repeats, 1)
 
-        # The outer-fold loop can only be batched (multiple folds processed in
-        # one torch call) when there's a single fixed edge-selection config --
-        # with an inner CV, each fold's hyperparameter search is already
-        # batched internally (see inner_fold.run_inner_folds) and owns its own
-        # per-fold results directory, so the outer loop stays a plain
-        # per-fold Python loop in that case. Non-linear models (no
-        # fit_batched/predict_batched) always use the plain per-fold loop too.
-        # calculate_residuals's train-fit/test-apply residualization is only
-        # implemented in the per-fold loop (_run_outer_fold) -- rare enough
-        # an option that a dedicated batched version isn't worth it, so fall
-        # back to the loop rather than silently skip the residualization.
-        # connected_components (networkx graph filtering, CPU-only, per fold)
-        # and presence_filter both only run inside the per-fold edge-selection
-        # path today -- presence_filter is applied in fit_transform_batched too,
-        # but connected_components has no batched equivalent -- so exclude it
-        # from batching the same way calculate_residuals is excluded below,
-        # rather than silently skipping the filter under batching.
-        can_batch_outer_folds = (
-            self.inner_cv is None
-            and not self.calculate_residuals
-            and not self.edge_selection.connected_components
-            and hasattr(self.cpm_model, 'fit_batched')
-            and hasattr(self.cpm_model, 'predict_batched')
+        # Move the full dataset to the compute device once, rather than
+        # re-uploading each fold's slice on every downstream torch.as_tensor
+        # call. Pure data placement; touches no statistic. (self.cv.split still
+        # runs on the original CPU X/y: sklearn splitters only derive index
+        # arrays from it, and some -- e.g. StratifiedKFold -- are not guaranteed
+        # to accept a CUDA tensor.)
+        X_dev = torch.as_tensor(X, device=self.device, dtype=torch.float32)
+        y_dev = torch.as_tensor(y, device=self.device, dtype=torch.float32)
+        cov_dev = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
+
+        iterator = tqdm(
+            enumerate(self.cv.split(X, y[:, 0])),
+            total=self.cv.get_n_splits(),
+            desc="Running outer folds",
+            unit="fold",
         )
-
-        if can_batch_outer_folds:
-            splits = list(self.cv.split(X, y[:, 0]))
-            self._run_outer_folds_batched(splits, X, y, covariates, results_manager, perm_run,
-                                          splits_per_repeat=splits_per_repeat)
-        else:
-            # Move the full dataset to the compute device ONCE, instead of
-            # leaving X/y/covariates on the CPU for the whole outer-fold loop:
-            # previously each of the (up to hundreds of) outer folds re-sliced
-            # X on the CPU and every downstream torch.as_tensor(..., device=...)
-            # call (inside run_inner_folds, model.fit, model.predict) re-uploaded
-            # that fold's slice from scratch. With X/y/covariates already
-            # device-resident here, torch_train_test_split's per-fold slicing
-            # (and every downstream torch.as_tensor call, which is a no-op when
-            # the input is already the right device/dtype) happens on-device
-            # instead -- pure data placement, doesn't touch any statistic.
-            # (self.cv.split still runs on the original CPU X/y: sklearn
-            # splitters only derive index arrays from it, and some -- e.g.
-            # StratifiedKFold -- aren't guaranteed to accept a CUDA tensor.)
-            X_dev = torch.as_tensor(X, device=self.device, dtype=torch.float32)
-            y_dev = torch.as_tensor(y, device=self.device, dtype=torch.float32)
-            cov_dev = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
-
-            iterator = tqdm(
-                enumerate(self.cv.split(X, y[:, 0])),
-                total=self.cv.get_n_splits(),
-                desc="Running outer folds",
-                unit="fold",
-            )
-            for outer_fold, (train, test) in iterator:
-                repeat = outer_fold // splits_per_repeat
-                self._run_outer_fold(outer_fold, repeat, train, test, X_dev, y_dev, cov_dev,
-                                     results_manager, perm_run)
+        for outer_fold, (train, test) in iterator:
+            repeat = outer_fold // splits_per_repeat
+            self._run_outer_fold(outer_fold, repeat, train, test, X_dev, y_dev, cov_dev,
+                                 results_manager, perm_run)
 
         # Aggregate across folds
         results_manager.calculate_final_cv_results(task_type=self.task_type)
@@ -457,8 +419,8 @@ class CPMAnalysis:
         if self.calculate_residuals:
             X_train, X_test = residualize_train_test(X_train, X_test, cov_train, cov_test)
 
-        edges = self._select_edges(X_train, y_train, cov_train,
-                                   results_manager, outer_fold)
+        # edges: [Features, 2, Runs] -- one winning configuration per run.
+        edges = self._select_edges(X_train, y_train, cov_train, results_manager, outer_fold)
         results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
 
         model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
@@ -477,108 +439,14 @@ class CPMAnalysis:
 
         metrics = score_models(y_true=y_test, y_pred=y_pred,
                                task_type=self.task_type, device=self.device)
-
         results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
-
-    def _run_outer_folds_batched(self, splits, X, y, covariates, results_manager, perm_run,
-                                 splits_per_repeat=1):
-        """
-        Batched version of the outer-fold loop for the `inner_cv is None`
-        case (a single fixed edge-selection config, no per-fold
-        hyperparameter search): batches multiple outer folds -- and, memory
-        permitting, permutation columns -- into single torch calls instead
-        of one Python iteration per fold. Falls back to batch size 1
-        (today's per-fold loop, routed through the same batched machinery
-        with singleton batch dims) whenever memory is tight.
-        """
-        n_folds = len(splits)
-        n_features = X.shape[1]
-        n_perms = y.shape[1]
-        n_cov = covariates.shape[1]
-
-        X_gpu = torch.as_tensor(X, device=self.device, dtype=torch.float32)
-        y_gpu = torch.as_tensor(y, device=self.device, dtype=torch.float32)
-        cov_gpu = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
-
-        n_samples_train = max(len(tr) for tr, te in splits)
-        n_samples_test = max(len(te) for tr, te in splits)
-        cost_fn = make_cpm_cost_fn(n_samples_train, n_samples_test, n_features, n_cov)
-        avail = available_memory_bytes(self.device)
-        plan = plan_batch_sizes(1, n_folds, n_perms, cost_fn, avail)
-
-        param_config = self.edge_selection.param_grid[0]
-        selector = param_config['edge_selection']
-        threshold = param_config['edge_selection__threshold']
-        correction = param_config.get('edge_selection__correction')
-        selector.correction = correction
-
-        iterator = tqdm(range(0, n_folds, plan.folds), total=-(-n_folds // plan.folds),
-                        desc="Running outer folds", unit="foldbatch")
-        for fold_start in iterator:
-            fold_ids = list(range(fold_start, min(fold_start + plan.folds, n_folds)))
-            fold_splits = [splits[i] for i in fold_ids]
-            fold_slice = slice(fold_ids[0], fold_ids[-1] + 1)
-
-            fb = build_fold_batch(X_gpu, y_gpu, cov_gpu, fold_splits)
-            if self.impute_missing_values:
-                fb.X_train, fb.X_test, fb.cov_train, fb.cov_test = torch_impute_missing_values_batched(
-                    fb.X_train, fb.X_test, fb.cov_train, fb.cov_test, fb.train_valid)
-
-            for perm_start in range(0, n_perms, plan.perms):
-                perm_end = min(perm_start + plan.perms, n_perms)
-                perm_slice = slice(perm_start, perm_end)
-                y_train_p = fb.y_train[:, :, perm_slice]
-                y_test_p = fb.y_test[:, :, perm_slice]
-
-                r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform_batched(
-                    X=fb.X_train, y=y_train_p, covariates=fb.cov_train,
-                    valid_mask=fb.train_valid, device=self.device)
-                edges = selector.select_batch(r=r_edges, p=p_edges, thresholds=[threshold])  # [F,2,1,B,R]
-
-                results_manager.store_edges(param_idx=0, fold_idx=fold_slice,
-                                            edges_tensor=edges.squeeze(2), run_idx=perm_slice)
-
-                model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
-                model.fit_batched(fb.X_train, y_train_p, fb.cov_train, valid_mask=fb.train_valid)
-
-                y_pred = model.predict_batched(fb.X_test, fb.cov_test,
-                                                valid_mask=fb.test_valid, return_proba=True)  # [N,5,3,1,B,R]
-
-                if not perm_run:
-                    for b_local, outer_fold in enumerate(fold_ids):
-                        train, test = splits[outer_fold]
-                        n_test = len(test)
-                        repeat = outer_fold // splits_per_repeat
-                        results_manager.store_predictions(
-                            y_pred=y_pred[:n_test, :, :, 0, b_local, :], y_true=fb.y_test[b_local, :n_test, perm_slice],
-                            fold=outer_fold, test_indices=test, repeat=repeat)
-                        # Network-strength reporting is a side-channel for the HTML
-                        # report, not part of the hot batched path -- refit a plain
-                        # single-fold model to reuse get_network_strengths() as-is.
-                        edges_fold = edges[:, :, 0, b_local, :]
-                        report_model = self.cpm_model(edges=edges_fold, device=self.device,
-                                                      task_type=self.task_type)
-                        report_model.fit(fb.X_train[b_local, :fb.n_train[b_local]],
-                                         y_train_p[b_local, :fb.n_train[b_local]],
-                                         fb.cov_train[b_local, :fb.n_train[b_local]])
-                        network_strengths = report_model.get_network_strengths(
-                            fb.X_test[b_local, :n_test], fb.cov_test[b_local, :n_test])
-                        results_manager.store_network_strengths(
-                            network_strengths=network_strengths,
-                            y_true=fb.y_test[b_local, :n_test, perm_slice], fold=outer_fold,
-                            test_indices=test, repeat=repeat)
-
-                metrics = score_models_batched(y_true=y_test_p, y_pred=y_pred, task_type=self.task_type,
-                                                valid_mask=fb.test_valid, device=self.device)
-
-                results_manager.store_metrics(param_idx=0, fold_idx=fold_slice,
-                                              metrics_tensor=metrics.squeeze(3), run_idx=perm_slice)
 
     def _select_edges(self, X_train, y_train, cov_train, results_manager, outer_fold):
         """
         Determine edge masks for this fold, either via inner CV hyperparameter
         search (with optional stability selection) or directly from the single
         configured edge-selection threshold.
+
         Returns
         -------
         edges : torch.Tensor [N_features, 2, N_runs]
@@ -596,29 +464,29 @@ class CPMAnalysis:
                 device=self.device,
                 task_type=self.task_type,
             )
+            if self.select_stable_edges:
+                return select_stable_edges(stability_edges, self.stability_threshold)
         else:
             best_params = [self.edge_selection.param_grid[0]] * y_train.shape[1]
 
-        if self.select_stable_edges:
-            return select_stable_edges(stability_edges, self.stability_threshold)
-
-        edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
-                            device=self.device)
-
         r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
             X=X_train, y=y_train, covariates=cov_train, device=self.device)
+        self.edge_selection.r_edges = r_edges
+        self.edge_selection.p_edges = p_edges
 
-        if all(p == best_params[0] for p in best_params):
+        # return_selected_edges gives [Features, 2, N_thresholds, Runs]; with a
+        # single configuration set, N_thresholds == 1.
+        if all(params == best_params[0] for params in best_params):
             self.edge_selection.set_params(**best_params[0])
-            self.edge_selection.r_edges = r_edges
-            self.edge_selection.p_edges = p_edges
-            edges = self.edge_selection.return_selected_edges()
-        else:
-            for run_id, params in enumerate(best_params):
-                self.edge_selection.set_params(**params)
-                self.edge_selection.r_edges = r_edges[:, [run_id]]
-                self.edge_selection.p_edges = p_edges[:, [run_id]]
-                current_edges = self.edge_selection.return_selected_edges()
-                edges[:, :, run_id] = current_edges.squeeze()
+            return self.edge_selection.return_selected_edges()[:, :, 0, :]
 
+        # The inner CV picked a different configuration for different runs, so
+        # each run is thresholded with its own winner and reassembled.
+        edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
+                            dtype=torch.bool, device=self.device)
+        for run_id, params in enumerate(best_params):
+            self.edge_selection.set_params(**params)
+            self.edge_selection.r_edges = r_edges[:, [run_id]]
+            self.edge_selection.p_edges = p_edges[:, [run_id]]
+            edges[:, :, run_id] = self.edge_selection.return_selected_edges()[:, :, 0, 0]
         return edges

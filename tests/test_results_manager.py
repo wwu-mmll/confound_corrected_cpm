@@ -149,27 +149,6 @@ class TestStoreAndRetrieve:
         assert mgr.cv_edge_sum.device == torch.device('cpu')
         assert mgr.cv_edges.device == torch.device('cpu')
 
-    def test_store_edges_batched_across_multiple_folds_matches_per_fold_calls(self, tmp_path):
-        """store_edges called once with a folds-batch (slice fold_idx, an extra
-        folds axis in edges_tensor) must accumulate the same cv_edge_sum as
-        calling it once per individual fold."""
-        n_features, n_folds = 5, 4
-        torch.manual_seed(0)
-        per_fold_masks = [torch.rand(n_features, 2, 1) > 0.5 for _ in range(n_folds)]
-
-        mgr_looped = ResultsManager(output_dir=str(tmp_path / "a"), n_runs=1,
-                                    n_folds=n_folds, n_features=n_features, store_fold_edges=False)
-        for fold, mask in enumerate(per_fold_masks):
-            mgr_looped.store_edges(param_idx=0, fold_idx=fold, edges_tensor=mask)
-
-        mgr_batched = ResultsManager(output_dir=str(tmp_path / "b"), n_runs=1,
-                                     n_folds=n_folds, n_features=n_features, store_fold_edges=False)
-        batched_mask = torch.stack(per_fold_masks, dim=2)  # [F,2,1]xFolds -> [F,2,Folds,1]
-        mgr_batched.store_edges(param_idx=0, fold_idx=slice(0, n_folds), edges_tensor=batched_mask)
-
-        assert torch.equal(mgr_looped.cv_edge_sum, mgr_batched.cv_edge_sum)
-
-
 class TestCalculateFinalCVResults:
     def test_saves_csv_files(self, tmp_path):
         mgr = ResultsManager(

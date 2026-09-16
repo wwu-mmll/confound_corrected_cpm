@@ -90,56 +90,29 @@ class ResultsManager:
         self.cv_network_strengths = pd.DataFrame()
         self.agg_results = None
 
-    @staticmethod
-    def estimate_slice_bytes(n_features: int, n_params: int, n_folds: int, n_runs: int) -> int:
-        """
-        Bytes needed, on the COMPUTE DEVICE, for a `[..., n_params, n_folds,
-        n_runs]`-shaped slice of `self.results` (float32) -- using the exact
-        same shape formula as the tensor allocated in `__init__`. Shared with
-        `batch_planning.py` so the byte-size arithmetic is defined once.
-
-        Edge bookkeeping (`cv_edges`/`cv_edge_sum`) is intentionally excluded:
-        it always lives on the CPU (`self.edge_device`), never on the compute
-        device, so it doesn't count against the GPU/CPU compute-device memory
-        budget batch_planning checks.
-        """
-        return len(Metrics) * len(Models) * len(Networks) * n_params * n_folds * n_runs * 4
-
     def store_edges(self, param_idx, fold_idx, edges_tensor, run_idx=slice(None)):
         """
-        Stores the edge masks for Positive and Negative networks: moves the
-        mask to the CPU edge store (frees VRAM) and accumulates the fold-sum
-        used for stability. The per-fold mask itself is retained only when
-        this manager was built with store_fold_edges=True.
+        Store the edge masks for the positive and negative networks: move the
+        mask to the CPU edge store (freeing VRAM) and accumulate the fold-sum
+        used for stability. The per-fold mask itself is retained only when this
+        manager was built with store_fold_edges=True.
 
         Args:
-            param_idx: Index (int or slice) of current parameter(s).
-            fold_idx: Index (int or slice) of current fold(s).
-            edges_tensor: Boolean Tensor of shape [Features, 2, (Params,) (Folds,) Runs],
-                          matching whatever param_idx/fold_idx/run_idx slice out.
-                          Dimension 1 must correspond to [Positive, Negative].
-            run_idx: Index (int or slice) of current run(s)/permutation(s).
-                     Defaults to every run (today's behaviour).
+            param_idx: index (int or slice) of the current parameter(s).
+            fold_idx: index (int) of the current fold.
+            edges_tensor: boolean tensor shaped to match
+                          ``cv_edges[:, :, param_idx, fold_idx, run_idx]``,
+                          i.e. [Features, 2, (Params,) Runs]. Dimension 1 must
+                          be [Positive, Negative].
+            run_idx: index (int or slice) of the current run(s)/permutation(s).
         """
         mask = torch.as_tensor(edges_tensor, dtype=torch.bool, device=self.edge_device)
 
         if self.cv_edges is not None:
             self.cv_edges[:, :, param_idx, fold_idx, run_idx] = mask
 
-        # cv_edge_sum has no folds axis, so any folds axis present in `mask`
-        # must be summed out before accumulating. `mask`'s axis layout mirrors
-        # cv_edges[:, :, param_idx, fold_idx, run_idx] positionally: Features,
-        # Network, then Params (present unless param_idx is an int, which
-        # collapses it), then Folds (present unless fold_idx is an int).
-        # fold_idx is a plain int only for the single-fold-at-a-time (non-batched)
-        # call pattern, in which case there's no folds axis to sum at all.
-        if isinstance(fold_idx, int):
-            fold_sum = mask.float()
-        else:
-            fold_axis = 2 + (0 if isinstance(param_idx, int) else 1)
-            fold_sum = mask.float().sum(dim=fold_axis)
-        self.cv_edge_sum[:, :, param_idx, run_idx] += fold_sum
-
+        # cv_edge_sum has no folds axis; one fold contributes one mask.
+        self.cv_edge_sum[:, :, param_idx, run_idx] += mask.float()
 
     def store_metrics(self, param_idx, fold_idx, metrics_tensor: torch.Tensor, run_idx=slice(None)):
         """

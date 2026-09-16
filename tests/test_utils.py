@@ -10,9 +10,7 @@ from cccpm.utils import (
     get_variable_names,
     infer_n_nodes,
     vector_to_matrix_tensor_version,
-    build_fold_batch,
     torch_impute_missing_values,
-    torch_impute_missing_values_batched,
 )
 
 
@@ -398,7 +396,7 @@ def test_matrix_to_vector_3d_extracts_upper_triangle():
         assert np.allclose(vec[s], mats[s, rows, cols])
 
 # ============================================================
-# build_fold_batch / torch_impute_missing_values_batched
+# Imputation
 # ============================================================
 
 def _uneven_splits(n_total, n_folds, seed):
@@ -414,75 +412,3 @@ def _uneven_splits(n_total, n_folds, seed):
     return splits
 
 
-def test_build_fold_batch_matches_manual_indexing_with_padding():
-    torch.manual_seed(0)
-    N, F, P, C = 27, 5, 2, 3
-    X = torch.randn(N, F)
-    y = torch.randn(N, P)
-    cov = torch.randn(N, C)
-
-    splits = _uneven_splits(N, n_folds=4, seed=5)
-    fb = build_fold_batch(X, y, cov, splits)
-    assert fb.n_train.unique().numel() > 1  # genuinely uneven
-
-    for b, (tr, te) in enumerate(splits):
-        n_tr, n_te = len(tr), len(te)
-        assert fb.n_train[b].item() == n_tr
-        assert fb.n_test[b].item() == n_te
-        assert torch.allclose(fb.X_train[b, :n_tr], X[torch.as_tensor(tr)])
-        assert torch.allclose(fb.y_train[b, :n_tr], y[torch.as_tensor(tr)])
-        assert torch.allclose(fb.cov_train[b, :n_tr], cov[torch.as_tensor(tr)])
-        assert torch.allclose(fb.X_test[b, :n_te], X[torch.as_tensor(te)])
-        # padded rows are exactly zero
-        assert torch.all(fb.X_train[b, n_tr:] == 0)
-        assert torch.all(fb.X_test[b, n_te:] == 0)
-        assert fb.train_valid[b, :n_tr].all() and not fb.train_valid[b, n_tr:].any()
-
-
-def test_build_fold_batch_handles_nan_in_pad_source_row():
-    """Padded rows must be exactly 0 even if row 0 (the pad-index source)
-    contains NaN -- NaN * 0 == NaN, so a naive multiply-by-mask would leave
-    NaN in padded positions instead of zeroing them."""
-    torch.manual_seed(1)
-    N, F = 20, 4
-    X = torch.randn(N, F)
-    X[0, 1] = float('nan')
-    y = torch.randn(N, 1)
-    cov = torch.randn(N, 2)
-
-    splits = _uneven_splits(N, n_folds=3, seed=6)
-    fb = build_fold_batch(X, y, cov, splits)
-    for b in range(len(splits)):
-        n = fb.n_train[b].item()
-        pad_rows = fb.X_train[b, n:]
-        assert torch.all(pad_rows == 0)
-        assert not torch.isnan(pad_rows).any()
-
-
-def test_torch_impute_missing_values_batched_matches_unbatched():
-    torch.manual_seed(2)
-    N, F, C = 24, 5, 2
-    X = torch.randn(N, F)
-    X[3, 2] = float('nan')
-    X[15, 0] = float('nan')
-    y = torch.randn(N, 1)
-    cov = torch.randn(N, C)
-    cov[7, 1] = float('nan')
-
-    splits = _uneven_splits(N, n_folds=3, seed=7)
-    fb = build_fold_batch(X, y, cov, splits)
-    Xtr_b, Xte_b, covtr_b, covte_b = torch_impute_missing_values_batched(
-        fb.X_train, fb.X_test, fb.cov_train, fb.cov_test, fb.train_valid)
-
-    assert not torch.isnan(Xtr_b).any()
-    assert not torch.isnan(Xte_b).any()
-
-    for b, (tr, te) in enumerate(splits):
-        n_tr, n_te = len(tr), len(te)
-        Xtr_ref, Xte_ref, covtr_ref, covte_ref = torch_impute_missing_values(
-            X[torch.as_tensor(tr)].clone(), X[torch.as_tensor(te)].clone(),
-            cov[torch.as_tensor(tr)].clone(), cov[torch.as_tensor(te)].clone())
-        assert torch.allclose(Xtr_b[b, :n_tr], Xtr_ref, atol=1e-5)
-        assert torch.allclose(Xte_b[b, :n_te], Xte_ref, atol=1e-5)
-        assert torch.allclose(covtr_b[b, :n_tr], covtr_ref, atol=1e-5)
-        assert torch.allclose(covte_b[b, :n_te], covte_ref, atol=1e-5)

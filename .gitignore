@@ -172,3 +172,7 @@ src/cccpm/simulation/simulation_results
 *.DS_Store
 # Quickstart output when run from the repo root
 /results/
+
+# Numerical baselines captured by scripts/capture_baseline.py for refactor
+# regression testing. Regenerate locally; too large and machine-specific to track.
+baselines/
