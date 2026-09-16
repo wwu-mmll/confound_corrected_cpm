@@ -1,4 +1,3 @@
-import warnings
 import numpy as np
 from typing import Union
 
@@ -759,21 +758,11 @@ class UnivariateEdgeSelection(BaseEstimator):
                  edge_statistic: str = 'spearman',
                  presence_filter: Union[bool, float] = False,
                  connected_components: Union[bool, int] = False,
-                 edge_selection: Union[list, None, PThreshold] = None,
-                 t_test_filter=None):
+                 edge_selection: Union[list, None, PThreshold] = None):
         self.r_edges = None
         self.p_edges = None
-        if t_test_filter is not None:
-            warnings.warn(
-                "`t_test_filter` never functioned and has been replaced by "
-                "`presence_filter` (keep edges nonzero in at least a fraction of "
-                "subjects). Ignoring `t_test_filter`; use `presence_filter` "
-                "instead.",
-                DeprecationWarning, stacklevel=2,
-            )
         self.presence_filter = presence_filter
         self.connected_components = connected_components
-        self.t_test_filter = t_test_filter
         self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic,
                                             presence_filter=presence_filter)
         self.edge_selection = edge_selection

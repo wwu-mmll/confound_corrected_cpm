@@ -10,14 +10,13 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold, RepeatedKFold, StratifiedKFold
-from sklearn.linear_model import LinearRegression
 
 from cccpm.inner_fold import run_inner_folds
 from cccpm.logging import setup_logging
 from cccpm.models.linear_model import LinearCPM
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold, resolve_presence_threshold
 from cccpm.results_manager import ResultsManager, PermutationManager
-from cccpm.utils import (train_test_split, torch_train_test_split, check_data, impute_missing_values, torch_impute_missing_values,
+from cccpm.utils import (torch_train_test_split, check_data, torch_impute_missing_values,
                          torch_impute_missing_values_batched, build_fold_batch, residualize_train_test,
                          select_stable_edges, generate_data_insights, detect_task_type,
                          validate_task_type, infer_n_nodes)
@@ -449,46 +448,37 @@ class CPMAnalysis:
 
     def _run_outer_fold(self, outer_fold, repeat, train, test, X, y, covariates,
                         results_manager, perm_run):
-        with torch.cuda.nvtx.range("split_impute"):
-            X_train, X_test, y_train, y_test, cov_train, cov_test = torch_train_test_split(
-                train, test, X, y, covariates)
-            if self.impute_missing_values:
-                X_train, X_test, cov_train, cov_test = torch_impute_missing_values(
-                    X_train, X_test, cov_train, cov_test)
+        X_train, X_test, y_train, y_test, cov_train, cov_test = torch_train_test_split(
+            train, test, X, y, covariates)
+        if self.impute_missing_values:
+            X_train, X_test, cov_train, cov_test = torch_impute_missing_values(
+                X_train, X_test, cov_train, cov_test)
 
         if self.calculate_residuals:
-            with torch.cuda.nvtx.range("calculate_residuals"):
-                X_train, X_test = residualize_train_test(X_train, X_test, cov_train, cov_test)
+            X_train, X_test = residualize_train_test(X_train, X_test, cov_train, cov_test)
 
-        with torch.cuda.nvtx.range("edge_selection"):
-            edges = self._select_edges(X_train, y_train, cov_train,
-                                       results_manager, outer_fold)
-        with torch.cuda.nvtx.range("store_edges"):
-            results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
+        edges = self._select_edges(X_train, y_train, cov_train,
+                                   results_manager, outer_fold)
+        results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
 
-        with torch.cuda.nvtx.range("model_fit"):
-            model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
-            model.fit(X_train, y_train, cov_train)
+        model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
+        model.fit(X_train, y_train, cov_train)
 
-        with torch.cuda.nvtx.range("model_predict"):
-            y_pred = model.predict(X_test, cov_test, return_proba=True)
+        y_pred = model.predict(X_test, cov_test, return_proba=True)
 
         if not perm_run:
-            with torch.cuda.nvtx.range("store_predictions"):
-                results_manager.store_predictions(y_pred=y_pred, y_true=y_test,
-                                                  fold=outer_fold, test_indices=test,
-                                                  repeat=repeat)
-                network_strengths = model.get_network_strengths(X_test, cov_test)
-                results_manager.store_network_strengths(network_strengths=network_strengths,
-                                                        y_true=y_test, fold=outer_fold,
-                                                        test_indices=test, repeat=repeat)
+            results_manager.store_predictions(y_pred=y_pred, y_true=y_test,
+                                              fold=outer_fold, test_indices=test,
+                                              repeat=repeat)
+            network_strengths = model.get_network_strengths(X_test, cov_test)
+            results_manager.store_network_strengths(network_strengths=network_strengths,
+                                                    y_true=y_test, fold=outer_fold,
+                                                    test_indices=test, repeat=repeat)
 
-        with torch.cuda.nvtx.range("scoring"):
-            metrics = score_models(y_true=y_test, y_pred=y_pred,
-                                   task_type=self.task_type, device=self.device)
+        metrics = score_models(y_true=y_test, y_pred=y_pred,
+                               task_type=self.task_type, device=self.device)
 
-        with torch.cuda.nvtx.range("store_metrics"):
-            results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
+        results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
 
     def _run_outer_folds_batched(self, splits, X, y, covariates, results_manager, perm_run,
                                  splits_per_repeat=1):
@@ -514,8 +504,7 @@ class CPMAnalysis:
         n_samples_test = max(len(te) for tr, te in splits)
         cost_fn = make_cpm_cost_fn(n_samples_train, n_samples_test, n_features, n_cov)
         avail = available_memory_bytes(self.device)
-        with torch.cuda.nvtx.range("outer:plan_batch_sizes"):
-            plan = plan_batch_sizes(1, n_folds, n_perms, cost_fn, avail)
+        plan = plan_batch_sizes(1, n_folds, n_perms, cost_fn, avail)
 
         param_config = self.edge_selection.param_grid[0]
         selector = param_config['edge_selection']
@@ -530,11 +519,10 @@ class CPMAnalysis:
             fold_splits = [splits[i] for i in fold_ids]
             fold_slice = slice(fold_ids[0], fold_ids[-1] + 1)
 
-            with torch.cuda.nvtx.range(f"outer:foldbatch{fold_start}:split_impute"):
-                fb = build_fold_batch(X_gpu, y_gpu, cov_gpu, fold_splits)
-                if self.impute_missing_values:
-                    fb.X_train, fb.X_test, fb.cov_train, fb.cov_test = torch_impute_missing_values_batched(
-                        fb.X_train, fb.X_test, fb.cov_train, fb.cov_test, fb.train_valid)
+            fb = build_fold_batch(X_gpu, y_gpu, cov_gpu, fold_splits)
+            if self.impute_missing_values:
+                fb.X_train, fb.X_test, fb.cov_train, fb.cov_test = torch_impute_missing_values_batched(
+                    fb.X_train, fb.X_test, fb.cov_train, fb.cov_test, fb.train_valid)
 
             for perm_start in range(0, n_perms, plan.perms):
                 perm_end = min(perm_start + plan.perms, n_perms)
@@ -542,57 +530,49 @@ class CPMAnalysis:
                 y_train_p = fb.y_train[:, :, perm_slice]
                 y_test_p = fb.y_test[:, :, perm_slice]
 
-                with torch.cuda.nvtx.range(f"outer:foldbatch{fold_start}:permbatch{perm_start}:edge_selection"):
-                    r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform_batched(
-                        X=fb.X_train, y=y_train_p, covariates=fb.cov_train,
-                        valid_mask=fb.train_valid, device=self.device)
-                    edges = selector.select_batch(r=r_edges, p=p_edges, thresholds=[threshold])  # [F,2,1,B,R]
+                r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform_batched(
+                    X=fb.X_train, y=y_train_p, covariates=fb.cov_train,
+                    valid_mask=fb.train_valid, device=self.device)
+                edges = selector.select_batch(r=r_edges, p=p_edges, thresholds=[threshold])  # [F,2,1,B,R]
 
-                with torch.cuda.nvtx.range(f"outer:foldbatch{fold_start}:permbatch{perm_start}:store_edges"):
-                    results_manager.store_edges(param_idx=0, fold_idx=fold_slice,
-                                                edges_tensor=edges.squeeze(2), run_idx=perm_slice)
+                results_manager.store_edges(param_idx=0, fold_idx=fold_slice,
+                                            edges_tensor=edges.squeeze(2), run_idx=perm_slice)
 
-                with torch.cuda.nvtx.range(f"outer:foldbatch{fold_start}:permbatch{perm_start}:model_fit"):
-                    model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
-                    model.fit_batched(fb.X_train, y_train_p, fb.cov_train, valid_mask=fb.train_valid)
+                model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
+                model.fit_batched(fb.X_train, y_train_p, fb.cov_train, valid_mask=fb.train_valid)
 
-                with torch.cuda.nvtx.range(f"outer:foldbatch{fold_start}:permbatch{perm_start}:model_predict"):
-                    y_pred = model.predict_batched(fb.X_test, fb.cov_test,
-                                                    valid_mask=fb.test_valid, return_proba=True)  # [N,5,3,1,B,R]
+                y_pred = model.predict_batched(fb.X_test, fb.cov_test,
+                                                valid_mask=fb.test_valid, return_proba=True)  # [N,5,3,1,B,R]
 
                 if not perm_run:
-                    with torch.cuda.nvtx.range(
-                            f"outer:foldbatch{fold_start}:permbatch{perm_start}:store_predictions"):
-                        for b_local, outer_fold in enumerate(fold_ids):
-                            train, test = splits[outer_fold]
-                            n_test = len(test)
-                            repeat = outer_fold // splits_per_repeat
-                            results_manager.store_predictions(
-                                y_pred=y_pred[:n_test, :, :, 0, b_local, :], y_true=fb.y_test[b_local, :n_test, perm_slice],
-                                fold=outer_fold, test_indices=test, repeat=repeat)
-                            # Network-strength reporting is a side-channel for the HTML
-                            # report, not part of the hot batched path -- refit a plain
-                            # single-fold model to reuse get_network_strengths() as-is.
-                            edges_fold = edges[:, :, 0, b_local, :]
-                            report_model = self.cpm_model(edges=edges_fold, device=self.device,
-                                                          task_type=self.task_type)
-                            report_model.fit(fb.X_train[b_local, :fb.n_train[b_local]],
-                                             y_train_p[b_local, :fb.n_train[b_local]],
-                                             fb.cov_train[b_local, :fb.n_train[b_local]])
-                            network_strengths = report_model.get_network_strengths(
-                                fb.X_test[b_local, :n_test], fb.cov_test[b_local, :n_test])
-                            results_manager.store_network_strengths(
-                                network_strengths=network_strengths,
-                                y_true=fb.y_test[b_local, :n_test, perm_slice], fold=outer_fold,
-                                test_indices=test, repeat=repeat)
+                    for b_local, outer_fold in enumerate(fold_ids):
+                        train, test = splits[outer_fold]
+                        n_test = len(test)
+                        repeat = outer_fold // splits_per_repeat
+                        results_manager.store_predictions(
+                            y_pred=y_pred[:n_test, :, :, 0, b_local, :], y_true=fb.y_test[b_local, :n_test, perm_slice],
+                            fold=outer_fold, test_indices=test, repeat=repeat)
+                        # Network-strength reporting is a side-channel for the HTML
+                        # report, not part of the hot batched path -- refit a plain
+                        # single-fold model to reuse get_network_strengths() as-is.
+                        edges_fold = edges[:, :, 0, b_local, :]
+                        report_model = self.cpm_model(edges=edges_fold, device=self.device,
+                                                      task_type=self.task_type)
+                        report_model.fit(fb.X_train[b_local, :fb.n_train[b_local]],
+                                         y_train_p[b_local, :fb.n_train[b_local]],
+                                         fb.cov_train[b_local, :fb.n_train[b_local]])
+                        network_strengths = report_model.get_network_strengths(
+                            fb.X_test[b_local, :n_test], fb.cov_test[b_local, :n_test])
+                        results_manager.store_network_strengths(
+                            network_strengths=network_strengths,
+                            y_true=fb.y_test[b_local, :n_test, perm_slice], fold=outer_fold,
+                            test_indices=test, repeat=repeat)
 
-                with torch.cuda.nvtx.range(f"outer:foldbatch{fold_start}:permbatch{perm_start}:scoring"):
-                    metrics = score_models_batched(y_true=y_test_p, y_pred=y_pred, task_type=self.task_type,
-                                                    valid_mask=fb.test_valid, device=self.device)
+                metrics = score_models_batched(y_true=y_test_p, y_pred=y_pred, task_type=self.task_type,
+                                                valid_mask=fb.test_valid, device=self.device)
 
-                with torch.cuda.nvtx.range(f"outer:foldbatch{fold_start}:permbatch{perm_start}:store_metrics"):
-                    results_manager.store_metrics(param_idx=0, fold_idx=fold_slice,
-                                                  metrics_tensor=metrics.squeeze(3), run_idx=perm_slice)
+                results_manager.store_metrics(param_idx=0, fold_idx=fold_slice,
+                                              metrics_tensor=metrics.squeeze(3), run_idx=perm_slice)
 
     def _select_edges(self, X_train, y_train, cov_train, results_manager, outer_fold):
         """
@@ -604,48 +584,41 @@ class CPMAnalysis:
         edges : torch.Tensor [N_features, 2, N_runs]
         """
         if self.inner_cv:
-            with torch.cuda.nvtx.range("edge_sel:inner_cv"):
-                best_params, stability_edges = run_inner_folds(
-                    cpm_model=self.cpm_model,
-                    X=X_train,
-                    y=y_train,
-                    covariates=cov_train,
-                    inner_cv=self.inner_cv,
-                    edge_selection=self.edge_selection,
-                    results_directory=os.path.join(
-                        results_manager.results_directory, 'folds', str(outer_fold)),
-                    device=self.device,
-                    task_type=self.task_type,
-                )
+            best_params, stability_edges = run_inner_folds(
+                cpm_model=self.cpm_model,
+                X=X_train,
+                y=y_train,
+                covariates=cov_train,
+                inner_cv=self.inner_cv,
+                edge_selection=self.edge_selection,
+                results_directory=os.path.join(
+                    results_manager.results_directory, 'folds', str(outer_fold)),
+                device=self.device,
+                task_type=self.task_type,
+            )
         else:
-            with torch.cuda.nvtx.range("edge_sel:param_setup"):
-                best_params = [self.edge_selection.param_grid[0]] * y_train.shape[1]
+            best_params = [self.edge_selection.param_grid[0]] * y_train.shape[1]
 
         if self.select_stable_edges:
-            with torch.cuda.nvtx.range("edge_sel:stable_edges"):
-                return select_stable_edges(stability_edges, self.stability_threshold)
+            return select_stable_edges(stability_edges, self.stability_threshold)
 
-        with torch.cuda.nvtx.range("edge_sel:zeros_init"):
-            edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
-                                device=self.device)
+        edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
+                            device=self.device)
 
-        with torch.cuda.nvtx.range("edge_sel:fit_transform"):
-            r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
-                X=X_train, y=y_train, covariates=cov_train, device=self.device)
+        r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
+            X=X_train, y=y_train, covariates=cov_train, device=self.device)
 
         if all(p == best_params[0] for p in best_params):
-            with torch.cuda.nvtx.range("edge_sel:threshold_single"):
-                self.edge_selection.set_params(**best_params[0])
-                self.edge_selection.r_edges = r_edges
-                self.edge_selection.p_edges = p_edges
-                edges = self.edge_selection.return_selected_edges()
+            self.edge_selection.set_params(**best_params[0])
+            self.edge_selection.r_edges = r_edges
+            self.edge_selection.p_edges = p_edges
+            edges = self.edge_selection.return_selected_edges()
         else:
             for run_id, params in enumerate(best_params):
-                with torch.cuda.nvtx.range(f"edge_sel:threshold_run{run_id}"):
-                    self.edge_selection.set_params(**params)
-                    self.edge_selection.r_edges = r_edges[:, [run_id]]
-                    self.edge_selection.p_edges = p_edges[:, [run_id]]
-                    current_edges = self.edge_selection.return_selected_edges()
-                    edges[:, :, run_id] = current_edges.squeeze()
+                self.edge_selection.set_params(**params)
+                self.edge_selection.r_edges = r_edges[:, [run_id]]
+                self.edge_selection.p_edges = p_edges[:, [run_id]]
+                current_edges = self.edge_selection.return_selected_edges()
+                edges[:, :, run_id] = current_edges.squeeze()
 
         return edges

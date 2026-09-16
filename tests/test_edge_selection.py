@@ -296,17 +296,6 @@ def test_presence_filter_adds_to_variance_gate():
     assert p_on[0, 0].item() == 1.0  # dropped by the presence filter
 
 
-def test_t_test_filter_deprecated():
-    """The old, never-functional t_test_filter keyword warns and is ignored."""
-    with pytest.warns(DeprecationWarning):
-        sel = UnivariateEdgeSelection(
-            edge_statistic='pearson', t_test_filter=True,
-            edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
-        )
-    # presence_filter stays at its default (off) — t_test_filter is not mapped.
-    assert sel.presence_filter is False
-
-
 # --- Connected-component edge filtering ---------------------------------------
 
 def test_resolve_min_component_size():

@@ -5,7 +5,6 @@ import pandas as pd
 import torch
 
 from sklearn.utils import check_X_y
-from sklearn.impute import SimpleImputer
 
 from scipy.stats import ConstantInputWarning, NearConstantInputWarning
 
@@ -93,9 +92,6 @@ def validate_task_type(y, task_type):
             f"Please check your data or task_type specification."
         )
 
-
-def train_test_split(train, test, X, y, covariates):
-    return X[train], X[test], y[train], y[test], covariates[train], covariates[test]
 
 def torch_train_test_split(train, test, X, y, covariates):
     """Wie utils.train_test_split, aber X/y/covariates sind bereits GPU-Tensoren."""
@@ -280,122 +276,6 @@ def vector_to_matrix_tensor_version(tensor, dim):
     return out.movedim((-2, -1), (dim, dim + 1))
 
 
-def matrix_to_vector_tensor_version(tensor, dim):
-    """
-    Collapses two adjacent dimensions (representing a symmetric matrix)
-    into a single dimension containing the upper-triangular edges.
-
-    Args:
-        tensor: Arbitrary shape, e.g. [Net, Fold, Nodes, Nodes, Perm]
-        dim: The index of the first of the two matrix dimensions.
-
-    Returns:
-        Tensor with [dim, dim+1] replaced by a single dimension of size Features.
-        Example: [Net, Fold, Nodes, Nodes, Perm] -> [Net, Fold, Features, Perm]
-    """
-    # 1. Normalize dim to positive index
-    ndim = tensor.ndim
-    dim = dim % ndim
-
-    # 2. Identify Matrix Size (N)
-    n_nodes = tensor.shape[dim]
-    if n_nodes != tensor.shape[dim + 1]:
-        raise ValueError(f"Dimensions at {dim} and {dim + 1} must be square.")
-
-    # 3. Move the target dimensions to the end for indexing
-    # Current: [..., Nodes, Nodes, ...] -> [..., Nodes, Nodes]
-    # We move dim and dim+1 to the last two positions
-    temp_tensor = tensor.movedim((dim, dim + 1), (-2, -1))
-
-    # 4. Get Upper Triangle Indices (matching your offset=1)
-    rows, cols = torch.triu_indices(n_nodes, n_nodes, offset=1, device=tensor.device)
-
-    # 5. Extract Values
-    # Indexing with [..., rows, cols] returns a tensor where the last
-    # two dimensions are flattened into the length of the indices.
-    out = temp_tensor[..., rows, cols]
-
-    # 6. Move the collapsed dimension back to the original 'dim' position
-    # After step 5, the new "Features" dimension is at the very end (-1).
-    return out.movedim(-1, dim)
-
-
-
-def vector_to_matrix_numpy(array, dim):
-    """
-    Expands a dimension containing vectorized upper-triangular edges
-    into a symmetric square matrix.
-    """
-    # 1. Normalize dim
-    ndim = array.ndim
-    dim = dim % ndim
-
-    # 2. Calculate Number of Nodes
-    n_features = array.shape[dim]
-    n_nodes = int((1 + np.sqrt(1 + 8 * n_features)) / 2)
-
-    # 3. Move target dimension to the end
-    temp_array = np.moveaxis(array, dim, -1)
-
-    # 4. Create Output Placeholder
-    out_shape = temp_array.shape[:-1] + (n_nodes, n_nodes)
-    out = np.zeros(out_shape, dtype=array.dtype)
-
-    # 5. Get Upper Triangle Indices (k=1 excludes diagonal)
-    rows, cols = np.triu_indices(n_nodes, k=1)
-
-    # 6. Assign Values
-    # NumPy advanced indexing allows assigning to the last two dims at once
-    out[..., rows, cols] = temp_array
-
-    # 7. Make Symmetric
-    out[..., cols, rows] = temp_array
-
-    # 8. Move the Matrix dimensions back to the original location
-    return np.moveaxis(out, (-2, -1), (dim, dim + 1))
-
-def matrix_to_vector_numpy(array, dim):
-    """
-    Collapses two adjacent dimensions of a NumPy array into a
-    single dimension of upper-triangular elements.
-    """
-    ndim = array.ndim
-    dim = dim % ndim
-
-    n_nodes = array.shape[dim]
-    if n_nodes != array.shape[dim + 1]:
-        raise ValueError(f"Dimensions at {dim} and {dim + 1} must be square.")
-
-    # 1. Move target dimensions to the end
-    temp_array = np.moveaxis(array, (dim, dim + 1), (-2, -1))
-
-    # 2. Get Upper Triangle Indices
-    rows, cols = np.triu_indices(n_nodes, k=1)
-
-    # 3. Extract Values
-    # In NumPy, trailing indices work slightly differently with '...'
-    # We slice the last two dimensions using the coordinate pairs
-    out = temp_array[..., rows, cols]
-
-    # 4. Move the new vector dimension back to the original 'dim'
-    return np.moveaxis(out, -1, dim)
-
-def get_colors_from_colormap(n_colors, colormap_name='tab10'):
-    """
-    Get a set of distinct colors from a specified colormap.
-
-    Parameters:
-    n_colors (int): Number of distinct colors needed.
-    colormap_name (str): Name of the colormap to use (e.g., 'tab10').
-
-    Returns:
-    list: A list of color strings.
-    """
-    cmap = plt.get_cmap(colormap_name)
-    colors = [cmap(i / (n_colors - 1)) for i in range(n_colors)]
-    return colors
-
-
 def infer_n_nodes(n_features: int):
     """
     Return the number of nodes ``n`` for which ``n * (n - 1) / 2 == n_features``,
@@ -530,18 +410,6 @@ def check_data(X, y, covariates, impute_missings: bool = False):
 
     return X_checked, y_checked, cov_arr
 
-
-def impute_missing_values(X_train, X_test, cov_train, cov_test):
-    # Initialize imputers with chosen strategy (e.g., mean, median, most_frequent)
-    x_imputer = SimpleImputer(strategy='mean')
-    cov_imputer = SimpleImputer(strategy='mean')
-
-    # Fit on training data and transform both training and test data
-    X_train = x_imputer.fit_transform(X_train)
-    X_test = x_imputer.transform(X_test)
-    cov_train = cov_imputer.fit_transform(cov_train)
-    cov_test = cov_imputer.transform(cov_test)
-    return X_train, X_test, cov_train, cov_test
 
 def torch_impute_missing_values(X_train, X_test, cov_train, cov_test):
     def _impute(train, test):

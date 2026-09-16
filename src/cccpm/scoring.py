@@ -358,27 +358,6 @@ class FastCPMClassificationMetrics:
         return auc
 
 
-def score_regression_models(y_true, y_pred, device='cpu', **kwargs):
-    evaluator = FastCPMMetrics(device=device)
-    return evaluator.score(y_true, y_pred)
-
-
-def score_classification_models(y_true, y_pred_proba, device='cpu', **kwargs):
-    """
-    Score classification models using predicted probabilities.
-
-    Args:
-        y_true: True binary labels [N_samples, N_runs]
-        y_pred_proba: Predicted probabilities [N_samples, N_models, N_networks, N_runs]
-        device: Device for computation
-
-    Returns:
-        Tensor of metrics [N_metrics, N_models, N_networks, N_runs]
-    """
-    evaluator = FastCPMClassificationMetrics(device=device)
-    return evaluator.score(y_true, y_pred_proba)
-
-
 def score_models(y_true, y_pred, task_type, device='cpu', **kwargs):
     """
     Score models based on task type (regression or classification).
@@ -394,11 +373,12 @@ def score_models(y_true, y_pred, task_type, device='cpu', **kwargs):
         Tensor of metrics [N_metrics, N_models, N_networks, N_runs]
     """
     if task_type == TaskType.regression:
-        return score_regression_models(y_true, y_pred, device=device, **kwargs)
+        evaluator = FastCPMMetrics(device=device)
     elif task_type == TaskType.classification:
-        return score_classification_models(y_true, y_pred, device=device, **kwargs)
+        evaluator = FastCPMClassificationMetrics(device=device)
     else:
         raise ValueError(f"Unknown task_type: {task_type}")
+    return evaluator.score(y_true, y_pred)
 
 
 def score_models_batched(y_true, y_pred, task_type, valid_mask=None, device='cpu'):
