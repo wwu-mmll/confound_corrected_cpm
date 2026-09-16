@@ -14,6 +14,7 @@ from sklearn.model_selection import KFold, RepeatedKFold
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
 from cccpm.utils import check_data
 from cccpm.reporting.reporting_utils import average_over_repeats
+from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 
 def _make_cpm(results_directory, **kwargs):
@@ -231,3 +232,61 @@ def test_permutations_are_shuffled(cpm_instance):
     # Ensure the first permutation is not identical to the original input
     assert not np.array_equal(permuted_y[:, 0], y), \
         "The permuted vector is identical to the input! (No shuffle occurred)"
+
+
+# --- Permutation chunking (memory valve) --------------------------------------
+
+def test_permutation_chunking_does_not_change_results(tmp_path, monkeypatch):
+    """
+    Chunking permutations is a memory valve, not a change of method: splitting
+    the runs axis must not alter any result.
+
+    Permutations are always vectorised (y is [N_samples, N_runs] and the edge
+    statistic is one matmul over all columns). The chunk size only caps how many
+    columns are in flight so a large parcellation crossed with many permutations
+    degrades in speed rather than running out of memory -- so results computed in
+    chunks must match results computed in one pass.
+
+    Edge selection must agree exactly. Metrics are compared with a tolerance
+    because reducing over a differently-shaped tensor changes float32
+    accumulation order; the observed drift is ~6e-7 on values of order 1.
+    """
+    import cccpm.cpm_analysis as cpm_analysis_module
+    from cccpm.results_manager import ResultsManager
+    from cccpm.constants import TaskType
+
+    X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=120, n_features=45)
+    rng = np.random.default_rng(0)
+    y_perms = np.stack([rng.permutation(np.asarray(y).ravel()) for _ in range(17)], axis=1)
+
+    def run(chunk_size):
+        captured = {}
+        original_init = ResultsManager.__init__
+
+        def remember(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            captured['manager'] = self
+
+        monkeypatch.setattr(ResultsManager, '__init__', remember)
+        if chunk_size is not None:
+            monkeypatch.setattr(cpm_analysis_module, 'plan_permutation_chunk',
+                                lambda **kwargs: chunk_size)
+        cpm = CPMAnalysis(
+            results_directory=str(tmp_path / f"chunk_{chunk_size}"),
+            cv=KFold(n_splits=3, shuffle=True, random_state=1),
+            edge_selection=UnivariateEdgeSelection(
+                edge_statistic='pearson',
+                edge_selection=[PThreshold(threshold=[0.05], correction=[None])]),
+            inner_cv=None, n_permutations=0, device='cpu')
+        cpm.task_type = TaskType.regression
+        cpm._single_run(X=X, y=y_perms, covariates=covariates, perm_run=True)
+        monkeypatch.undo()
+        manager = captured['manager']
+        return manager.results.clone(), manager.cv_edge_sum.clone()
+
+    reference_metrics, reference_edges = run(None)          # single pass, 17 runs
+    for chunk_size in (1, 3, 5, 16):
+        metrics, edges = run(chunk_size)
+        assert torch.equal(edges, reference_edges), (
+            f"chunk={chunk_size} selected different edges")
+        torch.testing.assert_close(metrics, reference_metrics, rtol=0, atol=1e-5)

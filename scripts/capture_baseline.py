@@ -12,9 +12,18 @@ Usage:
     poetry run python scripts/capture_baseline.py --compare \
         baselines/pre-refactor baselines/post-phase4
 
-`--compare` is the point of the whole thing: cv_results_summary.csv must match
-to the 4 decimals it is written with, and stability_edges.npy must be bit
-identical. Anything else is a regression to explain, not to tolerate.
+`--compare` is the point of the whole thing. It always prints the observed
+maximum difference per file, passing or failing, and fails above CSV_TOLERANCE.
+
+That reporting matters: an earlier version printed nothing on success, and a
+3.3e-6 drift in predicted values sat undetected under a 5e-5 threshold for two
+commits. A regression check that only says "pass" hides exactly the information
+you need to judge whether the pass was meaningful.
+
+The tolerance exists because float32 accumulation order changes whenever tensor
+shapes change, which is unavoidable in a refactor; 1e-5 is far below anything
+that could represent a logic error in these outputs, and .npy edge/stability
+arrays are still required to be bit identical.
 """
 import argparse
 import shutil
@@ -72,10 +81,15 @@ def run_and_archive(example: str, device: str, out_dir: Path) -> None:
     print(f"    archived {archived} artifact(s) -> {dest}")
 
 
+CSV_TOLERANCE = 1e-5
+
+
 def compare(ref_dir: Path, new_dir: Path) -> int:
     """Diff two baselines. Returns the number of mismatches found."""
     mismatches = 0
     checked = 0
+    worst_overall = 0.0
+    worst_name = None
     for ref_file in sorted(ref_dir.rglob("*")):
         if not ref_file.is_file():
             continue
@@ -88,14 +102,20 @@ def compare(ref_dir: Path, new_dir: Path) -> int:
 
         checked += 1
         if ref_file.suffix == ".npy":
+            # Edge masks, stability and significance must be bit identical:
+            # they are discrete selections, not accumulated sums, so float
+            # reassociation cannot legitimately move them.
             a, b = np.load(ref_file), np.load(new_file)
             if a.shape != b.shape:
                 print(f"SHAPE    {rel}: {a.shape} vs {b.shape}")
                 mismatches += 1
-            elif not np.array_equal(a, b, equal_nan=True):
-                worst = np.nanmax(np.abs(a - b))
-                print(f"DIFFER   {rel}: max|diff| = {worst:.3e}")
+                continue
+            worst = float(np.nanmax(np.abs(a - b))) if a.size else 0.0
+            if not np.array_equal(a, b, equal_nan=True):
+                print(f"DIFFER   {rel}: max|diff| = {worst:.3e} (must be exact)")
                 mismatches += 1
+            else:
+                print(f"ok       {rel}: exact")
         else:
             a = pd.read_csv(ref_file)
             b = pd.read_csv(new_file)
@@ -107,12 +127,21 @@ def compare(ref_dir: Path, new_dir: Path) -> int:
             if not a.drop(columns=num).equals(b.drop(columns=num)):
                 print(f"DIFFER   {rel}: non-numeric columns differ")
                 mismatches += 1
-            elif not np.allclose(a[num], b[num], atol=5e-5, equal_nan=True):
-                worst = np.nanmax(np.abs(a[num].to_numpy() - b[num].to_numpy()))
-                print(f"DIFFER   {rel}: max|diff| = {worst:.3e} (tol 5e-5)")
+                continue
+            worst = (float(np.nanmax(np.abs(a[num].to_numpy() - b[num].to_numpy())))
+                     if len(num) else 0.0)
+            if worst > CSV_TOLERANCE:
+                print(f"DIFFER   {rel}: max|diff| = {worst:.3e} (tol {CSV_TOLERANCE:.0e})")
                 mismatches += 1
+            else:
+                print(f"ok       {rel}: max|diff| = {worst:.3e}")
+
+        if worst > worst_overall:
+            worst_overall, worst_name = worst, rel
 
     print(f"\n{checked} file(s) compared, {mismatches} mismatch(es).")
+    if worst_name is not None:
+        print(f"largest difference anywhere: {worst_overall:.3e} ({worst_name})")
     return mismatches
 
 

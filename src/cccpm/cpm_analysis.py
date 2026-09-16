@@ -19,7 +19,7 @@ from cccpm.results_manager import ResultsManager, PermutationManager
 from cccpm.utils import (torch_train_test_split, check_data, torch_impute_missing_values,
                          residualize_train_test, select_stable_edges,
                          generate_data_insights, detect_task_type,
-                         validate_task_type, infer_n_nodes)
+                         validate_task_type, infer_n_nodes, plan_permutation_chunk)
 from cccpm.atlases import resolve_atlas
 from cccpm.scoring import score_models
 from cccpm.reporting import HTMLReporter
@@ -387,16 +387,30 @@ class CPMAnalysis:
         y_dev = torch.as_tensor(y, device=self.device, dtype=torch.float32)
         cov_dev = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
 
-        iterator = tqdm(
-            enumerate(self.cv.split(X, y[:, 0])),
-            total=self.cv.get_n_splits(),
-            desc="Running outer folds",
-            unit="fold",
-        )
-        for outer_fold, (train, test) in iterator:
-            repeat = outer_fold // splits_per_repeat
-            self._run_outer_fold(outer_fold, repeat, train, test, X_dev, y_dev, cov_dev,
-                                 results_manager, perm_run)
+        # Permutations stay fully vectorised; this only caps how many columns are
+        # in flight so a large parcellation x many permutations degrades in speed
+        # rather than running out of memory. For a real (non-permutation) run
+        # n_runs == 1, so it never engages.
+        n_runs = y.shape[1]
+        chunk = plan_permutation_chunk(n_features=X.shape[1], n_samples=X.shape[0],
+                                       n_runs=n_runs, device=self.device)
+        if chunk < n_runs:
+            self.logger.info(
+                f"Processing {n_runs} permutations in {-(-n_runs // chunk)} chunks of "
+                f"at most {chunk} to stay within available memory.")
+
+        splits = list(self.cv.split(X, y[:, 0]))
+        iterator = tqdm(total=self.cv.get_n_splits() * (-(-n_runs // chunk)),
+                        desc="Running outer folds", unit="fold")
+        for run_start in range(0, n_runs, chunk):
+            run_idx = slice(run_start, min(run_start + chunk, n_runs))
+            y_chunk = y_dev[:, run_idx]
+            for outer_fold, (train, test) in enumerate(splits):
+                repeat = outer_fold // splits_per_repeat
+                self._run_outer_fold(outer_fold, repeat, train, test, X_dev, y_chunk,
+                                     cov_dev, results_manager, perm_run, run_idx=run_idx)
+                iterator.update(1)
+        iterator.close()
 
         # Aggregate across folds
         results_manager.calculate_final_cv_results(task_type=self.task_type)
@@ -409,7 +423,7 @@ class CPMAnalysis:
             self.results_manager = results_manager
 
     def _run_outer_fold(self, outer_fold, repeat, train, test, X, y, covariates,
-                        results_manager, perm_run):
+                        results_manager, perm_run, run_idx=slice(None)):
         X_train, X_test, y_train, y_test, cov_train, cov_test = torch_train_test_split(
             train, test, X, y, covariates)
         if self.impute_missing_values:
@@ -421,7 +435,8 @@ class CPMAnalysis:
 
         # edges: [Features, 2, Runs] -- one winning configuration per run.
         edges = self._select_edges(X_train, y_train, cov_train, results_manager, outer_fold)
-        results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
+        results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges,
+                                    run_idx=run_idx)
 
         model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
         model.fit(X_train, y_train, cov_train)
@@ -439,7 +454,8 @@ class CPMAnalysis:
 
         metrics = score_models(y_true=y_test, y_pred=y_pred,
                                task_type=self.task_type, device=self.device)
-        results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
+        results_manager.store_metrics(param_idx=0, fold_idx=outer_fold,
+                                      metrics_tensor=metrics, run_idx=run_idx)
 
     def _select_edges(self, X_train, y_train, cov_train, results_manager, outer_fold):
         """
