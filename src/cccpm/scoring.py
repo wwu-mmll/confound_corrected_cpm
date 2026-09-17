@@ -5,6 +5,8 @@ from cccpm.constants import Networks, Models, Metrics, TaskType
 
 class FastCPMMetrics:
 
+
+
     def __init__(self, device='cpu'):
         self.device = device
 

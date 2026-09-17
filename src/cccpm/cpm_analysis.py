@@ -380,8 +380,10 @@ class CPMAnalysis:
             and hasattr(self.cpm_model, 'predict_batched')
         )
 
+        splits = list(self.cv.split(X, y[:, 0]))
+        self._log_batch_plan(splits, X, covariates, y.shape[1])
+
         if can_batch_outer_folds:
-            splits = list(self.cv.split(X, y[:, 0]))
             self._run_outer_folds_batched(splits, X, y, covariates, results_manager, perm_run)
         else:
             # Move the full dataset to the compute device ONCE, instead of
@@ -420,6 +422,18 @@ class CPMAnalysis:
             results_manager.save_predictions()
             results_manager.save_network_strengths()
             self.results_manager = results_manager
+
+    def _log_batch_plan(self, splits, X, covariates, n_perms):
+        """Log the memory-aware batch plan for this run's outer-fold loop."""
+        n_samples_train = max(len(tr) for tr, te in splits)
+        n_samples_test = max(len(te) for tr, te in splits)
+        cost_fn = make_cpm_cost_fn(n_samples_train, n_samples_test, X.shape[1], covariates.shape[1])
+        plan = plan_batch_sizes(1, len(splits), n_perms, cost_fn, available_memory_bytes(self.device))
+        self.logger.info(
+            f"Batch plan (params/folds/perms per batch): "
+            f"{plan.params}/{plan.folds}/{plan.perms} "
+            f"(of 1/{len(splits)}/{n_perms} total)"
+        )
 
     # def _run_outer_fold(self, outer_fold, train, test, X, y, covariates,
     #                     results_manager, perm_run):
@@ -483,27 +497,46 @@ class CPMAnalysis:
         with torch.cuda.nvtx.range("store_edges"):
             results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
 
-        with torch.cuda.nvtx.range("model_fit"):
-            model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
-            model.fit(X_train, y_train, cov_train)
+        # Fit/predict/score/store, chunked over permutation columns: LinearCPM.fit/
+        # predict (and score_models) process the whole N_runs dimension in one
+        # unbatched pass, with intermediates shaped [N_*, Models, Networks, N_runs]
+        # -- at large n_permutations this was a second CUDA OOM source (same
+        # family as edge_sel:fit_transform above, just further down the fold
+        # body). Chunk with the same memory-aware planner, writing each chunk
+        # straight into results_manager via its run_idx slice instead of ever
+        # reassembling a full-N_runs tensor.
+        n_perms_total = y_train.shape[1]
+        cost_fn = make_cpm_cost_fn(
+            n_samples_train=X_train.shape[0], n_samples_test=X_test.shape[0],
+            n_features=X_train.shape[1], n_cov=cov_train.shape[1])
+        plan = plan_batch_sizes(1, 1, n_perms_total, cost_fn, available_memory_bytes(self.device))
 
-        with torch.cuda.nvtx.range("model_predict"):
-            y_pred = model.predict(X_test, cov_test, return_proba=True)
+        for start in range(0, n_perms_total, plan.perms):
+            end = min(start + plan.perms, n_perms_total)
+            run_idx = slice(start, end)
 
-        if not perm_run:
-            with torch.cuda.nvtx.range("store_predictions"):
-                results_manager.store_predictions(y_pred=y_pred, y_true=y_test,
-                                                  fold=outer_fold, test_indices=test)
-                network_strengths = model.get_network_strengths(X_test, cov_test)
-                results_manager.store_network_strengths(network_strengths=network_strengths,
-                                                        y_true=y_test, fold=outer_fold)
+            with torch.cuda.nvtx.range("model_fit"):
+                model = self.cpm_model(edges=edges[:, :, run_idx], device=self.device, task_type=self.task_type)
+                model.fit(X_train, y_train[:, run_idx], cov_train)
 
-        with torch.cuda.nvtx.range("scoring"):
-            metrics = score_models(y_true=y_test, y_pred=y_pred,
-                                   task_type=self.task_type, device=self.device)
+            with torch.cuda.nvtx.range("model_predict"):
+                y_pred = model.predict(X_test, cov_test, return_proba=True)
 
-        with torch.cuda.nvtx.range("store_metrics"):
-            results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
+            if not perm_run:
+                with torch.cuda.nvtx.range("store_predictions"):
+                    results_manager.store_predictions(y_pred=y_pred, y_true=y_test[:, run_idx],
+                                                      fold=outer_fold, test_indices=test)
+                    network_strengths = model.get_network_strengths(X_test, cov_test)
+                    results_manager.store_network_strengths(network_strengths=network_strengths,
+                                                            y_true=y_test[:, run_idx], fold=outer_fold)
+
+            with torch.cuda.nvtx.range("scoring"):
+                metrics = score_models(y_true=y_test[:, run_idx], y_pred=y_pred,
+                                       task_type=self.task_type, device=self.device)
+
+            with torch.cuda.nvtx.range("store_metrics"):
+                results_manager.store_metrics(param_idx=0, fold_idx=outer_fold,
+                                              metrics_tensor=metrics, run_idx=run_idx)
 
     def _run_outer_folds_batched(self, splits, X, y, covariates, results_manager, perm_run):
         """
@@ -709,8 +742,30 @@ class CPMAnalysis:
 
         torch.cuda.synchronize()
         with torch.cuda.nvtx.range("edge_sel:fit_transform"):
-            r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
-                X=X_train, y=y_train, covariates=cov_train, device=self.device)
+            # This computes r/p for every run (permutation column) in one pass
+            # -- unlike run_inner_folds above, nothing here was memory-planned,
+            # so at large n_permutations this was a real CUDA OOM source (the
+            # intermediates in correlations_and_pvalues are all
+            # [N_features, N_runs]-shaped and there are several of them alive
+            # at once). Chunk over runs using the same memory-aware planner
+            # used everywhere else; degenerates to today's single call when
+            # the whole thing fits (the common case).
+            n_perms_total = y_train.shape[1]
+            n_cov = cov_train.shape[1]
+            cost_fn = make_cpm_cost_fn(
+                n_samples_train=X_train.shape[0], n_samples_test=0,
+                n_features=X_train.shape[1], n_cov=n_cov)
+            plan = plan_batch_sizes(1, 1, n_perms_total, cost_fn, available_memory_bytes(self.device))
+
+            r_chunks, p_chunks = [], []
+            for start in range(0, n_perms_total, plan.perms):
+                end = min(start + plan.perms, n_perms_total)
+                r_c, p_c = self.edge_selection.edge_statistic.fit_transform(
+                    X=X_train, y=y_train[:, start:end], covariates=cov_train, device=self.device)
+                r_chunks.append(r_c)
+                p_chunks.append(p_c)
+            r_edges = r_chunks[0] if len(r_chunks) == 1 else torch.cat(r_chunks, dim=1)
+            p_edges = p_chunks[0] if len(p_chunks) == 1 else torch.cat(p_chunks, dim=1)
         torch.cuda.synchronize()
 
         if all(p == best_params[0] for p in best_params):

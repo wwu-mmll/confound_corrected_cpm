@@ -172,3 +172,7 @@ src/cccpm/simulation/simulation_results
 *.DS_Store
 # Quickstart output when run from the repo root
 /results/
+
+# Benchmark run outputs (examples/bench/benchmark.py) and scratch dir
+/benchmarks/
+/tmp/
