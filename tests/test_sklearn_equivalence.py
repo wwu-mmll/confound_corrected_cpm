@@ -28,11 +28,8 @@ from sklearn.model_selection import KFold
 
 from cccpm.cpm_analysis import CPMAnalysis
 from cccpm.constants import Models, Networks, TaskType
-from cccpm.edge_selection import (
-    correlations_and_pvalues,
-    PThreshold,
-    UnivariateEdgeSelection,
-)
+from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
+from cccpm.statistics import correlations_and_pvalues
 from cccpm.models.linear_model import LinearCPM
 from cccpm.simulation.simulate_sem import simulate_data_given_kappa
 

@@ -41,7 +41,7 @@ mkdocs build
 3. **Outer CV loop** — splits data, runs edge selection → model fitting → scoring per fold
 4. **Inner CV** (optional) — hyperparameter tuning via `run_inner_folds()` in `inner_fold.py`
 5. **Permutation testing** (optional) — shuffled targets for statistical significance
-6. **Results aggregation** — `ResultsManager` / `PermutationManager` in `results_manager.py`
+6. **Results aggregation** — `ResultsManager` in `results_manager.py`; permutation p-values, NBS/TFCE in `inference.py`
 7. **HTML report** — `reporting/html_report.py`
 
 ### Key Modules
@@ -51,10 +51,12 @@ mkdocs build
 | `cpm_analysis.py` | Main `CPMAnalysis` class — entry point and orchestrator |
 | `models/linear_model.py` | `LinearCPM` — PyTorch linear/logistic regression with Cholesky solver |
 | `models/nonlinear_models.py` | `DecisionTreeCPM` / `RandomForestCPM` / `GAMCPM` — alternative CPM model backends |
-| `edge_selection.py` | `UnivariateEdgeSelection` — correlation-based feature selection (Pearson/Spearman/partial) with p-value thresholding |
+| `statistics.py` | The edge statistic itself — one vectorised OLS GLM covering Pearson/Spearman/point-biserial and their partial variants, plus ranks, residualisation and Bonferroni |
+| `edge_selection.py` | `UnivariateEdgeSelection` / `PThreshold` — p-value thresholding, presence and connected-component filters, parameter grid |
 | `scoring.py` | `FastCPMMetrics` / `FastCPMClassificationMetrics` — GPU-accelerated metrics |
 | `inner_fold.py` | Inner CV for hyperparameter optimization |
-| `results_manager.py` | `ResultsManager` / `PermutationManager` — aggregation and p-value computation |
+| `results_manager.py` | `ResultsManager` — preallocated accumulation of per-fold results |
+| `inference.py` | `PermutationManager` — permutation p-values, NBS and TFCE edge-level correction |
 | `constants.py` | Enums: `TaskType`, `Networks`, `Models`, `Metrics` |
 | `validation.py` | Input validation (`check_data`), task-type detection, variable names |
 | `connectome.py` | Matrix <-> upper-triangular-vector conversion, the single place the edge indexing convention lives |

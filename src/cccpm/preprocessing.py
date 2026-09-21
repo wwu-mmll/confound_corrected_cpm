@@ -40,7 +40,7 @@ def residualize_train_test(X_train, X_test, confounds_train, confounds_test):
     subtract the fitted values from both train and test (residualizing test
     with the train-fit model, never fitting on test data). Pure torch,
     dtype/device-agnostic (works equally on CPU or GPU tensors) -- same
-    closed-form pseudo-inverse approach as edge_selection.get_residuals,
+    closed-form pseudo-inverse approach as statistics.get_residuals,
     generalized to the fit-on-train/apply-to-both split CPMAnalysis needs
     for its `calculate_residuals` option.
 

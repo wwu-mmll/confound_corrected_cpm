@@ -15,7 +15,8 @@ from cccpm.inner_fold import run_inner_folds
 from cccpm.logging import setup_logging
 from cccpm.models.linear_model import LinearCPM
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold, resolve_presence_threshold
-from cccpm.results_manager import ResultsManager, PermutationManager
+from cccpm.results_manager import ResultsManager
+from cccpm.inference import PermutationManager
 from cccpm.preprocessing import (torch_train_test_split, torch_impute_missing_values,
                                  residualize_train_test, select_stable_edges)
 from cccpm.validation import (check_data, detect_task_type, validate_task_type,
