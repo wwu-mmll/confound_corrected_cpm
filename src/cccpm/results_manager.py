@@ -9,6 +9,7 @@ It holds no statistics beyond means and argmax -- the permutation inference
 that used to live in this file is now in `inference.py`.
 """
 import os
+import json
 from typing import Union
 
 import numpy as np
@@ -27,6 +28,10 @@ class ResultsManager:
     ----------
     output_dir : str
         Directory where results will be saved.
+    available_models : list of str, optional
+        Names of the model variants this run defines. Persisted to
+        ``available_models.json`` so the report can skip the rest; defaults to
+        every entry of :class:`~cccpm.constants.Models`.
     """
     def __init__(self,
                  output_dir: Union[str, None],
@@ -36,9 +41,16 @@ class ResultsManager:
                  n_params: int = None,
                  is_inner_cv: bool = False,
                  device: torch.device = torch.device('cpu'),
-                 store_fold_edges: bool = True):
+                 store_fold_edges: bool = True,
+                 available_models: Union[list, None] = None):
         self.results_directory = output_dir
         self.is_inner_cv = is_inner_cv
+        # Which model variants this run actually defines. The results tensor is
+        # always full-size -- undefined variants are NaN-filled rather than
+        # reshaped away -- so the reporting layer needs to be told which rows
+        # mean something. Defaults to all of them.
+        self.available_models = (list(available_models) if available_models is not None
+                                 else [m.name for m in Models])
         self.device = device
         # Edge bookkeeping is kept on the CPU regardless of the compute device: it
         # only aggregates stability and (optionally) writes per-fold edges, and a
@@ -236,7 +248,9 @@ class ResultsManager:
                 'fold': fold,
                 'repeat': repeat,
             })
-            for m in ['connectome', 'residuals']
+            # Iterate what the model actually produced: without covariates
+            # there is no 'residuals' entry to store.
+            for m in network_strengths
             for n in ['positive', 'negative']
         ]
 
@@ -341,6 +355,11 @@ class ResultsManager:
 
         self.agg_results = df_agg.copy()
         df_agg.to_csv(os.path.join(self.results_directory, 'cv_results_summary.csv'), float_format='%.4f')
+
+        # The report reads this to know which model rows carry a real number and
+        # which are NaN placeholders for variants this run does not define.
+        with open(os.path.join(self.results_directory, 'available_models.json'), 'w') as f:
+            json.dump(self.available_models, f)
 
         # Concatenate the per-fold prediction frames into a single DataFrame;
         # save_predictions() (real runs only) is what writes it to disk.

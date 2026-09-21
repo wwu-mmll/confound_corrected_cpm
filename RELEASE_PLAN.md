@@ -15,12 +15,15 @@ and within sections.
 
 ## Correctness & statistical validity
 
-- [ ] **Clear error when no confound is provided.** A missing/`None` `covariates`
-      argument currently crashes deep in `check_data`/`get_residuals` instead of
-      failing fast. Catch it early in `check_data`/`CPMAnalysis.run` and raise a
-      clear message that a confound is currently required (the covariates/full/
-      residuals variants and the `*_partial` statistics all assume one). Add a
-      test. (Longer term: consider a real no-confound mode.)
+- [x] **No-confound mode** (2026-09-21). `covariates` is now optional rather than
+      required, so vanilla CPM is a first-class mode -- the "longer term" option in
+      the original item, taken instead of just improving the error message. Only the
+      `connectome` model is defined; `covariates`/`full`/`residuals`/`increment` are
+      NaN-filled (the results tensor keeps its shape) and `available_models.json`
+      tells the report which rows mean something. Options that presuppose covariates
+      (a `*_partial` statistic, `calculate_residuals=True`) raise up front naming the
+      offending parameter -- they would otherwise have degraded silently into a
+      different analysis. Covered by `tests/test_no_covariates.py`.
 - [~] **Edge-selection p-value approximation** (decision #6). The normal
       approximation to the t-tail in `correlations_and_pvalues` is
       anti-conservative at small N (~13% too low at N=20, negligible at N≥100).

@@ -66,7 +66,10 @@ def generate_data_insights(X, y, covariates, results_directory):
         y = pd.Series(y.detach().cpu().numpy(), name="target")
     if isinstance(covariates, torch.Tensor):
         covariates = pd.DataFrame(covariates.detach().cpu().numpy())
-    full_data = pd.concat([X, y.rename("target"), covariates], axis=1)
+    parts = [X, y.rename("target")]
+    if covariates is not None:
+        parts.append(covariates)
+    full_data = pd.concat(parts, axis=1)
     missing_total = full_data.isnull().sum().sum()
 
     # --- Summary ---

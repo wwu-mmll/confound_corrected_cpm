@@ -55,6 +55,9 @@ class HTMLReporter:
         )
         self.atlas_labels = self.data_loader.atlas_labels
         self.task_type = self.data_loader.load_task_type()
+        # Model variants this run defines; the rest are NaN placeholders and
+        # their sections are omitted rather than rendered blank.
+        self.available_models = self.data_loader.load_available_models()
         self._load_data()
 
     def _load_data(self) -> None:
@@ -79,6 +82,7 @@ class HTMLReporter:
         ctx: dict = {
             "y_name": self.y_name,
             "logo_img": self._logo_html(),
+            "available_models": self.available_models,
         }
 
         ctx.update(build_hero_context(
@@ -93,6 +97,7 @@ class HTMLReporter:
             task_type=self.task_type,
             version=cccpm.__version__,
             run_date=datetime.date.today().isoformat(),
+            available_models=self.available_models,
         ))
 
         ctx.update(build_data_context(summary_df, scatter_path, self.results_directory))

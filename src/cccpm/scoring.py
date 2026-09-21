@@ -147,6 +147,19 @@ class FastCPMClassificationMetrics:
         f1_score = 2 * (precision * tpr) / (precision + tpr + 1e-8)
         roc_auc = self._fast_roc_auc(truth, y_pred_proba)
 
+        # Every classification metric above is built from comparisons, and a
+        # comparison against NaN is silently False: an undefined prediction
+        # column would score as "predicted class 0 for everyone" -- a real
+        # number, around the base rate, with nothing marking it as meaningless.
+        # (The regression metrics need no such guard; means and variances
+        # propagate NaN on their own.) Undefined in, undefined out.
+        undefined = torch.isnan(y_pred_proba).any(dim=0)
+        nan = torch.full_like(accuracy, float('nan'))
+        accuracy = torch.where(undefined, nan, accuracy)
+        balanced_accuracy = torch.where(undefined, nan, balanced_accuracy)
+        f1_score = torch.where(undefined, nan, f1_score)
+        roc_auc = torch.where(undefined, nan, roc_auc)
+
         zero = torch.zeros_like(accuracy)
         metrics_list = [zero] * len(Metrics)
         metrics_list[Metrics.accuracy] = accuracy

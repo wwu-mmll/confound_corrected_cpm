@@ -6,8 +6,11 @@ including results files, predictions, network strengths, and metadata.
 """
 
 import os
+import json
 import pandas as pd
 from typing import Tuple, Optional
+
+from cccpm.reporting.plots.plots import MODEL_ORDER
 
 
 class ReportDataLoader:
@@ -55,12 +58,31 @@ class ReportDataLoader:
             header=None
         ).iloc[0, 0]
 
-        covar_names = pd.read_csv(
-            os.path.join(data_insights_dir, "covariate_names.csv"),
-            header=None
-        )[0].tolist()
+        # Written as an empty file when the analysis ran without covariates;
+        # pandas cannot parse a file with no columns.
+        covar_path = os.path.join(data_insights_dir, "covariate_names.csv")
+        if os.path.getsize(covar_path) == 0:
+            covar_names = []
+        else:
+            covar_names = pd.read_csv(covar_path, header=None)[0].tolist()
 
         return X_names, y_name, covar_names
+
+    def load_available_models(self) -> list:
+        """
+        The model variants this run defines, in report order.
+
+        A run without covariates NaN-fills the variants that need them rather
+        than reshaping the results tensor, so the report filters on this list
+        instead of on what columns exist. Result directories written before
+        this file existed fall back to the full model set.
+        """
+        path = os.path.join(self.results_directory, 'available_models.json')
+        if not os.path.exists(path):
+            return list(MODEL_ORDER)
+        with open(path) as f:
+            available = set(json.load(f))
+        return [m for m in MODEL_ORDER if m in available]
 
     def load_cv_results(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -75,6 +97,7 @@ class ReportDataLoader:
         df_full = pd.read_csv(
             os.path.join(self.results_directory, 'cv_results_full.csv')
         ).drop("run", axis=1)
+        df_full = self._keep_available_models(df_full)
 
         # Load summary results
         df_summary = load_results_from_folder(
@@ -99,7 +122,10 @@ class ReportDataLoader:
         """
         df = df.reorder_levels(["model", "network", "run"])
 
-        model_order = ["covariates", "connectome", "full", "residuals", "increment"]
+        # Drop the NaN placeholder rows for variants this run does not define,
+        # rather than printing a table of blanks.
+        model_order = self.load_available_models()
+        df = df[df.index.get_level_values("model").isin(model_order)]
         network_order = ["positive", "negative", "both"]
 
         # Create categorical index for proper sorting
@@ -120,10 +146,17 @@ class ReportDataLoader:
 
         return df.sort_index().droplevel("run")
 
+    def _keep_available_models(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop rows for model variants this run does not define."""
+        if 'model' not in df.columns:
+            return df
+        return df[df['model'].isin(self.load_available_models())]
+
     def load_predictions(self) -> pd.DataFrame:
         """Load cross-validation predictions."""
         from cccpm.reporting.reporting_utils import load_data_from_folder
-        return load_data_from_folder(self.results_directory, 'cv_predictions.csv')
+        return self._keep_available_models(
+            load_data_from_folder(self.results_directory, 'cv_predictions.csv'))
 
     def load_p_values(self) -> Optional[pd.DataFrame]:
         """Load permutation test p-values."""
@@ -143,7 +176,8 @@ class ReportDataLoader:
     def load_network_strengths(self) -> pd.DataFrame:
         """Load network strength values."""
         from cccpm.reporting.reporting_utils import load_data_from_folder
-        return load_data_from_folder(self.results_directory, 'cv_network_strengths.csv')
+        return self._keep_available_models(
+            load_data_from_folder(self.results_directory, 'cv_network_strengths.csv'))
 
     def load_edge_stability(self) -> Tuple:
         """

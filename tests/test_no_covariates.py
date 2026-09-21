@@ -1,0 +1,201 @@
+"""
+Vanilla CPM: running without covariates.
+
+`covariates` used to be a required argument, and omitting it crashed deep inside
+`check_data`. It is now optional, which makes exactly one model meaningful --
+`connectome`. The others (`covariates`, `full`, `residuals`, `increment`) all
+need a confound design and are reported as NaN rather than as a number that
+would read as a real, terrible model score.
+
+The results tensor keeps its full shape: undefined variants are NaN-filled, not
+reshaped away, and `available_models.json` tells the report which rows mean
+something.
+"""
+import json
+import os
+
+import numpy as np
+import pytest
+import torch
+from sklearn.model_selection import KFold
+
+from cccpm import CPMAnalysis, PThreshold, UnivariateEdgeSelection
+from cccpm.constants import Models, Networks
+from cccpm.models.linear_model import LinearCPM
+from cccpm.validation import check_data, get_variable_names
+
+
+COVARIATE_DEPENDENT = (Models.covariates, Models.full,
+                       Models.residuals, Models.increment)
+
+
+def _data(seed=0, n=120, n_nodes=10, binary=False):
+    rng = np.random.RandomState(seed)
+    n_features = n_nodes * (n_nodes - 1) // 2
+    X = rng.randn(n, n_features)
+    Z = rng.randn(n, 2)
+    y = X[:, :5].sum(1) * 0.5 + Z[:, 0] + rng.randn(n)
+    if binary:
+        y = (y > np.median(y)).astype(float)
+    return X, y, Z
+
+
+def _analysis(tmp_path, statistic="pearson", **kwargs):
+    ue = UnivariateEdgeSelection(
+        edge_statistic=statistic,
+        edge_selection=[PThreshold(threshold=0.05, correction=[None])])
+    return CPMAnalysis(
+        results_directory=str(tmp_path),
+        cv=KFold(n_splits=3, shuffle=True, random_state=0),
+        edge_selection=ue, n_permutations=0, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+def test_check_data_returns_none_for_absent_covariates():
+    X, y, _ = _data()
+    X_checked, y_checked, cov = check_data(X, y, None)
+    assert cov is None
+    assert X_checked.shape == X.shape
+    assert y_checked.shape == (len(y),)
+
+
+def test_get_variable_names_without_covariates():
+    X, y, _ = _data()
+    _, _, covar_names = get_variable_names(X, y, None)
+    assert covar_names == []
+
+
+# ---------------------------------------------------------------------------
+# Options that presuppose covariates must fail up front, not degrade silently
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("statistic", ["pearson_partial", "spearman_partial",
+                                       "point_biserial_partial"])
+def test_partial_statistic_without_covariates_raises(tmp_path, statistic):
+    X, y, _ = _data()
+    cpm = _analysis(tmp_path, statistic=statistic, task_type="regression")
+    with pytest.raises(ValueError, match="require covariates"):
+        cpm.run(X=X, y=y)
+
+
+def test_calculate_residuals_without_covariates_raises(tmp_path):
+    X, y, _ = _data()
+    cpm = _analysis(tmp_path, task_type="regression", calculate_residuals=True)
+    with pytest.raises(ValueError, match="require covariates"):
+        cpm.run(X=X, y=y)
+
+
+def test_error_names_the_offending_parameter(tmp_path):
+    """A user has to be able to tell which argument to change."""
+    X, y, _ = _data()
+    cpm = _analysis(tmp_path, statistic="pearson_partial",
+                    task_type="regression", calculate_residuals=True)
+    with pytest.raises(ValueError) as excinfo:
+        cpm.run(X=X, y=y)
+    message = str(excinfo.value)
+    assert "edge_statistic='pearson_partial'" in message
+    assert "calculate_residuals=True" in message
+
+
+# ---------------------------------------------------------------------------
+# The model itself
+# ---------------------------------------------------------------------------
+
+def test_model_nan_fills_covariate_dependent_variants():
+    X, y, _ = _data()
+    n_features = X.shape[1]
+    edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
+    edges[:5, Networks.positive, 0] = True
+    edges[5:10, Networks.negative, 0] = True
+
+    model = LinearCPM(edges=edges, device='cpu').fit(X, y.reshape(-1, 1), None)
+    pred = model.predict(X).numpy()
+
+    assert model.available_models == ['connectome']
+    assert np.isfinite(pred[:, Models.connectome]).all()
+    for model_idx in COVARIATE_DEPENDENT:
+        assert np.isnan(pred[:, model_idx]).all(), f"{model_idx.name} should be NaN"
+
+
+def test_connectome_model_is_unaffected_by_dropping_covariates():
+    """Given the same edges, the connectome model never touches the covariate
+    design, so its predictions must be identical either way."""
+    X, y, Z = _data()
+    n_features = X.shape[1]
+    edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
+    edges[:5, Networks.positive, 0] = True
+    edges[5:10, Networks.negative, 0] = True
+
+    with_cov = LinearCPM(edges=edges, device='cpu').fit(X, y.reshape(-1, 1), Z)
+    without = LinearCPM(edges=edges, device='cpu').fit(X, y.reshape(-1, 1), None)
+
+    np.testing.assert_allclose(
+        with_cov.predict(X, Z).numpy()[:, Models.connectome],
+        without.predict(X).numpy()[:, Models.connectome],
+        rtol=1e-6, atol=1e-6)
+
+
+def test_classification_metrics_are_nan_not_a_plausible_score():
+    """`nan > 0.5` is False, so an undefined prediction column would otherwise
+    score as "class 0 for everyone" -- an accuracy near the base rate, with
+    nothing marking it as meaningless."""
+    from cccpm.scoring import score_models
+    from cccpm.constants import Metrics, TaskType
+
+    rng = np.random.RandomState(0)
+    n = 80
+    y_true = (rng.rand(n, 1) > 0.5).astype(np.float32)
+    y_pred = rng.rand(n, len(Models), len(Networks), 1).astype(np.float32)
+    y_pred[:, Models.covariates] = np.nan
+
+    scores = score_models(y_true=y_true, y_pred=y_pred,
+                          task_type=TaskType.classification, device='cpu')
+
+    for metric in (Metrics.accuracy, Metrics.balanced_accuracy,
+                   Metrics.f1_score, Metrics.roc_auc):
+        assert torch.isnan(scores[metric, Models.covariates]).all(), metric.name
+        assert torch.isfinite(scores[metric, Models.connectome]).all(), metric.name
+
+
+# ---------------------------------------------------------------------------
+# End to end
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("binary", [False, True])
+def test_run_without_covariates_end_to_end(tmp_path, binary):
+    X, y, _ = _data(binary=binary)
+    task = "classification" if binary else "regression"
+    statistic = "point_biserial" if binary else "pearson"
+
+    cpm = _analysis(tmp_path, statistic=statistic, task_type=task)
+    cpm.run(X=X, y=y)
+
+    with open(os.path.join(str(tmp_path), 'available_models.json')) as f:
+        assert json.load(f) == ['connectome']
+
+    metric = "accuracy" if binary else "pearson_score"
+    ag = cpm.results_manager.agg_results
+    connectome = ag.loc[("connectome", "both"), (metric, "mean")]
+    assert np.isfinite(np.ravel(connectome)).all()
+
+    for name in ("covariates", "full", "residuals", "increment"):
+        assert np.isnan(np.ravel(ag.loc[(name, "both"), (metric, "mean")])).all(), name
+
+    # The report renders, and says nothing about models that do not exist.
+    report = os.path.join(str(tmp_path), 'report.html')
+    assert os.path.exists(report)
+    html = open(report).read()
+    assert "Covariates only" not in html
+    assert "nan" not in html and "NaN" not in html
+
+
+def test_network_strengths_omit_residuals_without_covariates(tmp_path):
+    X, y, _ = _data()
+    cpm = _analysis(tmp_path, task_type="regression")
+    cpm.run(X=X, y=y)
+
+    strengths = cpm.results_manager.cv_network_strengths
+    assert set(strengths['model'].unique()) == {'connectome'}

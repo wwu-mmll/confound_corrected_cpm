@@ -26,7 +26,7 @@ from cccpm.atlases import resolve_atlas
 from cccpm.scoring import score_models
 from cccpm.reporting import HTMLReporter
 from cccpm.reporting.data_insights import generate_data_insights
-from cccpm.constants import Networks, TaskType
+from cccpm.constants import Models, Networks, TaskType
 
 
 class CPMAnalysis:
@@ -273,10 +273,52 @@ class CPMAnalysis:
                 f"atlas matching your parcellation."
             )
 
+    def _available_models(self):
+        """
+        Which model variants this run defines. Without covariates only
+        ``connectome`` is meaningful: ``covariates`` has an empty design,
+        ``full`` collapses onto ``connectome``, ``residuals`` has nothing to
+        residualise against, and ``increment`` would be identically zero.
+        """
+        if getattr(self, 'has_covariates', True):
+            return [m.name for m in Models]
+        return [Models.connectome.name]
+
+    def _validate_covariate_requirements(self, covariates):
+        """
+        Fail up front when an option that needs covariates was combined with no
+        covariates, naming the offending parameter.
+
+        Without this the run would not crash -- it would quietly degrade. A
+        ``*_partial`` statistic with an empty confound design is just the plain
+        statistic, and ``calculate_residuals`` would subtract a fit on nothing.
+        Both would produce a full set of plausible numbers that silently answer
+        a different question, which is the failure mode this package has been
+        bitten by before.
+        """
+        if covariates is not None:
+            return
+
+        offenders = []
+        statistic = self.edge_selection.edge_statistic.edge_statistic
+        if statistic.endswith('_partial'):
+            offenders.append(
+                f"edge_statistic='{statistic}' (partial statistics control for "
+                f"covariates; use '{statistic[:-len('_partial')]}' instead)")
+        if self.calculate_residuals:
+            offenders.append(
+                "calculate_residuals=True (there is nothing to residualise against)")
+
+        if offenders:
+            raise ValueError(
+                "covariates=None, but these options require covariates: "
+                + "; ".join(offenders) + "."
+            )
+
     def run(self,
             X: Union[pd.DataFrame, np.ndarray],
             y: Union[pd.Series, pd.DataFrame, np.ndarray],
-            covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
+            covariates: Union[pd.Series, pd.DataFrame, np.ndarray, None] = None):
         """
         Estimates a model using the provided data and conducts permutation testing. This method first fits the model to the actual data and subsequently performs estimation on permuted data for a specified number of permutations. Finally, it calculates permutation results.
 
@@ -285,13 +327,32 @@ class CPMAnalysis:
         X: Feature data used for the model. Can be a pandas DataFrame or a NumPy array.
         y: Target variable used in the estimation process. Can be a pandas Series, DataFrame, or a NumPy array.
         covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
+            Omit it (or pass ``None``) for vanilla CPM with no confound control. In that
+            mode only the ``connectome`` model is defined -- ``covariates``, ``full``,
+            ``residuals`` and ``increment`` all need covariates and are reported as NaN,
+            and the models that do exist are listed in ``available_models.json``.
+            Options that presuppose covariates (a ``*_partial`` edge statistic,
+            ``calculate_residuals=True``) then raise up front.
 
         """
         self.logger.info("Starting CPM estimation.")
 
+        self._validate_covariate_requirements(covariates)
+
         # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
+
+        self.has_covariates = covariates is not None
+        if not self.has_covariates:
+            self.logger.info(
+                "No covariates supplied: running vanilla CPM. Only the "
+                "'connectome' model is defined; covariates/full/residuals/"
+                "increment are reported as NaN.")
+            # A zero-width design keeps every tensor operation downstream valid
+            # without a `None` check in each of them. LinearCPM reads the width,
+            # not this flag, to decide which variants exist.
+            covariates = np.empty((X.shape[0], 0), dtype=np.float64)
 
         # Guard against an atlas that doesn't match the connectome size.
         self._validate_atlas_node_count(X.shape[1])
@@ -371,7 +432,8 @@ class CPMAnalysis:
         # parcellations x many folds x many permutations).
         results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
-                                         device=self.device, store_fold_edges=not perm_run)
+                                         device=self.device, store_fold_edges=not perm_run,
+                                         available_models=self._available_models())
 
         # For a RepeatedKFold the outer split index runs 0..(n_splits*n_repeats-1)
         # with all folds of repeat 0 first, then repeat 1, etc. Derive the repeat

@@ -97,22 +97,38 @@
     <section class="report-section" id="performance">
       <h2>Model Comparison</h2>
       <p class="section-intro">
+        {% if 'increment' in available_models %}
         How the model variants compare across metrics and networks. The
         <em>increment</em> model — the full model minus the covariates-only model — is the
         key confound-control result: it isolates the predictive value the connectome adds
         <em>beyond</em> the confounds.
+        {% else %}
+        How the connectome model performs across metrics and networks. This analysis ran
+        without covariates, so the confound-control variants (covariates, full, residuals,
+        increment) are not defined.
+        {% endif %}
       </p>
 
       <div class="info">
         <p>Each model answers a different question:</p>
         <ul>
+          {% if 'connectome' in available_models %}
           <li><strong>connectome</strong> — how well does brain connectivity alone predict?</li>
+          {% endif %}
+          {% if 'covariates' in available_models %}
           <li><strong>covariates</strong> — the baseline from nuisance variables (age, sex, motion…).</li>
+          {% endif %}
+          {% if 'full' in available_models %}
           <li><strong>full</strong> — connectome + covariates combined (best prediction).</li>
+          {% endif %}
+          {% if 'residuals' in available_models %}
           <li><strong>residuals</strong> — connectome after removing covariate effects from the target.</li>
+          {% endif %}
+          {% if 'increment' in available_models %}
           <li><strong>increment</strong> — the <em>added</em> value of the connectome over covariates
             (full − covariates). A significant increment is your evidence the connectome carries
             information the confounds do not.</li>
+          {% endif %}
         </ul>
         <p>
           Colours are the network the edges came from: red = positive, blue = negative,
@@ -135,9 +151,13 @@
       <h3>Results Table</h3>
       <p class="section-intro">
         Mean [SD] across outer CV folds. Permutation p-values: * p&lt;0.05, ** p&lt;0.01.
+        {% if 'increment' in available_models %}
         Models: <em>connectome</em> (connectivity only), <em>covariates</em> (confounds only),
         <em>full</em> (connectome + confounds), <em>residuals</em> (residualised connectome),
         <em>increment</em> (full minus covariates).
+        {% else %}
+        Model: <em>connectome</em> (connectivity only) — this analysis ran without covariates.
+        {% endif %}
         Networks: <em>positive</em> / <em>negative</em> / <em>both</em>.
       </p>
       <div class="table-scroll card">{{ results_table }}</div>

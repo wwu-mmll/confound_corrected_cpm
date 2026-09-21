@@ -31,6 +31,7 @@ from cccpm.reporting.table_builders import (
     create_hyperparameter_table,
 )
 from cccpm.reporting.plots.plots import (
+    MODEL_ORDER,
     histograms_network_strengths,
     performance_grid,
     scatter_plot_main,
@@ -108,12 +109,15 @@ def build_hero_context(
     task_type: str,
     version: str,
     run_date: str,
+    available_models: Optional[list] = None,
 ) -> dict:
     """
     Build the hero: a one-sentence verdict, key-stat chips, and the prominent
     predicted-vs-observed scatter for the headline (connectome, both) model.
     """
     import re
+
+    available_models = available_models or MODEL_ORDER
 
     cfg = _config_dict(results_directory)
     raw = "\n".join(f"{k}: {v}" for k, v in _config_items(results_directory))
@@ -194,7 +198,9 @@ def build_hero_context(
     if n_edges is not None:
         chips.append(("Stable edges", str(n_edges)))
     ncov = _summary_value(summary_df, "Number of covariates")
-    if ncov:
+    # "Covariates: 0" is noise; the Model Comparison section already says the
+    # analysis ran without them.
+    if ncov and str(ncov).strip() not in ("0", "0.0"):
         chips.append(("Covariates", ncov))
     if p_thresh:
         chips.append(("Edge p-threshold", p_thresh))
@@ -241,8 +247,11 @@ def build_hero_context(
         _scatter("connectome", "both", "scatter_both", "Connectome — both networks"),
         _scatter("connectome", "positive", "scatter_positive", "Connectome — positive network"),
         _scatter("connectome", "negative", "scatter_negative", "Connectome — negative network"),
-        _scatter("covariates", "both", "scatter_covariates", "Covariates only"),
     ]
+    # Omitted, not rendered blank, when the run had no covariates.
+    if "covariates" in available_models:
+        hero_scatters.append(
+            _scatter("covariates", "both", "scatter_covariates", "Covariates only"))
     hero_scatters = [s for s in hero_scatters if s is not None]
 
     return {

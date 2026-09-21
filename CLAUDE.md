@@ -74,7 +74,13 @@ mkdocs build
 
 ### Model Variants
 
-Each fold fits four model types (defined in `Models` enum): **connectome**, **covariates**, **full**, **residuals**. Each is evaluated across network types (positive, negative, both).
+Each fold fits four model types (defined in `Models` enum): **connectome**, **covariates**, **full**, **residuals**, plus **increment** (full − covariates) computed at aggregation. Each is evaluated across network types (positive, negative, both).
+
+Passing `covariates=None` to `CPMAnalysis.run` is vanilla CPM: only **connectome** is
+defined, the other variants are NaN-filled (the results tensor keeps its full shape),
+and `available_models.json` in the results directory tells the report which model rows
+carry a real number. Options that presuppose covariates (`*_partial` edge statistics,
+`calculate_residuals=True`) raise up front.
 
 ### Package Structure
 

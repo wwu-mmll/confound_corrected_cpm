@@ -105,7 +105,7 @@ def infer_n_nodes(n_features: int):
     return (1 + root) // 2
 
 
-def check_data(X, y, covariates, impute_missings: bool = False):
+def check_data(X, y, covariates=None, impute_missings: bool = False):
     """
     Validate and format input data for modeling.
 
@@ -117,8 +117,9 @@ def check_data(X, y, covariates, impute_missings: bool = False):
     y: array-like
         Target values; 1D array of shape (n_samples,) or
         2D array of shape (n_samples, 1) to be squeezed.
-    covariates: array-like or pandas.Series or pandas.DataFrame
+    covariates: array-like, pandas.Series, pandas.DataFrame or None
         Covariate data. Series are converted to 2D; DataFrames are one-hot encoded.
+        ``None`` means vanilla CPM with no confound control.
     impute_missings: bool, default=False
         If True, allow NaNs in X for imputation; NaNs in y always raise an error.
 
@@ -128,8 +129,8 @@ def check_data(X, y, covariates, impute_missings: bool = False):
         2D array of validated (and vectorized) feature data.
     y_checked: np.ndarray
         1D array of target values.
-    cov_arr: np.ndarray
-        2D array of covariates.
+    cov_arr: np.ndarray or None
+        2D array of covariates, or ``None`` if none were supplied.
     """
     # Convert to numpy for dimension checks
     if isinstance(X, torch.Tensor):
@@ -202,7 +203,11 @@ def check_data(X, y, covariates, impute_missings: bool = False):
             )
             raise
 
-    # Process covariates
+    # Process covariates. None is a first-class value: vanilla CPM with no
+    # confound control, where the covariates/full/increment models do not exist.
+    if covariates is None:
+        return X_checked, y_checked, None
+
     if isinstance(covariates, pd.Series):
         cov_df = covariates.to_frame()
     elif isinstance(covariates, pd.DataFrame):
@@ -237,10 +242,11 @@ def get_variable_names(X, y, covariates):
     y : array-like, pandas.Series, or pandas.DataFrame
         Target vector. If Series, its name is used; if DataFrame, the first
         column name is used; otherwise, the default name "target" is returned.
-    covariates : array-like, pandas.Series, or pandas.DataFrame
+    covariates : array-like, pandas.Series, pandas.DataFrame or None
         Covariate data. If Series, its name is returned as a single-element
-        list; if DataFrame, its column names are returned; otherwise, generic
-        names "covariate_{i}" are generated for each covariate column.
+        list; if DataFrame, its column names are returned; if None, an empty
+        list; otherwise, generic names "covariate_{i}" are generated for each
+        covariate column.
 
     Returns
     -------
@@ -263,18 +269,19 @@ def get_variable_names(X, y, covariates):
         y_name = "target"
 
     # Covariates
-    if isinstance(covariates, (pd.Series, pd.DataFrame)):
+    if covariates is None:
+        covar_names = []
+    elif isinstance(covariates, (pd.Series, pd.DataFrame)):
         covar_names = (
             [covariates.name]
             if isinstance(covariates, pd.Series)
             else list(covariates.columns)
         )
+    elif len(covariates.shape) == 1:
+        covar_names = ["covariate_1"]
     else:
-        if len(covariates.shape) == 1:
-            covar_names = ["covariate_1"]
-        else:
-            covar_names = [
-                f"covariate_{i}" for i in range(covariates.shape[1])
-            ]
+        covar_names = [
+            f"covariate_{i}" for i in range(covariates.shape[1])
+        ]
 
     return X_names, y_name, covar_names
