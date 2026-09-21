@@ -71,16 +71,29 @@ class PermutationManager:
         """
         result_dict = {}
         for column in true_group.columns:
+            observed = true_group[column].values[0]
+            null = perms_group[column].astype(float)
+
+            # An undefined statistic has no null to compare against. Every
+            # comparison with NaN is False, so the count would come out 0 and
+            # the +1 correction would report the *floor* -- 1/(n_perms+1), the
+            # most significant p-value the test can produce -- for a model that
+            # does not exist. (This is what a run without covariates hits: the
+            # covariates/full/residuals/increment rows are NaN placeholders.)
+            if pd.isna(observed) or null.isna().all():
+                result_dict[column] = float('nan')
+                continue
+
             if PermutationManager._is_lower_better(column):
-                condition_count = (true_group[column].values[0] > perms_group[column].astype(float)).sum()
+                condition_count = (observed > null).sum()
             else:
                 # Higher is better: score, accuracy, balanced_accuracy, f1_score, roc_auc, etc.
-                condition_count = (true_group[column].values[0] < perms_group[column].astype(float)).sum()
+                condition_count = (observed < null).sum()
 
             # Standard permutation p-value (Phipson & Smyth, 2010): the +1 in both
             # numerator and denominator counts the observed statistic itself and
             # guarantees a valid p-value in (0, 1].
-            result_dict[column] = (condition_count + 1) / (len(perms_group[column]) + 1)
+            result_dict[column] = (condition_count + 1) / (len(null) + 1)
 
         return pd.Series(result_dict)
 

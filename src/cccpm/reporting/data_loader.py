@@ -162,7 +162,7 @@ class ReportDataLoader:
         """Load permutation test p-values."""
         csv_path = os.path.join(self.results_directory, 'p_values.csv')
         if os.path.exists(csv_path):
-            return pd.read_csv(csv_path)
+            return self._keep_available_models(pd.read_csv(csv_path))
         return None
 
     def load_permutations(self) -> Optional[pd.DataFrame]:
@@ -170,7 +170,7 @@ class ReportDataLoader:
         perm_dir = os.path.join(self.results_directory, 'permutation')
         csv_path = os.path.join(perm_dir, 'cv_results_summary.csv')
         if os.path.exists(csv_path):
-            return pd.read_csv(csv_path)
+            return self._keep_available_models(pd.read_csv(csv_path))
         return None
 
     def load_network_strengths(self) -> pd.DataFrame:

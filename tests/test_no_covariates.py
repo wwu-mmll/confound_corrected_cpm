@@ -13,6 +13,7 @@ something.
 """
 import json
 import os
+import re
 
 import numpy as np
 import pytest
@@ -27,6 +28,16 @@ from cccpm.validation import check_data, get_variable_names
 
 COVARIATE_DEPENDENT = (Models.covariates, Models.full,
                        Models.residuals, Models.increment)
+
+
+def _rendered_text(html):
+    """The report's text with embedded images stripped.
+
+    Figures are inlined as base64 data URIs, and base64 is base64 -- "nan" and
+    "NaN" turn up inside the image bytes of any report. Searching the raw HTML
+    for them finds those, not anything a reader would see.
+    """
+    return re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "", html).lower()
 
 
 def _data(seed=0, n=120, n_nodes=10, binary=False):
@@ -189,7 +200,42 @@ def test_run_without_covariates_end_to_end(tmp_path, binary):
     assert os.path.exists(report)
     html = open(report).read()
     assert "Covariates only" not in html
-    assert "nan" not in html and "NaN" not in html
+    assert "nan" not in _rendered_text(html)
+
+
+def test_permutation_p_values_are_nan_for_undefined_models(tmp_path):
+    """The permutation test must not report the non-existent models as the most
+    significant result in the table.
+
+    p_values.csv is produced from cv_results_summary.csv, where the undefined
+    variants are NaN placeholders. Without a guard every comparison against NaN
+    is False, the count is 0, and the +1 correction reports the permutation
+    floor -- 1/(n_perms+1) -- which reads as "highly significant".
+    """
+    import pandas as pd
+
+    X, y, _ = _data()
+    ue = UnivariateEdgeSelection(
+        edge_statistic="pearson",
+        edge_selection=[PThreshold(threshold=0.05, correction=[None])])
+    cpm = CPMAnalysis(
+        results_directory=str(tmp_path),
+        cv=KFold(n_splits=3, shuffle=True, random_state=0),
+        edge_selection=ue, n_permutations=20, task_type="regression")
+    cpm.run(X=X, y=y)
+
+    p_values = pd.read_csv(os.path.join(str(tmp_path), 'p_values.csv'))
+    p_values = p_values.set_index(['network', 'model'])
+
+    metric = 'pearson_score'
+    assert np.isfinite(p_values.loc[('both', 'connectome'), metric])
+    for name in ('covariates', 'full', 'residuals', 'increment'):
+        value = p_values.loc[('both', name), metric]
+        assert np.isnan(value), f"{name} got p={value}, but the model does not exist"
+
+    # And the report shows none of them.
+    html = open(os.path.join(str(tmp_path), 'report.html')).read()
+    assert "nan" not in _rendered_text(html)
 
 
 def test_network_strengths_omit_residuals_without_covariates(tmp_path):

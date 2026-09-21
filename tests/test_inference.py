@@ -305,3 +305,34 @@ def test_calculate_permutation_results_rejects_unknown_method(tmp_path):
     with pytest.raises(ValueError, match="Unknown edge-significance method"):
         PermutationManager.calculate_permutation_results(
             str(results_dir), logging.getLogger(__name__), method='bogus')
+
+
+# ============================================================
+# Undefined statistics have no null distribution.
+# ============================================================
+
+def test_p_value_is_nan_when_the_observed_statistic_is_undefined():
+    """A NaN observed value must give a NaN p-value, not the permutation floor.
+
+    Every comparison with NaN is False, so the naive count comes out 0 and the
+    +1 correction reports 1/(n_perms+1) -- the *most* significant p-value the
+    test can produce -- for a statistic that does not exist. A run without
+    covariates hits this directly: its covariates/full/residuals/increment rows
+    are NaN placeholders, and they were being reported as p = 0.02.
+    """
+    true = pd.DataFrame({'pearson_score': [float('nan')]})
+    perms = pd.DataFrame({'pearson_score': [float('nan')] * 50})
+
+    p = PermutationManager._calculate_group_p_value(true, perms)
+
+    assert np.isnan(p['pearson_score'])
+
+
+def test_p_value_is_nan_when_only_the_null_is_undefined():
+    """Defensive: a real observation against an all-NaN null is still undefined."""
+    true = pd.DataFrame({'pearson_score': [0.4]})
+    perms = pd.DataFrame({'pearson_score': [float('nan')] * 50})
+
+    p = PermutationManager._calculate_group_p_value(true, perms)
+
+    assert np.isnan(p['pearson_score'])
