@@ -72,7 +72,7 @@ from cccpm.simulation.simulate_sem import (
     GRID_R2_X_Y,
     GRID_KAPPA,
 )
-from cccpm.utils import check_data
+from cccpm.validation import check_data
 
 warnings.filterwarnings("ignore")
 logging.disable(logging.CRITICAL)

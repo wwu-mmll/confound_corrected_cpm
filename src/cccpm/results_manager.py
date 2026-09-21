@@ -11,7 +11,7 @@ import torch
 import networkx as nx
 
 from cccpm.constants import Networks, Models, Metrics, TaskType, get_metrics_for_task
-from cccpm.utils import vector_to_matrix_tensor_version
+from cccpm.connectome import vector_to_matrix_tensor_version
 
 
 class ResultsManager:

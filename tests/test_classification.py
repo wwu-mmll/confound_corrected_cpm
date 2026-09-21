@@ -15,7 +15,7 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from cccpm.constants import TaskType, Networks, Models
-from cccpm.utils import detect_task_type, validate_task_type
+from cccpm.validation import detect_task_type, validate_task_type
 from cccpm.models.linear_model import LinearCPM
 
 

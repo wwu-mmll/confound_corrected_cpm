@@ -33,7 +33,7 @@ CPU_SAFE_CUDA_CALLS = {
     "torch.cuda.nvtx.range_push",
     "torch.cuda.nvtx.range_pop",
     # Guarded by an explicit `device.type == 'cuda'` check in
-    # batch_planning.available_memory_bytes.
+    # memory.available_memory_bytes.
     "torch.cuda.mem_get_info",
 }
 

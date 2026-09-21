@@ -64,8 +64,9 @@ AI-narration comments in `linear_model.py`; and the double `cv_predictions.csv`
 write. The 3 remaining test-only matrix/vector converters were kept — they are the
 reference implementations that validate the production `vector_to_matrix_tensor_version`.*
 
-No open code-health items. (Future: consolidate the duplicate
-`vector_to_upper_triangular_matrix` defined locally in `plots/cpm_chord_plot.py`.)
+No open code-health items. (The duplicate `vector_to_upper_triangular_matrix` in
+`plots/cpm_chord_plot.py` was unused and has been deleted; the surviving converters
+live in `connectome.py`.)
 
 ## Packaging & cross-platform install
 

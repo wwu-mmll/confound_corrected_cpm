@@ -16,13 +16,15 @@ from cccpm.logging import setup_logging
 from cccpm.models.linear_model import LinearCPM
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold, resolve_presence_threshold
 from cccpm.results_manager import ResultsManager, PermutationManager
-from cccpm.utils import (torch_train_test_split, check_data, torch_impute_missing_values,
-                         residualize_train_test, select_stable_edges,
-                         generate_data_insights, detect_task_type,
-                         validate_task_type, infer_n_nodes, plan_permutation_chunk)
+from cccpm.preprocessing import (torch_train_test_split, torch_impute_missing_values,
+                                 residualize_train_test, select_stable_edges)
+from cccpm.validation import (check_data, detect_task_type, validate_task_type,
+                              infer_n_nodes)
+from cccpm.memory import plan_permutation_chunk
 from cccpm.atlases import resolve_atlas
 from cccpm.scoring import score_models
 from cccpm.reporting import HTMLReporter
+from cccpm.reporting.data_insights import generate_data_insights
 from cccpm.constants import Networks, TaskType
 
 

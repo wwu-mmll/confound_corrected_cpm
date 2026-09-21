@@ -1,6 +1,6 @@
 import torch
 
-from cccpm.utils import torch_train_test_split
+from cccpm.preprocessing import torch_train_test_split
 from cccpm.scoring import score_models
 from cccpm.results_manager import ResultsManager
 from cccpm.edge_selection import (BaseEdgeSelector, filter_connected_components,

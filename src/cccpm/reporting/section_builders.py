@@ -167,7 +167,7 @@ def build_hero_context(
     n_nodes = None
     if n_features is not None:
         try:
-            from cccpm.utils import infer_n_nodes
+            from cccpm.validation import infer_n_nodes
             n_nodes = infer_n_nodes(int(float(n_features)))
         except Exception:
             n_nodes = None

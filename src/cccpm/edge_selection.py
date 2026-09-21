@@ -7,6 +7,8 @@ import torch
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
 
+from cccpm.validation import infer_n_nodes
+
 
 def torch_rankdata(data, dim=-1):
     """
@@ -284,8 +286,6 @@ def filter_connected_components(mask, min_edges):
     This is CPU/networkx work and is not vectorised -- it runs once per
     (network, *batch) slice.
     """
-    from cccpm.utils import infer_n_nodes
-
     n_features = mask.shape[0]
     n_nodes = infer_n_nodes(n_features)
     if n_nodes is None:

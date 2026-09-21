@@ -12,7 +12,7 @@ import torch
 from sklearn.model_selection import KFold, RepeatedKFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
-from cccpm.utils import check_data
+from cccpm.validation import check_data
 from cccpm.reporting.reporting_utils import average_over_repeats
 from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 

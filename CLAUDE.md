@@ -36,7 +36,7 @@ mkdocs build
 ### Pipeline Flow
 
 `CPMAnalysis.run()` orchestrates the full pipeline:
-1. **Data validation** — `check_data()`, `impute_missing_values()` in `utils.py`
+1. **Data validation** — `check_data()` in `validation.py`, imputation/residualisation in `preprocessing.py`
 2. **Task type detection** — auto-detects regression vs classification from target variable
 3. **Outer CV loop** — splits data, runs edge selection → model fitting → scoring per fold
 4. **Inner CV** (optional) — hyperparameter tuning via `run_inner_folds()` in `inner_fold.py`
@@ -56,7 +56,11 @@ mkdocs build
 | `inner_fold.py` | Inner CV for hyperparameter optimization |
 | `results_manager.py` | `ResultsManager` / `PermutationManager` — aggregation and p-value computation |
 | `constants.py` | Enums: `TaskType`, `Networks`, `Models`, `Metrics` |
-| `utils.py` | Data validation, train/test splitting, edge stability, matrix/vector conversion |
+| `validation.py` | Input validation (`check_data`), task-type detection, variable names |
+| `connectome.py` | Matrix <-> upper-triangular-vector conversion, the single place the edge indexing convention lives |
+| `preprocessing.py` | Per-fold train/test split, imputation, confound residualisation, edge-stability thresholding |
+| `memory.py` | Permutation chunk planning (`plan_permutation_chunk`) |
+| `reporting/data_insights.py` | Input-data summary figures — kept in `reporting/` so the numeric core stays plotting-free |
 
 ### Internal Tensor Shapes
 
