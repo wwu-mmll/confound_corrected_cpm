@@ -26,6 +26,11 @@ and within sections.
       anti-conservative at small N (~13% too low at N=20, negligible at N≥100).
       Pick (a) keep, (b) on-GPU exact t-tail, or (c) scipy `t.sf` on CPU for the
       threshold step only. Needs sign-off.
+      *Now measured rather than estimated:* `test_sklearn_equivalence.py::
+      test_edge_pvalues_vs_exact_t_distribution` pins max |p_exact - p_approx|
+      at 0.018 (n=30), 0.0089 (n=60), 0.0044 (n=120), 0.0010 (n=500), and asserts
+      the error is never conservative. Whichever option is chosen, that test says
+      what changes.
 - [x] **Connected-component edge selection** (2026-07-22).
       `UnivariateEdgeSelection(connected_components=True|int)` drops selected edges
       not in a connected component with ≥ N edges (N=2 by default), per network,

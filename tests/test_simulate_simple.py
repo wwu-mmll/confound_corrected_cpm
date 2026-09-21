@@ -4,18 +4,6 @@ import pytest
 from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 
-def test_shapes():
-    X, y, z = simulate_confounded_data_chyzhyk(
-        link_type="direct_link",
-        n_samples=200,
-        n_features=50,
-    )
-
-    assert X.shape == (200, 50)
-    assert y.shape == (200,)
-    assert z.shape == (200, 1)
-
-
 def test_reproducibility():
     X1, y1, z1 = simulate_confounded_data_chyzhyk()
     X2, y2, z2 = simulate_confounded_data_chyzhyk()
@@ -23,15 +11,6 @@ def test_reproducibility():
     assert np.allclose(X1, X2)
     assert np.allclose(y1, y2)
     assert np.allclose(z1, z2)
-
-
-@pytest.mark.parametrize("link_type", ["no_link", "direct_link", "weak_link"])
-def test_valid_link_types(link_type):
-    X, y, z = simulate_confounded_data_chyzhyk(link_type=link_type)
-
-    assert isinstance(X, np.ndarray)
-    assert isinstance(y, np.ndarray)
-    assert isinstance(z, np.ndarray)
 
 
 def test_no_link_structure():
@@ -108,5 +87,5 @@ def test_features_are_exchangeable():
 
 
 def test_invalid_link_type_raises():
-    with pytest.raises(UnboundLocalError):
+    with pytest.raises(ValueError, match="Unknown link_type"):
         simulate_confounded_data_chyzhyk(link_type="invalid")

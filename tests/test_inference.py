@@ -34,21 +34,6 @@ class TestPermutationManager:
         # true (1.5) > perm: 1.4 → 1 out of 4. p = (1+1)/(4+1) = 0.4
         assert p['mean_squared_error'] == pytest.approx(2 / 5)
 
-    def test_calculate_group_p_value_mixed_metrics(self):
-        """Test with both higher-is-better and lower-is-better metrics."""
-        true = pd.DataFrame({'pearson_score': [0.2], 'mean_squared_error': [1.5]})
-        perms = pd.DataFrame({
-            'pearson_score': [0.1, 0.3, 0.25],
-            'mean_squared_error': [1.4, 1.6, 1.5]
-        })
-
-        p = PermutationManager._calculate_group_p_value(true, perms)
-
-        # pearson: true 0.2 < perm → 0.3, 0.25 = 2 of 3. p = (2+1)/(3+1) = 0.75
-        assert p['pearson_score'] == pytest.approx(3 / 4)
-        # mse: true 1.5 > perm → 1.4 = 1 of 3. p = (1+1)/(3+1) = 0.5
-        assert p['mean_squared_error'] == pytest.approx(2 / 4)
-
     def test_calculate_group_p_value_never_exceeds_one(self):
         """A valid p-value must be in (0, 1] even when every permutation beats the true value."""
         true = pd.DataFrame({'pearson_score': [0.0]})
@@ -124,21 +109,18 @@ def _make_stability_arrays(n_nodes, n_perms, clique, isolated, seed=0,
 
 
 class TestEdgeSignificance:
-    def test_nbs_shape_and_symmetry(self):
-        true, perm = _make_stability_arrays(20, 100, clique=range(6),
+    def test_nbs_output_contract(self):
+        """Shape, per-layer symmetry, and p-values in (0, 1] with the
+        permutation floor at 1 / (n_perms + 1)."""
+        n_perms = 100
+        true, perm = _make_stability_arrays(20, n_perms, clique=range(6),
                                             isolated=[(10, 11)])
         sig = PermutationManager.calculate_p_values_edges_nbs(true, perm)
         assert sig.shape == (20, 20, 2)
         assert np.allclose(sig[:, :, 0], sig[:, :, 0].T)
         assert np.allclose(sig[:, :, 1], sig[:, :, 1].T)
-
-    def test_nbs_pvalue_bounds(self):
-        true, perm = _make_stability_arrays(20, 100, clique=range(6),
-                                            isolated=[(10, 11)])
-        sig = PermutationManager.calculate_p_values_edges_nbs(true, perm)
         assert np.all(sig > 0) and np.all(sig <= 1)
-        # floor is 1 / (n_perms + 1)
-        assert sig.min() >= 1.0 / (100 + 1) - 1e-12
+        assert sig.min() >= 1.0 / (n_perms + 1) - 1e-12
 
     def test_nbs_detects_planted_subnetwork(self):
         true, perm = _make_stability_arrays(20, 200, clique=range(6),

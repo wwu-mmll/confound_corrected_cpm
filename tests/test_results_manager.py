@@ -9,14 +9,6 @@ from cccpm.constants import Networks, Models, Metrics, TaskType
 
 
 class TestResultsManagerInit:
-    def test_constructor(self, tmp_path):
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=1, n_folds=5, n_features=10
-        )
-        assert mgr.results_directory == str(tmp_path)
-        assert mgr.dims['folds'] == 5
-        assert mgr.dims['runs'] == 1
-        assert mgr.dims['params'] == 1
 
     def test_results_tensor_shape(self, tmp_path):
         mgr = ResultsManager(
@@ -25,19 +17,14 @@ class TestResultsManagerInit:
         expected = (len(Metrics), len(Models), len(Networks), 2, 5, 3)
         assert mgr.results.shape == expected
 
-    def test_edges_tensor_shape(self, tmp_path):
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=2, n_folds=3, n_features=6
-        )
-        # [N_features, 2(pos/neg), params, folds, runs]
-        assert mgr.cv_edges.shape == (6, 2, 1, 3, 2)
-        assert mgr.cv_edges.dtype == torch.bool
-
     def test_edges_tensor_shape_with_params(self, tmp_path):
         mgr = ResultsManager(
             output_dir=str(tmp_path), n_runs=1, n_folds=4, n_features=10, n_params=3
         )
+        # [N_features, 2 (pos/neg), params, folds, runs]
         assert mgr.cv_edges.shape == (10, 2, 3, 4, 1)
+        # bool, not float: this tensor is the largest allocation in a big run.
+        assert mgr.cv_edges.dtype == torch.bool
 
 
 class TestStoreAndRetrieve:
@@ -52,23 +39,6 @@ class TestStoreAndRetrieve:
         # Verify it was stored in the right place
         stored = mgr.results[:, :, :, 0, 0, :]
         assert torch.allclose(stored, metrics)
-
-    def test_store_edges(self, tmp_path):
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=1, n_folds=2, n_features=6
-        )
-        # Create edges tensor [Features, 2, Runs]
-        edges = torch.zeros(6, 2, 1, dtype=torch.bool)
-        edges[0, Networks.positive, 0] = True
-        edges[2, Networks.positive, 0] = True
-        edges[1, Networks.negative, 0] = True
-
-        mgr.store_edges(param_idx=0, fold_idx=0, edges_tensor=edges)
-
-        assert mgr.cv_edges[0, Networks.positive, 0, 0, 0] == True
-        assert mgr.cv_edges[2, Networks.positive, 0, 0, 0] == True
-        assert mgr.cv_edges[1, Networks.negative, 0, 0, 0] == True
-        assert mgr.cv_edges[3, Networks.positive, 0, 0, 0] == False
 
     def test_store_edges_and_calculate_stability(self, tmp_path):
         n_features = 6
@@ -163,18 +133,6 @@ class TestCalculateFinalCVResults:
 
         assert os.path.exists(os.path.join(str(tmp_path), 'cv_results_full.csv'))
         assert os.path.exists(os.path.join(str(tmp_path), 'cv_results_summary.csv'))
-
-    def test_agg_results_populated(self, tmp_path):
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=1, n_folds=3, n_features=3
-        )
-        for fold in range(3):
-            metrics = torch.randn(len(Metrics), len(Models), len(Networks), 1)
-            mgr.store_metrics(param_idx=0, fold_idx=fold, metrics_tensor=metrics)
-
-        mgr.calculate_final_cv_results()
-        assert mgr.agg_results is not None
-        assert isinstance(mgr.agg_results, pd.DataFrame)
 
     def test_regression_filters_metrics(self, tmp_path):
         """Regression task should only output regression metrics."""

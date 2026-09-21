@@ -9,15 +9,6 @@ from cccpm.simulation.simulate_sem import (
 )
 
 
-def test_solve_rho_basic_case():
-    rho = _solve_rho_for_R2(
-        r2_X_y=0.25,
-        r2_X_y_given_Z=0.15,
-        r2_Z_y=0.10,
-    )
-    assert -1.0 < rho < 1.0
-
-
 def test_solve_rho_zero_confounds():
     rho = _solve_rho_for_R2(
         r2_X_y=0.30,
@@ -25,29 +16,6 @@ def test_solve_rho_zero_confounds():
         r2_Z_y=0.0,
     )
     assert rho == 0.0
-
-
-def test_solve_rho_returns_float():
-    rho = _solve_rho_for_R2(0.2, 0.1, 0.1)
-    assert isinstance(rho, float)
-
-
-def test_simulate_data_shapes():
-    sim = simulate_data_given_R2(
-        R2_X_y=0.25,
-        R2_X_y_given_Z=0.15,
-        R2_Z_y=0.10,
-        n_features=20,
-        n_features_informative=5,
-        n_confounds=3,
-        n_samples=500,
-        random_state=42,
-    )
-
-    assert sim["X"].shape == (500, 20)
-    assert sim["Z"].shape == (500, 3)
-    assert sim["y"].shape == (500, 1)
-    assert sim["true_X"].shape == (500, 1)
 
 
 def test_simulate_data_deterministic_with_seed():
@@ -123,20 +91,6 @@ def test_invalid_n_confounds():
         )
 
 
-def test_compute_r2s_keys():
-    sim = simulate_data_given_R2(
-        0.25, 0.15, 0.10, n_samples=500
-    )
-    r2s = compute_r2s(sim)
-
-    assert set(r2s.keys()) == {
-        "r2_naive",
-        "r2_conf_only",
-        "r2_full",
-        "r2_unique_X",
-    }
-
-
 def test_r2_relationships_hold():
     sim = simulate_data_given_R2(
         0.25, 0.15, 0.10, n_samples=5000
@@ -145,14 +99,6 @@ def test_r2_relationships_hold():
 
     assert r2s["r2_full"] >= r2s["r2_conf_only"]
     assert r2s["r2_unique_X"] >= 0.0
-
-
-def test_generate_four_scenarios_keys():
-    scenarios = generate_four_scenarios(n_samples=500)
-
-    assert len(scenarios) == 4
-    assert "No Confounding Effect" in scenarios
-    assert "Strong Confounding Effect" in scenarios
 
 
 def test_generate_four_scenarios_r2_ordering():

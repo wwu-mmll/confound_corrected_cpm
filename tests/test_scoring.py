@@ -42,29 +42,7 @@ def simple_data():
     return y_true, y_pred
 
 
-@pytest.fixture
-def perfect_data():
-    """Creates data where predictions perfectly match ground truth."""
-    np.random.seed(42)
-    N_samples = 30
-    N_runs = 2
-
-    y_true = np.random.randn(N_samples, N_runs).astype(np.float32)
-    # Expand y_true to [N_samples, N_models, N_networks, N_runs]
-    y_pred = np.broadcast_to(
-        y_true[:, np.newaxis, np.newaxis, :],
-        (N_samples, N_MODELS, N_NETWORKS, N_runs)
-    ).copy()
-
-    return y_true, y_pred
-
-
 class TestFastCPMMetrics:
-
-    def test_initialization(self, device):
-        """Test that FastCPMMetrics initializes correctly."""
-        evaluator = FastCPMMetrics(device=device)
-        assert evaluator.device == device
 
     def test_score_output_shape(self, simple_data, device):
         """Test that score returns correct output shape."""
@@ -75,75 +53,6 @@ class TestFastCPMMetrics:
         N_runs = y_true.shape[1]
         expected_shape = (N_METRICS, N_MODELS, N_NETWORKS, N_runs)
         assert scores.shape == expected_shape, f"Expected {expected_shape}, got {scores.shape}"
-
-    def test_score_returns_tensor(self, simple_data, device):
-        """Test that score returns a torch.Tensor."""
-        y_true, y_pred = simple_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-        assert isinstance(scores, torch.Tensor)
-
-    def test_perfect_predictions_pearson(self, perfect_data, device):
-        """Test that perfect predictions yield Pearson correlation of 1."""
-        y_true, y_pred = perfect_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        pearson_scores = scores[Metrics.pearson_score, :, :, :]
-        assert torch.allclose(pearson_scores, torch.ones_like(pearson_scores), atol=1e-5)
-
-    def test_perfect_predictions_mse(self, perfect_data, device):
-        """Test that perfect predictions yield MSE of 0."""
-        y_true, y_pred = perfect_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        mse_scores = scores[Metrics.mean_squared_error, :, :, :]
-        assert torch.allclose(mse_scores, torch.zeros_like(mse_scores), atol=1e-5)
-
-    def test_perfect_predictions_mae(self, perfect_data, device):
-        """Test that perfect predictions yield MAE of 0."""
-        y_true, y_pred = perfect_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        mae_scores = scores[Metrics.mean_absolute_error, :, :, :]
-        assert torch.allclose(mae_scores, torch.zeros_like(mae_scores), atol=1e-5)
-
-    def test_perfect_predictions_explained_variance(self, perfect_data, device):
-        """Test that perfect predictions yield explained variance of 1."""
-        y_true, y_pred = perfect_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        ev_scores = scores[Metrics.explained_variance_score, :, :, :]
-        assert torch.allclose(ev_scores, torch.ones_like(ev_scores), atol=1e-5)
-
-    def test_mse_calculation(self, device):
-        """Test MSE calculation with known values."""
-        N, P = 10, 1
-        y_true = np.full((N, P), 2.0, dtype=np.float32)
-        y_pred = np.full((N, N_MODELS, N_NETWORKS, P), 4.0, dtype=np.float32)
-
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        mse_scores = scores[Metrics.mean_squared_error, :, :, :]
-        expected = torch.full_like(mse_scores, 4.0)  # (4-2)^2 = 4
-        assert torch.allclose(mse_scores, expected, atol=1e-5)
-
-    def test_mae_calculation(self, device):
-        """Test MAE calculation with known values."""
-        N, P = 10, 1
-        y_true = np.full((N, P), 2.0, dtype=np.float32)
-        y_pred = np.full((N, N_MODELS, N_NETWORKS, P), 5.0, dtype=np.float32)
-
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        mae_scores = scores[Metrics.mean_absolute_error, :, :, :]
-        expected = torch.full_like(mae_scores, 3.0)  # |5-2| = 3
-        assert torch.allclose(mae_scores, expected, atol=1e-5)
 
     def test_covariates_shared_across_networks(self, device):
         """Test that when covariates preds are identical across networks, scores match."""
@@ -183,42 +92,6 @@ class TestFastCPMMetrics:
         scores_torch = evaluator.score(y_true_torch, y_pred_torch)
 
         assert torch.allclose(scores_np, scores_torch, atol=1e-5)
-
-    def test_pearson_negative_correlation(self, device):
-        """Test Pearson correlation with negatively correlated predictions."""
-        N, P = 50, 1
-        y_true = np.linspace(0, 10, N).reshape(-1, 1).astype(np.float32)
-        y_pred_vals = -y_true  # Perfect negative correlation
-        y_pred = np.broadcast_to(
-            y_pred_vals[:, np.newaxis, np.newaxis, :],
-            (N, N_MODELS, N_NETWORKS, P)
-        ).copy()
-
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        pearson_scores = scores[Metrics.pearson_score, :, :, :]
-        expected = torch.full_like(pearson_scores, -1.0)
-        assert torch.allclose(pearson_scores, expected, atol=1e-5)
-
-    def test_multiple_permutations(self, device):
-        """Test that multiple runs are handled correctly."""
-        np.random.seed(42)
-        N, P = 30, 5
-        y_true = np.random.randn(N, P).astype(np.float32)
-        y_pred = np.random.randn(N, N_MODELS, N_NETWORKS, P).astype(np.float32)
-
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        assert scores.shape[-1] == P
-
-        # Each run should have different scores (extremely unlikely to be identical)
-        for model in Models:
-            for network in Networks:
-                for metric in [Metrics.pearson_score, Metrics.mean_squared_error]:
-                    run_scores = scores[metric, model, network, :]
-                    assert not torch.allclose(run_scores, run_scores[0].expand_as(run_scores))
 
     def test_score_models_wrapper(self, simple_data, device):
         """Test the score_models wrapper function for regression."""

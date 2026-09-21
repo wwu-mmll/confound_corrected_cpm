@@ -21,8 +21,8 @@ All tests run on CPU with float64/float32 tolerances.
 import numpy as np
 import torch
 from scipy import stats
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import explained_variance_score
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.metrics import accuracy_score, explained_variance_score, roc_auc_score
 from sklearn.model_selection import KFold
 
 from cccpm.cpm_analysis import CPMAnalysis
@@ -256,3 +256,124 @@ def test_pipeline_matches_sklearn_and_shows_inflation(tmp_path):
     assert ev["partial"] > ev["resid"] + 0.05
     assert ev["partial"] <= ev["raw"] + 0.02
     assert abs(ev["resid"] - true_r2) < 0.06
+
+
+# --------------------------------------------------------------------------- #
+# 4. End-to-end cross-validated pipeline, classification                       #
+# --------------------------------------------------------------------------- #
+def _sklearn_classification_metrics(X, y, Z, cv):
+    """The same CPM recipe written directly in sklearn: point-biserial edge
+    selection on the training split, positive/negative sum scores, logistic
+    regression, scored out of sample."""
+    accs, aucs = [], []
+    for tr, te in cv.split(X, y):
+        Xtr, Xte = X[tr], X[te]
+        ytr, yte = y[tr], y[te]
+
+        # Point-biserial is Pearson against a 0/1 target.
+        r, p = ref_pearson(Xtr, ytr)
+        pos = (p < P_THRESHOLD) & (r > 0)
+        neg = (p < P_THRESHOLD) & (r < 0)
+
+        ftr = np.column_stack([Xtr[:, pos].sum(1), Xtr[:, neg].sum(1)])
+        fte = np.column_stack([Xte[:, pos].sum(1), Xte[:, neg].sum(1)])
+
+        # C=1e9 is effectively unregularised, and unlike penalty=None it is
+        # accepted across the whole supported sklearn range.
+        clf = LogisticRegression(C=1e9, max_iter=1000).fit(ftr, ytr)
+        proba = clf.predict_proba(fte)[:, 1]
+        accs.append(accuracy_score(yte, (proba > 0.5).astype(int)))
+        aucs.append(roc_auc_score(yte, proba))
+    return float(np.mean(accs)), float(np.mean(aucs))
+
+
+def test_classification_pipeline_matches_sklearn(tmp_path):
+    """The classification path end to end -- edge selection, sum scores, IRLS
+    logistic fit, out-of-sample scoring -- against the same recipe in sklearn.
+
+    The regression pipeline has had this check since the beginning; the
+    classification pipeline was only ever verified at the model level
+    (test_classification.py), leaving selection, aggregation and the
+    classification metrics unverified end to end.
+    """
+    X, y_cont, Z = _sim(kappa=0.3, r2=0.36, n=1200, seed=11)
+    y = (y_cont > np.median(y_cont)).astype(np.float64)
+
+    cv_tb = KFold(n_splits=5, shuffle=True, random_state=0)
+    cv_sk = KFold(n_splits=5, shuffle=True, random_state=0)
+
+    ue = UnivariateEdgeSelection(
+        edge_statistic="point_biserial",
+        edge_selection=[PThreshold(threshold=P_THRESHOLD, correction=[None])])
+    cpm = CPMAnalysis(
+        results_directory=str(tmp_path), cv=cv_tb, edge_selection=ue,
+        n_permutations=0, task_type="classification")
+    cpm._single_run(X=X, y=y.reshape(-1, 1), covariates=Z, perm_run=False)
+
+    ag = cpm.results_manager.agg_results
+    tb_acc = float(np.ravel(ag.loc[("connectome", "both"), ("accuracy", "mean")])[0])
+    tb_auc = float(np.ravel(ag.loc[("connectome", "both"), ("roc_auc", "mean")])[0])
+
+    sk_acc, sk_auc = _sklearn_classification_metrics(X, y, Z, cv_sk)
+
+    # The signal must be real, not a coin flip -- otherwise agreement is vacuous.
+    assert sk_auc > 0.65, f"reference pipeline found no signal (auc={sk_auc:.3f})"
+    assert abs(tb_acc - sk_acc) < 0.02, f"accuracy: toolbox {tb_acc:.3f} vs sklearn {sk_acc:.3f}"
+    assert abs(tb_auc - sk_auc) < 0.02, f"roc_auc:  toolbox {tb_auc:.3f} vs sklearn {sk_auc:.3f}"
+
+
+# --------------------------------------------------------------------------- #
+# 5. How wrong is the normal approximation to the t tail?                      #
+# --------------------------------------------------------------------------- #
+def test_edge_pvalues_vs_exact_t_distribution():
+    """Quantify the documented normal approximation in the edge-selection
+    p-values against the exact two-sided t-test.
+
+    `correlations_and_pvalues` converts the t statistic through the standard
+    normal tail rather than `scipy.stats.t.sf`, which makes every p-value
+    slightly too small (anti-conservative), by more at small n. This is
+    RELEASE_PLAN decision #6, and it was previously unmeasured: the existing
+    equivalence tests run at n=1000, where the difference vanishes.
+
+    Measured here (max |p_exact - p_approx| over 200 edges, seed 7):
+
+        n=30  0.0184   (0.0146 near the p=0.05 boundary)
+        n=60  0.0089   (0.0063)
+        n=120 0.0044   (0.0036)
+        n=500 0.0010   (0.0009)
+
+    So it decays like ~1/n and is worst where it matters least in practice: at
+    n=30 an edge whose exact p is 0.065 can be selected at a 0.05 threshold. At
+    any cohort size CPM is normally run on, it cannot move an edge across the
+    boundary meaningfully.
+
+    The assertions pin the *direction* (never conservative) and the decay; the
+    magnitude bounds are loose enough not to be seed-fragile.
+    """
+    rng = np.random.RandomState(7)
+    # Largest deviation is at the smallest n. 30 is a realistic small CPM cohort.
+    worst_by_n = {}
+    for n in (30, 60, 120, 500):
+        X = rng.randn(n, 200)
+        y = X[:, 0] * 0.3 + rng.randn(n)
+
+        _, p_tb = correlations_and_pvalues(
+            X, y.reshape(-1, 1), correlation_type="pearson")
+        p_tb = p_tb.numpy().ravel()
+
+        r_ref, p_exact = ref_pearson(X, y)      # uses scipy.stats.t.sf
+
+        # Direction: the normal tail is never heavier than the t tail, so the
+        # approximate p-value is never larger than the exact one.
+        assert np.all(p_tb <= p_exact + 1e-9), (
+            f"n={n}: approximation produced a conservative p-value, which it cannot do")
+
+        worst_by_n[n] = float(np.max(p_exact - p_tb))
+
+    # The error shrinks monotonically with n, and is already small at n=30.
+    ns = sorted(worst_by_n)
+    for a, b in zip(ns, ns[1:]):
+        assert worst_by_n[b] < worst_by_n[a], f"error grew from n={a} to n={b}: {worst_by_n}"
+
+    assert worst_by_n[30] < 0.02, f"larger than documented at n=30: {worst_by_n[30]:.4f}"
+    assert worst_by_n[500] < 2e-3, f"larger than documented at n=500: {worst_by_n[500]:.6f}"

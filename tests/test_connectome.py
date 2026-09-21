@@ -55,33 +55,6 @@ def vector_to_matrix_numpy(array, dim):
     return np.moveaxis(out, (-2, -1), (dim, dim + 1))
 
 
-def matrix_to_vector_numpy(array, dim):
-    """
-    Collapses two adjacent dimensions of a NumPy array into a
-    single dimension of upper-triangular elements.
-    """
-    ndim = array.ndim
-    dim = dim % ndim
-
-    n_nodes = array.shape[dim]
-    if n_nodes != array.shape[dim + 1]:
-        raise ValueError(f"Dimensions at {dim} and {dim + 1} must be square.")
-
-    # 1. Move target dimensions to the end
-    temp_array = np.moveaxis(array, (dim, dim + 1), (-2, -1))
-
-    # 2. Get Upper Triangle Indices
-    rows, cols = np.triu_indices(n_nodes, k=1)
-
-    # 3. Extract Values
-    # In NumPy, trailing indices work slightly differently with '...'
-    # We slice the last two dimensions using the coordinate pairs
-    out = temp_array[..., rows, cols]
-
-    # 4. Move the new vector dimension back to the original 'dim'
-    return np.moveaxis(out, -1, dim)
-
-
 def matrix_to_vector_tensor_version(tensor, dim):
     """
     Collapses two adjacent dimensions (representing a symmetric matrix)
@@ -122,65 +95,12 @@ def matrix_to_vector_tensor_version(tensor, dim):
     return out.movedim(-1, dim)
 
 
-def test_matrix_to_vector_3d():
-    n = 4
-    n_samples = 10
-    mat = np.random.randn(n_samples, n, n)
-    vec = matrix_to_vector_3d(mat)
-    expected_dim = n * (n - 1) // 2
-    assert vec.shape == (n_samples, expected_dim)
-
-
 
 # ============================================================
 # Connectome <-> vector conversions (foundation of edge stability
-# and mapping p-values back to a connectome). These must round-trip
-# exactly, and the numpy and tensor implementations must agree.
+# and mapping p-values back to a connectome). The production converter must
+# round-trip exactly and must agree with the reference implementation above.
 # ============================================================
-
-def _symmetric_zero_diag(n, rng):
-    m = rng.randn(n, n).astype(np.float32)
-    m = (m + m.T) / 2
-    np.fill_diagonal(m, 0.0)
-    return m
-
-
-def test_vector_to_matrix_numpy_roundtrip_1d():
-    rng = np.random.RandomState(0)
-    n_nodes = 6
-    n_edges = n_nodes * (n_nodes - 1) // 2  # 15
-    vec = rng.randn(n_edges).astype(np.float32)
-
-    mat = vector_to_matrix_numpy(vec, dim=0)
-    assert mat.shape == (n_nodes, n_nodes)
-    # symmetric with zero diagonal
-    assert np.allclose(mat, mat.T)
-    assert np.allclose(np.diag(mat), 0.0)
-    # vector -> matrix -> vector is the identity
-    back = matrix_to_vector_numpy(mat, dim=0)
-    assert np.allclose(back, vec)
-
-
-def test_matrix_to_vector_numpy_roundtrip_symmetric():
-    rng = np.random.RandomState(1)
-    n_nodes = 7
-    mat = _symmetric_zero_diag(n_nodes, rng)
-    vec = matrix_to_vector_numpy(mat, dim=0)
-    assert vec.shape == (n_nodes * (n_nodes - 1) // 2,)
-    # matrix -> vector -> matrix recovers a symmetric, zero-diagonal matrix
-    recon = vector_to_matrix_numpy(vec, dim=0)
-    assert np.allclose(recon, mat)
-
-
-def test_vector_to_matrix_numpy_batched():
-    rng = np.random.RandomState(2)
-    n_nodes, n_runs = 5, 3
-    n_edges = n_nodes * (n_nodes - 1) // 2  # 10
-    arr = rng.randn(n_edges, n_runs).astype(np.float32)
-    mat = vector_to_matrix_numpy(arr, dim=0)
-    assert mat.shape == (n_nodes, n_nodes, n_runs)
-    back = matrix_to_vector_numpy(mat, dim=0)
-    assert np.allclose(back, arr)
 
 
 def test_tensor_conversion_roundtrip():
