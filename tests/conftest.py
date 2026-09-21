@@ -7,7 +7,6 @@ matplotlib.use("Agg")
 
 import pytest
 import numpy as np
-import pandas as pd
 from sklearn.model_selection import KFold, ShuffleSplit, StratifiedKFold
 from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold

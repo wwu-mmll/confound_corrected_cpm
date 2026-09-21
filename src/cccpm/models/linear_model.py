@@ -67,7 +67,7 @@ class LinearCPM:
         n_runs = self.edges.shape[2]
         if y.shape[1] != n_runs:
             raise ValueError(f"y has {y.shape[1]} runs but edges has {n_runs}")
-        R, N = n_runs, n_samples
+        R = n_runs
 
         pos_str, neg_str = self._network_strengths(X)          # [R, N]
         cov_b = self._expand_covariates(cov, R)                # [R, N, C]

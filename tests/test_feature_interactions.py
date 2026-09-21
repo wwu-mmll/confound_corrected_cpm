@@ -31,7 +31,6 @@ import torch
 from sklearn.model_selection import KFold, ShuffleSplit
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
-from cccpm.constants import TaskType
 from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 

@@ -40,7 +40,6 @@ def test_partial_path_matches_glm_coefficient(simulated_data):
     r = r.numpy().ravel()
     p = p.numpy().ravel()
 
-    n = X.shape[0]
     Z = sm.add_constant(cov)
     Pz = Z @ np.linalg.pinv(Z)          # confound hat matrix
     for i in range(X.shape[1]):

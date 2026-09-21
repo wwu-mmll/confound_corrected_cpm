@@ -19,7 +19,6 @@ All tests run on CPU with float64/float32 tolerances.
 """
 
 import numpy as np
-import pytest
 import torch
 from scipy import stats
 from sklearn.linear_model import LinearRegression
@@ -143,7 +142,7 @@ def test_model_variants_match_sklearn():
     X, y, Z = _sim(seed=4, n=800)
     ntr = 500
     Xtr, Xte = X[:ntr], X[ntr:]
-    ytr, yte = y[:ntr], y[ntr:]
+    ytr = y[:ntr]
     Ztr, Zte = Z[:ntr], Z[ntr:]
 
     # Fixed edge mask from Pearson selection on the training split (same mask

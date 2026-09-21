@@ -151,7 +151,6 @@ class TestRegressionGroundTruth:
         (high stability), while noise edges should have low stability.
         """
         cpm, pos_idx, neg_idx = cpm_result
-        informative_idx = pos_idx + neg_idx
 
         # stability shape: [N_Features, 2, Runs] after calculate_edge_stability
         stability = cpm.results_manager.calculate_edge_stability(write=False)

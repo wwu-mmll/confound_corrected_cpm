@@ -22,7 +22,7 @@ import pandas as pd
 
 import networkx as nx
 
-from cccpm.constants import Networks, Metrics
+from cccpm.constants import Networks
 from cccpm.results_manager import ResultsManager
 
 

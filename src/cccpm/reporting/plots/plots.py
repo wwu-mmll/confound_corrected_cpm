@@ -4,14 +4,12 @@ import pandas as pd
 import seaborn as sns
 
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 
 from pandas.api.types import is_numeric_dtype
 
 from cccpm.reporting.plots.figure_style import (
     COLOR_MAP,
-    PANEL,
     SQUARE,
     apply_nature_style,
     save_figure,
@@ -168,12 +166,6 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) 
     # Filter relevant data
     df = df[df["model"].isin(["connectome", "residuals"])]
     df = df[df["network"].isin(["positive", "negative"])]
-
-    # Color mapping
-    color_map = {
-        "positive": "#FF5768",  # red
-        "negative": "#6C88C4"   # blue
-    }
 
     def histplot_colored(data, color=None, **kwargs):
         # Override color based on 'network' value

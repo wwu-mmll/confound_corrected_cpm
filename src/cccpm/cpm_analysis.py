@@ -287,7 +287,7 @@ class CPMAnalysis:
         covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
 
         """
-        self.logger.info(f"Starting CPM estimation.")
+        self.logger.info("Starting CPM estimation.")
 
         # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)

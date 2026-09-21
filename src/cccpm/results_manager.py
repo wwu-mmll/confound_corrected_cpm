@@ -187,7 +187,6 @@ class ResultsManager:
         y_pred = y_pred.detach().cpu().numpy().squeeze(-1)
         y_true = torch.as_tensor(y_true).detach().cpu().numpy().reshape(-1)
 
-        batch_size = y_pred.shape[0]
         n_models = len(Models)
         n_networks = len(Networks)
         n_combinations = n_models * n_networks

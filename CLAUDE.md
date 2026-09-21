@@ -82,4 +82,10 @@ Source code lives in `src/cccpm/` (Poetry src layout). Tests in `tests/` with fi
 
 ## CI
 
-GitHub Actions runs `pytest --cov` on push/PR to `main` and `develop` branches (Python 3.11).
+GitHub Actions runs on push/PR to `main` and `develop`:
+
+- **Pyflakes** (`lint` job) over `src/ tests/ examples/ scripts/`. Pyflakes only —
+  undefined names, unused imports, unreachable code; no style rules. Run it locally with
+  `poetry run python -m pyflakes src/ tests/ examples/ scripts/`.
+- **Tests** across a matrix of ubuntu/macos/windows x Python 3.10-3.13, with coverage
+  uploaded to Coveralls from the ubuntu/3.11 job.

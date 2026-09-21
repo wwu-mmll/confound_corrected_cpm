@@ -7,6 +7,22 @@ on:
     branches: [main, develop]
 
 jobs:
+  lint:
+    # Pyflakes only: undefined names, unused imports, unreachable code. No style
+    # opinions, so it never argues with anyone about formatting. It exists because
+    # splitting a module can turn a module global into an undefined name inside a
+    # function body -- which the whole unit suite will happily pass over (it did,
+    # once; see inference.py's ResultsManager import).
+    name: Pyflakes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyflakes
+      - run: pyflakes src/ tests/ examples/ scripts/
+
   test:
     name: Tests (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

@@ -64,7 +64,6 @@ from sklearn.model_selection import KFold
 
 from cccpm import CPMAnalysis
 import cccpm.cpm_analysis as _ca
-from cccpm.constants import TaskType
 from cccpm.edge_selection import PThreshold, UnivariateEdgeSelection
 from cccpm.simulation.simulate_sem import (
     simulate_data_given_kappa,

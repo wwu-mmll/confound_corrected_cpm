@@ -81,6 +81,7 @@ scikit-image = "*"
 pingouin = "*"
 pytest = "*"
 pytest-cov = "*"
+pyflakes = "^3.4.0"
 
 [tool.poetry.group.docs]
 optional = true

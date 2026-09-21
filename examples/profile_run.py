@@ -1,5 +1,4 @@
 import time
-import torch.cuda.nvtx as nvtx
 from sklearn.model_selection import ShuffleSplit, RepeatedKFold
 from cccpm import CPMAnalysis
 from cccpm.simulation.simulate_sem import simulate_data_given_kappa
@@ -37,9 +36,8 @@ cpm = CPMAnalysis(
 )
 
 _start = time.perf_counter()
-#nvtx.range_push("cpm_run")
+# (NVTX profiling scaffolding was removed from the package in 0.6.0.)
 cpm.run(X=X, y=y, covariates=covariates)
-#nvtx.range_pop()
 wall_time_s = time.perf_counter() - _start
 
 print(f"Wall time: {wall_time_s:.2f}s")

@@ -13,7 +13,6 @@ The companion script ``classification_quickstart.py`` shows the same workflow
 for a binary target.
 """
 
-import numpy as np
 from sklearn.model_selection import KFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold

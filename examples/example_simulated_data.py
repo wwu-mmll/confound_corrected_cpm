@@ -9,7 +9,6 @@ brain–outcome R² that is confound-driven. This gives simulated data with an
 *analytically known* ground truth. See the "Simulating Data" docs page for details.
 """
 
-import numpy as np
 from sklearn.model_selection import ShuffleSplit, RepeatedKFold
 
 from cccpm import CPMAnalysis
