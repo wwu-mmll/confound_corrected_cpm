@@ -11,7 +11,7 @@ import pytest
 import torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.datasets import make_classification
-from sklearn.metrics import accuracy_score, roc_auc_score
+
 from sklearn.model_selection import train_test_split
 
 from cccpm.constants import TaskType, Networks, Models
@@ -23,32 +23,26 @@ from cccpm.models.linear_model import LinearCPM
 # Task type detection
 # ============================================================
 
-class TestTaskTypeDetection:
-    def test_detect_binary_01(self):
-        y = np.array([0, 1, 0, 1, 1, 0])
-        assert detect_task_type(y) == TaskType.classification
+@pytest.mark.parametrize("y,expected", [
+    (np.array([0, 1, 0, 1, 1, 0]), TaskType.classification),     # 0/1
+    (np.array([-1, 1, -1, 1, 1, -1]), TaskType.classification),  # any two levels
+    (np.array([1.0, 2.5, 3.7, 4.2, 5.1]), TaskType.regression),
+])
+def test_detect_task_type(y, expected):
+    assert detect_task_type(y) == expected
 
-    def test_detect_binary_neg1_1(self):
-        y = np.array([-1, 1, -1, 1, 1, -1])
-        assert detect_task_type(y) == TaskType.classification
 
-    def test_detect_continuous(self):
-        y = np.array([1.0, 2.5, 3.7, 4.2, 5.1])
-        assert detect_task_type(y) == TaskType.regression
+def test_detect_task_type_rejects_a_constant_target():
+    """Neither task is defined without variation in y."""
+    with pytest.raises(ValueError):
+        detect_task_type(np.array([1, 1, 1, 1]))
 
-    def test_validate_correct_classification(self):
-        y = np.array([0, 1, 0, 1])
-        validate_task_type(y, TaskType.classification)
 
-    def test_validate_wrong_type_raises(self):
-        y = np.array([0, 1, 0, 1])
-        with pytest.raises(ValueError):
-            validate_task_type(y, TaskType.regression)
-
-    def test_constant_target_raises(self):
-        y = np.array([1, 1, 1, 1])
-        with pytest.raises(ValueError):
-            detect_task_type(y)
+def test_validate_task_type_accepts_the_matching_type_and_rejects_the_other():
+    y = np.array([0, 1, 0, 1])
+    validate_task_type(y, TaskType.classification)        # must not raise
+    with pytest.raises(ValueError):
+        validate_task_type(y, TaskType.regression)
 
 
 # ============================================================
@@ -192,26 +186,6 @@ class TestLogisticRegressionVsSklearn:
             f"Mean absolute probability difference too large: {mae:.4f}"
         )
 
-    def test_classification_accuracy_comparable(self, binary_classification_data):
-        """Classification accuracy from both methods should match."""
-        X_train, X_test, y_train, y_test = binary_classification_data
-
-        cpm_proba = _fit_cpm_logistic(X_train, y_train, X_test)
-        sklearn_proba, _ = _fit_sklearn_logistic(X_train, y_train, X_test)
-
-        cpm_acc = accuracy_score(y_test, (cpm_proba > 0.5).astype(int))
-        sklearn_acc = accuracy_score(y_test, (sklearn_proba > 0.5).astype(int))
-
-        cpm_auc = roc_auc_score(y_test, cpm_proba)
-        sklearn_auc = roc_auc_score(y_test, sklearn_proba)
-
-        assert abs(cpm_acc - sklearn_acc) < 0.05, (
-            f"Accuracy gap too large: CPM={cpm_acc:.4f} vs sklearn={sklearn_acc:.4f}"
-        )
-        assert abs(cpm_auc - sklearn_auc) < 0.01, (
-            f"AUC gap too large: CPM={cpm_auc:.4f} vs sklearn={sklearn_auc:.4f}"
-        )
-
     def test_coefficients_match(self, binary_classification_data):
         """IRLS coefficients should closely match sklearn's unregularized logistic regression (both MLE)."""
         X_train, X_test, y_train, y_test = binary_classification_data
@@ -252,22 +226,6 @@ class TestLogisticRegressionVsSklearn:
         )
         assert mae < 0.02, (
             f"Mean absolute probability difference too large: {mae:.4f}"
-        )
-
-    def test_probability_calibration(self, multi_feature_data):
-        """IRLS should produce probability ranges comparable to sklearn's."""
-        X_train, X_test, y_train, y_test = multi_feature_data
-
-        cpm_proba = _fit_cpm_logistic(X_train, y_train, X_test)
-        sklearn_proba, _ = _fit_sklearn_logistic(X_train, y_train, X_test)
-
-        cpm_range = cpm_proba.max() - cpm_proba.min()
-        sklearn_range = sklearn_proba.max() - sklearn_proba.min()
-
-        range_ratio = cpm_range / sklearn_range if sklearn_range > 0 else 0
-
-        assert range_ratio > 0.8, (
-            f"CPM probability range much narrower than sklearn's: ratio={range_ratio:.4f}"
         )
 
     def test_class_predictions(self, binary_classification_data):

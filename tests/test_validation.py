@@ -87,34 +87,40 @@ def test_error_on_invalid_y_dim(small_data_setup):
         check_data(X2d[:10], y2d_bad, cov2d[:10])
 
 
-def test_covariates_series(small_data_setup):
-    X2d, y1d, _, cov_series, _, _ = small_data_setup
-    _, _, cov_out = check_data(X2d, y1d, cov_series)
+@pytest.mark.parametrize("kind,expected_shape", [
+    ("series", (50, 1)),          # a pandas Series -> one column
+    ("array_1d", (50, 1)),        # a 1-D array -> one column
+    ("array_2d", (50, 2)),        # a 2-D array passes through
+    ("dataframe", (50, 3)),       # 'cat' one-hot encodes to 2 + 'num' = 3
+])
+def test_covariates_are_coerced_to_two_dimensions(small_data_setup, kind,
+                                                  expected_shape):
+    """Every accepted covariate spelling ends up as [n_samples, n_covariates].
+
+    One behaviour, one test: these were four near-identical test functions
+    differing only in the input type and the expected width.
+    """
+    X2d, y1d, _, cov_series, cov_1d_array, cov_2d_array = small_data_setup
+    covariates = {
+        "series": cov_series,
+        "array_1d": cov_1d_array,
+        "array_2d": cov_2d_array,
+        "dataframe": pd.DataFrame({
+            'cat': np.random.choice(['A', 'B', 'C'], size=50),
+            'num': np.random.randn(50),
+        }),
+    }[kind]
+
+    _, _, cov_out = check_data(X2d, y1d, covariates)
+
     assert cov_out.ndim == 2
-    assert cov_out.shape == (50, 1)
+    assert cov_out.shape == expected_shape
 
 
-def test_covariates_1d_array(small_data_setup):
-    X2d, y1d, _, _, cov_1d_array, _ = small_data_setup
-    _, _, cov_out = check_data(X2d, y1d, cov_1d_array)
-    assert cov_out.shape == (50, 1)
-
-
-def test_covariates_2d_array(small_data_setup):
-    X2d, y1d, _, _, _, cov_2d_array = small_data_setup
-    _, _, cov_out = check_data(X2d, y1d, cov_2d_array)
-    assert cov_out.shape == cov_2d_array.shape
-
-
-def test_accepts_dataframe_covariates(small_data_setup):
+def test_error_on_invalid_covariate_dim(small_data_setup):
     X2d, y1d, _, _, _, _ = small_data_setup
-    cov_df = pd.DataFrame({
-        'cat': np.random.choice(['A', 'B', 'C'], size=50),
-        'num': np.random.randn(50)
-    })
-    _, _, cov_out = check_data(X2d, y1d, cov_df)
-    # 'cat' -> 2 one-hot columns + 'num' = 3 features
-    assert cov_out.shape == (50, 3)
+    with pytest.raises(ValueError):
+        check_data(X2d, y1d, np.zeros((50, 2, 2)))
 
 
 def test_missing_values_behavior(small_data_setup):
@@ -137,46 +143,20 @@ def test_missing_values_behavior(small_data_setup):
         check_data(X2d, y_nan, cov2d, impute_missings=True)
 
 
-def test_error_on_invalid_covariate_dim(small_data_setup):
-    X2d, y1d, _, _, _, _ = small_data_setup
-    cov_3d = np.zeros((50, 2, 2))
-    with pytest.raises(ValueError):
-        check_data(X2d, y1d, cov_3d)
-
-
-# Tests for get_variable_names
-def test_get_variable_names_with_dataframe_inputs():
-    X_df = pd.DataFrame(np.random.randn(10, 3), columns=['f1', 'f2', 'f3'])
-    y_df = pd.DataFrame({'target_col': np.arange(10)})
-    cov_df = pd.DataFrame({'c1': np.arange(10), 'c2': np.arange(10) * 2})
-
-    X_names, y_name, cov_names = get_variable_names(X_df, y_df, cov_df)
-
-    assert X_names == ['f1', 'f2', 'f3']
-    assert y_name == 'target_col'
-    assert cov_names == ['c1', 'c2']
-
-
-def test_get_variable_names_with_series_and_numpy():
-    X_arr = np.zeros((5, 2))
-    y_ser = pd.Series(np.arange(5), name='yser')
-    cov_arr = np.zeros((5, 4))
-
-    X_names, y_name, cov_names = get_variable_names(X_arr, y_ser, cov_arr)
-
-    assert X_names == ['feature_0', 'feature_1']
-    assert y_name == 'yser'
-    assert cov_names == ['covariate_0', 'covariate_1', 'covariate_2', 'covariate_3']
-
-
-def test_get_variable_names_with_array_y_and_df_covariates():
-    X_arr = np.zeros((7, 1))
-    y_arr = np.arange(7)
-    cov_ser = pd.Series(np.arange(7), name='cov_only')
-
-    X_names, y_name, cov_names = get_variable_names(X_arr, y_arr, cov_ser)
-
-    assert X_names == ['feature_0']
-    assert y_name == 'target'
-    assert cov_names == ['cov_only']
-
+@pytest.mark.parametrize("X,y,covariates,expected", [
+    # Labelled inputs keep their own names...
+    (pd.DataFrame(np.zeros((10, 3)), columns=['f1', 'f2', 'f3']),
+     pd.DataFrame({'target_col': np.arange(10)}),
+     pd.DataFrame({'c1': np.arange(10), 'c2': np.arange(10) * 2}),
+     (['f1', 'f2', 'f3'], 'target_col', ['c1', 'c2'])),
+    # ...unlabelled arrays fall back to positional names...
+    (np.zeros((5, 2)), pd.Series(np.arange(5), name='yser'), np.zeros((5, 4)),
+     (['feature_0', 'feature_1'], 'yser',
+      ['covariate_0', 'covariate_1', 'covariate_2', 'covariate_3'])),
+    # ...and the two can be mixed in one call.
+    (np.zeros((7, 1)), np.arange(7), pd.Series(np.arange(7), name='cov_only'),
+     (['feature_0'], 'target', ['cov_only'])),
+])
+def test_get_variable_names_falls_back_per_input(X, y, covariates, expected):
+    """Names come from the data where it carries them, positional otherwise."""
+    assert get_variable_names(X, y, covariates) == expected

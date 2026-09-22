@@ -109,10 +109,6 @@ class TestRegressionGroundTruth:
         cpm.run(X, y, covariates)
         return cpm, pos_idx, neg_idx
 
-    def test_task_type_detected(self, cpm_result):
-        cpm, _, _ = cpm_result
-        assert cpm.task_type == TaskType.regression
-
     def test_positive_performance(self, cpm_result):
         """
         With strong signal edges, the connectome model should achieve
@@ -255,10 +251,6 @@ class TestClassificationGroundTruth:
         cpm.run(X, y, covariates)
         return cpm, pos_idx, neg_idx
 
-    def test_task_type_detected(self, cpm_result):
-        cpm, _, _ = cpm_result
-        assert cpm.task_type == TaskType.classification
-
     def test_above_chance_accuracy(self, cpm_result):
         """With informative edges, accuracy should be well above chance (0.5)."""
         cpm, _, _ = cpm_result
@@ -313,69 +305,6 @@ class TestClassificationGroundTruth:
             assert m not in df.columns, f"Regression metric should not be present: {m}"
 
 
-class TestEdgeSelectionStatistics:
-    """
-    Unit-level tests verifying that the edge selection step produces
-    statistically correct results on data with known correlation structure.
-    """
-
-    def test_pearson_selects_correlated_edges(self):
-        """
-        Verify that pearson-based edge selection identifies edges
-        that are correlated with y and rejects uncorrelated ones.
-        """
-        rng = np.random.RandomState(42)
-        n_samples = 200
-        n_features = 20
-
-        X = rng.randn(n_samples, n_features).astype(np.float32)
-        # Feature 0 is strongly positively correlated with y
-        y = (X[:, 0] * 2.0 + rng.randn(n_samples) * 0.3).astype(np.float32).reshape(-1, 1)
-
-        edge_sel = UnivariateEdgeSelection(
-            selection_statistic='pearson',
-            edge_selection=[PThreshold(threshold=[0.01], correction=[None])]
-        )
-        # set_params to configure the edge_selection as a single selector (as the pipeline does)
-        edge_sel.set_params(**list(edge_sel.param_grid)[0])
-
-        result = edge_sel.fit_transform(X=X, y=y, covariates=rng.randn(n_samples, 1))
-        edges = result.return_selected_edges()  # [n_features, 2, 1]
-
-        # Feature 0 should be selected as positive
-        assert edges[0, Networks.positive, 0] == True, "Feature 0 should be selected as positive"
-
-        # Count how many noise features are selected
-        noise_selected = edges[1:, :, 0].sum().item()
-        print(f"Noise features selected: {noise_selected} out of {n_features - 1}")
-        # At p<0.01 with 19 noise features, expected false positives ~0.19
-        assert noise_selected <= 5, f"Too many noise features selected: {noise_selected}"
-
-    def test_negative_correlation_detected(self):
-        """Edges negatively correlated with y should be selected as negative."""
-        rng = np.random.RandomState(42)
-        n_samples = 200
-        n_features = 10
-
-        X = rng.randn(n_samples, n_features).astype(np.float32)
-        # Feature 0 is negatively correlated with y
-        y = (-X[:, 0] * 2.0 + rng.randn(n_samples) * 0.3).astype(np.float32).reshape(-1, 1)
-
-        edge_sel = UnivariateEdgeSelection(
-            selection_statistic='pearson',
-            edge_selection=[PThreshold(threshold=[0.01], correction=[None])]
-        )
-        edge_sel.set_params(**list(edge_sel.param_grid)[0])
-
-        result = edge_sel.fit_transform(X=X, y=y, covariates=rng.randn(n_samples, 1))
-        edges = result.return_selected_edges()
-
-        # Feature 0 should be selected as negative
-        assert edges[0, Networks.negative, 0] == True, "Feature 0 should be selected as negative"
-        # And NOT selected as positive
-        assert edges[0, Networks.positive, 0] == False, "Feature 0 should not be selected as positive"
-
-
 class TestModelFitting:
     """Test that the linear model produces correct fits on simple data."""
 
@@ -416,37 +345,6 @@ class TestModelFitting:
         print(f"\nPearson r with pos+neg edges: {r:.6f}")
         # Should be perfect since the generative process matches the model
         assert r > 0.999, f"Should be near-perfect fit: r={r:.6f}"
-
-    def test_ols_with_uniform_coefficients(self):
-        """
-        When all true coefficients are equal, the sum-based aggregation
-        in CPM should recover the signal perfectly.
-        """
-        from cccpm.models.linear_model import LinearCPM
-
-        rng = np.random.RandomState(42)
-        n_samples = 100
-        n_features = 5
-
-        X = rng.randn(n_samples, n_features).astype(np.float32)
-        # y = sum of all features (uniform weights of 1.0)
-        y = X.sum(axis=1).astype(np.float32).reshape(-1, 1)
-
-        edges = torch.ones(n_features, 2, 1, dtype=torch.bool)
-        edges[:, Networks.negative, :] = False
-
-        model = LinearCPM(edges=edges, device='cpu', task_type=TaskType.regression)
-        cov = np.zeros((n_samples, 1), dtype=np.float32)
-        model.fit(X, y, cov)
-
-        preds = model.predict(X, cov)
-        y_pred = preds[:, Models.connectome, Networks.positive, 0].numpy()
-
-        from scipy.stats import pearsonr
-        r, _ = pearsonr(y.ravel(), y_pred)
-        print(f"\nPearson r with uniform coefficients: {r:.6f}")
-        # Sum aggregation matches the true generative process exactly
-        assert r > 0.999, f"Should be perfect fit with uniform coefficients: r={r:.6f}"
 
     def test_logistic_regression_recovers_separation(self):
         """

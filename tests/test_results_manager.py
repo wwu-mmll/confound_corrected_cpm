@@ -5,7 +5,8 @@ import pandas as pd
 import torch
 
 from cccpm.results_manager import ResultsManager
-from cccpm.constants import Networks, Models, Metrics, TaskType
+from cccpm.constants import (INCREMENTABLE_METRICS, Metrics, Models, Networks,
+                             TaskType)
 
 
 class TestResultsManagerInit:
@@ -227,16 +228,28 @@ class TestIncrementIsSuppressedWhereMeaningless:
         mgr = self._manager_with_metrics(tmp_path, TaskType.classification)
         assert torch.isnan(mgr.results[Metrics.f1_score, Models.increment]).all()
 
-    @pytest.mark.parametrize("metric", [
-        Metrics.explained_variance_score, Metrics.mean_squared_error,
-        Metrics.mean_absolute_error, Metrics.accuracy,
-        Metrics.balanced_accuracy, Metrics.roc_auc,
-    ])
-    def test_interpretable_increments_survive(self, tmp_path, metric):
+    def test_interpretable_increments_survive(self, tmp_path):
+        """Every metric whose difference *is* a statistic keeps full - covariates.
+
+        One run over INCREMENTABLE_METRICS rather than one test per metric --
+        and reading the constant means a metric added to it is covered here
+        automatically, instead of silently untested until someone remembers.
+        """
+        # Pin the membership itself. Reading the constant means a metric
+        # *removed* from it would silently stop being checked -- which the old
+        # hardcoded parametrize list would have caught. Assert both: the set is
+        # what we think it is, and every member behaves.
+        assert {m.name for m in INCREMENTABLE_METRICS} == {
+            "explained_variance_score", "mean_squared_error",
+            "mean_absolute_error", "accuracy", "balanced_accuracy", "roc_auc",
+        }, "INCREMENTABLE_METRICS changed -- is the increment still a statistic?"
+
         mgr = self._manager_with_metrics(tmp_path)
-        expected = (mgr.results[metric, Models.full]
-                    - mgr.results[metric, Models.covariates])
-        assert torch.allclose(mgr.results[metric, Models.increment], expected)
+        for metric in INCREMENTABLE_METRICS:
+            expected = (mgr.results[metric, Models.full]
+                        - mgr.results[metric, Models.covariates])
+            assert torch.allclose(mgr.results[metric, Models.increment],
+                                  expected), metric.name
 
     def test_suppression_does_not_touch_the_other_models(self, tmp_path):
         """Only the increment row is affected -- Pearson r itself is fine."""

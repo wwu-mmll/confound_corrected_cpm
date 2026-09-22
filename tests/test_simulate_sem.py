@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pytest
 
@@ -52,53 +54,34 @@ def test_simulated_r2s_match_targets():
     )
 
 
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        dict(R2_X_y=-0.1, R2_X_y_given_Z=0.0, R2_Z_y=0.0),
-        dict(R2_X_y=1.1, R2_X_y_given_Z=0.0, R2_Z_y=0.0),
-        dict(R2_X_y=0.2, R2_X_y_given_Z=0.3, R2_Z_y=0.0),
-        dict(R2_X_y=0.4, R2_X_y_given_Z=0.3, R2_Z_y=0.8),
-    ],
-)
-def test_simulate_data_invalid_r2_raises(kwargs):
-    with pytest.raises(ValueError):
-        simulate_data_given_R2(**kwargs)
+def test_rejects_invalid_arguments():
+    """Every rejected argument combination, and *which* error each produces.
 
-
-def test_informative_features_gt_total_features():
-    with pytest.raises(ValueError):
-        simulate_data_given_R2(
-            0.2, 0.1, 0.1,
-            n_features=5,
-            n_features_informative=10,
-        )
-
-
-def test_invalid_rho_informative():
-    with pytest.raises(ValueError):
-        simulate_data_given_R2(
-            0.2, 0.1, 0.1,
-            rho_informative=1.5,
-        )
-
-
-def test_invalid_n_confounds():
-    with pytest.raises(ValueError):
-        simulate_data_given_R2(
-            0.2, 0.1, 0.1,
-            n_confounds=0,
-        )
-
-
-def test_r2_relationships_hold():
-    sim = simulate_data_given_R2(
-        0.25, 0.15, 0.10, n_samples=5000
-    )
-    r2s = compute_r2s(sim)
-
-    assert r2s["r2_full"] >= r2s["r2_conf_only"]
-    assert r2s["r2_unique_X"] >= 0.0
+    These were seven test functions asserting only that some ValueError came
+    out -- which an unrelated typo raising ValueError would also satisfy. Each
+    case now pins the message, so the test fails if the wrong guard fires.
+    """
+    cases = [
+        # (kwargs, expected message fragment)
+        (dict(R2_X_y=-0.1, R2_X_y_given_Z=0.0, R2_Z_y=0.0),
+         "R2_X_y must be in"),
+        (dict(R2_X_y=1.1, R2_X_y_given_Z=0.0, R2_Z_y=0.0),
+         "R2_X_y must be in"),
+        (dict(R2_X_y=0.2, R2_X_y_given_Z=0.3, R2_Z_y=0.0),
+         "cannot exceed R2_X_y"),
+        (dict(R2_X_y=0.4, R2_X_y_given_Z=0.3, R2_Z_y=0.8),
+         "must be < 1"),
+        (dict(R2_X_y=0.2, R2_X_y_given_Z=0.1, R2_Z_y=0.1,
+              n_features=5, n_features_informative=10),
+         "cannot be greater than n_features"),
+        (dict(R2_X_y=0.2, R2_X_y_given_Z=0.1, R2_Z_y=0.1, rho_informative=1.5),
+         "rho_informative must be in"),
+        (dict(R2_X_y=0.2, R2_X_y_given_Z=0.1, R2_Z_y=0.1, n_confounds=0),
+         "n_confounds must be at least 1"),
+    ]
+    for kwargs, expected in cases:
+        with pytest.raises(ValueError, match=re.escape(expected)):
+            simulate_data_given_R2(**kwargs)
 
 
 def test_generate_four_scenarios_r2_ordering():

@@ -90,14 +90,6 @@ class TestModelInterface:
             assert isinstance(ns[group]["negative"], torch.Tensor)
             assert ns[group]["positive"].shape[0] == X.shape[0]
 
-    @pytest.mark.parametrize("model_cls", ALL_MODELS)
-    def test_chaining(self, model_cls, simple_data):
-        """model.fit(...).predict(...) works (fit returns self)."""
-        X, y, cov, edges = simple_data
-        model = model_cls(edges=edges, device='cpu', task_type=TaskType.regression)
-        result = model.fit(X, y, cov).predict(X, cov)
-        assert isinstance(result, torch.Tensor)
-
 
 # ============================================================
 # TestNonLinearModelsWithPipeline

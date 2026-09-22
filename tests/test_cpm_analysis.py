@@ -1,7 +1,10 @@
 """
-Tests for the CPMAnalysis pipeline: input handling, data validation, and permutation generation.
+Tests for the CPMAnalysis pipeline: input handling, repeated k-fold, and
+permutation generation.
 
-Full pipeline correctness (regression + classification) is tested in test_ground_truth.py.
+Full pipeline correctness (regression + classification) is tested in
+test_ground_truth.py; `check_data` itself, including missing-value handling, in
+test_validation.py.
 """
 
 import numpy as np
@@ -12,7 +15,6 @@ import torch
 from sklearn.model_selection import KFold, RepeatedKFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
-from cccpm.validation import check_data
 from cccpm.reporting.reporting_utils import average_over_repeats
 from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
@@ -38,35 +40,6 @@ def test_input_is_dataframe(cpm_instance, simulated_data):
         pd.DataFrame(y),
         pd.DataFrame(covariates)
     )
-
-
-# --- Missing value handling ---
-
-def test_nan_in_X(simulated_data):
-    X, y, covariates = simulated_data
-    X_nan = X.copy()
-    X_nan[0, 0] = np.nan
-
-    with pytest.raises(ValueError):
-        check_data(X_nan, y, covariates, impute_missings=False)
-
-    # Should not raise
-    check_data(X_nan, y, covariates, impute_missings=True)
-
-
-def test_nan_in_y(simulated_data):
-    X, y, covariates = simulated_data
-    y_nan = y.copy()
-    y_nan[0] = np.nan
-
-    # raise error if y contains nan and impute_missings is False
-    with pytest.raises(ValueError):
-        check_data(X, y_nan, covariates, impute_missings=False)
-
-    # but also raise an error if y contains nan and impute_missings is True
-    # values in y should never be missing
-    with pytest.raises(ValueError):
-        check_data(X, y_nan, covariates, impute_missings=True)
 
 
 # --- Repeated k-fold ---

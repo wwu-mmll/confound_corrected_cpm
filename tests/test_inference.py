@@ -14,36 +14,37 @@ from cccpm.inference import PermutationManager
 
 
 class TestPermutationManager:
-    def test_calculate_group_p_value_higher_is_better(self):
-        """For metrics where higher is better, p = (count(true < perm) + 1) / (n_perms + 1)."""
-        true = pd.DataFrame({'pearson_score': [0.5]})
-        perms = pd.DataFrame({'pearson_score': [0.3, 0.6, 0.4, 0.7]})
+    P_VALUE_CASES = [
+        # Higher is better: p = (count(observed < null) + 1) / (n + 1).
+        # 0.5 < 0.6, 0.7 -> 2 of 4 -> 3/5.
+        ('pearson_score', 0.5, [0.3, 0.6, 0.4, 0.7], 3 / 5),
+        # Lower is better: the comparison flips. 1.5 > 1.4 -> 1 of 4 -> 2/5.
+        ('mean_squared_error', 1.5, [1.4, 1.6, 1.5, 1.7], 2 / 5),
+        # Every permutation beats the observation: p = 1, never above it.
+        ('pearson_score', 0.0, [0.5, 0.6, 0.7], 1.0),
+        # An undefined statistic has no null to compare against. Every
+        # comparison with NaN is False, so a naive count comes out 0 and the +1
+        # correction reports 1/(n+1) -- the *most* significant p-value the test
+        # can produce -- for a model that does not exist. A run without
+        # covariates hits this: its covariates/full/increment rows are NaN
+        # placeholders, and they were being reported as p = 0.02.
+        ('pearson_score', float('nan'), [float('nan')] * 50, float('nan')),
+        # Defensive: a real observation against an all-NaN null is undefined too.
+        ('pearson_score', 0.4, [float('nan')] * 50, float('nan')),
+    ]
 
-        p = PermutationManager._calculate_group_p_value(true, perms)
+    def test_calculate_group_p_value(self):
+        """The p-value definition, in one place: the direction flip for
+        lower-is-better metrics, the +1 correction, and NaN in, NaN out."""
+        for column, observed, null, expected in self.P_VALUE_CASES:
+            p = PermutationManager._calculate_group_p_value(
+                pd.DataFrame({column: [observed]}), pd.DataFrame({column: null}))
 
-        # true (0.5) < perm: 0.6, 0.7 → 2 out of 4. p = (2+1)/(4+1) = 0.6
-        assert p['pearson_score'] == pytest.approx(3 / 5)
-
-    def test_calculate_group_p_value_lower_is_better(self):
-        """For error metrics (lower is better), p = (count(true > perm) + 1) / (n_perms + 1)."""
-        true = pd.DataFrame({'mean_squared_error': [1.5]})
-        perms = pd.DataFrame({'mean_squared_error': [1.4, 1.6, 1.5, 1.7]})
-
-        p = PermutationManager._calculate_group_p_value(true, perms)
-
-        # true (1.5) > perm: 1.4 → 1 out of 4. p = (1+1)/(4+1) = 0.4
-        assert p['mean_squared_error'] == pytest.approx(2 / 5)
-
-    def test_calculate_group_p_value_never_exceeds_one(self):
-        """A valid p-value must be in (0, 1] even when every permutation beats the true value."""
-        true = pd.DataFrame({'pearson_score': [0.0]})
-        perms = pd.DataFrame({'pearson_score': [0.5, 0.6, 0.7]})  # all beat true
-
-        p = PermutationManager._calculate_group_p_value(true, perms)
-
-        # (3 + 1) / (3 + 1) = 1.0 — must not exceed 1
-        assert p['pearson_score'] == pytest.approx(1.0)
-        assert 0 < p['pearson_score'] <= 1
+            if np.isnan(expected):
+                assert np.isnan(p[column]), (column, observed)
+            else:
+                assert p[column] == pytest.approx(expected), (column, observed)
+                assert 0 < p[column] <= 1
 
     def test_calculate_p_values_groups(self):
         """Test grouped p-value calculation across model/network combinations."""
@@ -305,34 +306,3 @@ def test_calculate_permutation_results_rejects_unknown_method(tmp_path):
     with pytest.raises(ValueError, match="Unknown edge-significance method"):
         PermutationManager.calculate_permutation_results(
             str(results_dir), logging.getLogger(__name__), method='bogus')
-
-
-# ============================================================
-# Undefined statistics have no null distribution.
-# ============================================================
-
-def test_p_value_is_nan_when_the_observed_statistic_is_undefined():
-    """A NaN observed value must give a NaN p-value, not the permutation floor.
-
-    Every comparison with NaN is False, so the naive count comes out 0 and the
-    +1 correction reports 1/(n_perms+1) -- the *most* significant p-value the
-    test can produce -- for a statistic that does not exist. A run without
-    covariates hits this directly: its covariates/full/residuals/increment rows
-    are NaN placeholders, and they were being reported as p = 0.02.
-    """
-    true = pd.DataFrame({'pearson_score': [float('nan')]})
-    perms = pd.DataFrame({'pearson_score': [float('nan')] * 50})
-
-    p = PermutationManager._calculate_group_p_value(true, perms)
-
-    assert np.isnan(p['pearson_score'])
-
-
-def test_p_value_is_nan_when_only_the_null_is_undefined():
-    """Defensive: a real observation against an all-NaN null is still undefined."""
-    true = pd.DataFrame({'pearson_score': [0.4]})
-    perms = pd.DataFrame({'pearson_score': [float('nan')] * 50})
-
-    p = PermutationManager._calculate_group_p_value(true, perms)
-
-    assert np.isnan(p['pearson_score'])
