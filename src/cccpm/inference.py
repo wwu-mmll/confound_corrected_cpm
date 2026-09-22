@@ -99,7 +99,8 @@ class PermutationManager:
 
     @staticmethod
     def calculate_permutation_results(results_directory, logger, method="nbs",
-                                      nbs_threshold=0.5, nbs_component_stat="extent"):
+                                      nbs_stability_threshold=0.5,
+                                      nbs_component_stat="extent"):
         """
         Calculate and save the permutation test results.
 
@@ -114,7 +115,8 @@ class PermutationManager:
         :param results_directory: Directory where the results are saved.
         :param logger: Logger for progress messages.
         :param method: Edge-significance method, ``'nbs'`` (default) or ``'tfce'``.
-        :param nbs_threshold: Stability threshold for NBS component forming.
+        :param nbs_stability_threshold: Stability threshold (a fraction of folds,
+            not a p-value) for NBS component forming.
         :param nbs_component_stat: NBS component statistic, ``'extent'`` or ``'intensity'``.
         """
         true_results = ResultsManager.load_cv_results(results_directory)
@@ -131,7 +133,8 @@ class PermutationManager:
         if method == "nbs":
             stability_significance, sig_meta = PermutationManager.calculate_p_values_edges_nbs(
                 true_edge_stability, perm_edge_stability,
-                threshold=nbs_threshold, component_stat=nbs_component_stat,
+                threshold=nbs_stability_threshold,
+                component_stat=nbs_component_stat,
                 return_diagnostics=True)
         elif method == "tfce":
             stability_significance, sig_meta = PermutationManager.calculate_p_values_edges_tfce(

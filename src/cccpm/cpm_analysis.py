@@ -30,6 +30,26 @@ from cccpm.reporting.data_insights import generate_data_insights
 from cccpm.constants import Models, Networks, TaskType
 
 
+# Parameters renamed in 0.7.0, mapped to their replacement.
+#
+# "edge significance" conflated two different questions: the p-value that decides
+# whether an edge is *selected* (set on PThreshold), and whether an edge is
+# selected across folds *more consistently than chance*. These parameters only
+# ever meant the second -- which is what the outputs have always been called
+# (stability_edges_significance.npy). `nbs_threshold` had the same problem one
+# level down: it is a fraction of folds, not a p-value, and it sat in the same
+# call as `PThreshold(threshold=...)` with nothing to tell them apart.
+_RENAMED_IN_0_7_0 = {
+    'edge_significance_method': (
+        'stability_significance_method',
+        "it sets how edge *stability* significance is established from the "
+        "permutations, not how edges are selected"),
+    'nbs_threshold': (
+        'nbs_stability_threshold',
+        "it is a stability threshold -- a fraction of folds -- not a p-value"),
+}
+
+
 class CPMAnalysis:
     """
     This class handles the process of performing CPM analysis with cross-validation and permutation testing.
@@ -51,13 +71,14 @@ class CPMAnalysis:
                  impute_missing_values: bool = True,
                  model_input: str = 'raw',
                  n_permutations: int = 0,
-                 edge_significance_method: str = "nbs",
-                 nbs_threshold: float = 0.5,
+                 stability_significance_method: str = "nbs",
+                 nbs_stability_threshold: float = 0.5,
                  nbs_component_stat: str = "extent",
                  atlas: str = None,
                  atlas_labels: str = None,
                  device: str = 'cpu',
-                 random_state: int = 42):
+                 random_state: int = 42,
+                 **removed):
         """
         Initialize the CPMAnalysis object.
 
@@ -108,15 +129,20 @@ class CPMAnalysis:
         n_permutations: int, default=0
             Number of label permutations for significance testing. ``0`` disables
             permutation testing; use 1000+ for publishable p-values.
-        edge_significance_method: str, default='nbs'
-            How edge-stability significance is established from the permutations.
-            ``'nbs'`` uses the Network-Based Statistic (connected-component test,
-            subnetwork-level FWER control); ``'tfce'`` uses network Threshold-Free
-            Cluster Enhancement (per-edge FWER control, no primary threshold).
-        nbs_threshold: float, default=0.5
-            Stability threshold (``>=``) for NBS component forming. Because
-            stability is discrete over the outer folds, ``0.5`` keeps edges
-            selected in a majority of folds. Ignored when method is ``'tfce'``.
+        stability_significance_method: str, default='nbs'
+            How edge-*stability* significance is established from the
+            permutations -- that is, whether an edge is selected across folds
+            more consistently than chance. This is a different question from
+            which edges pass the selection threshold in the first place, which
+            is set on :class:`PThreshold`. ``'nbs'`` uses the Network-Based
+            Statistic (connected-component test, subnetwork-level FWER control);
+            ``'tfce'`` uses network Threshold-Free Cluster Enhancement (per-edge
+            FWER control, no primary threshold).
+        nbs_stability_threshold: float, default=0.5
+            **Stability** threshold (``>=``) for NBS component forming -- a
+            fraction of folds, not a p-value. Because stability is discrete over
+            the outer folds, ``0.5`` keeps edges selected in a majority of them.
+            Ignored when the method is ``'tfce'``.
         nbs_component_stat: str, default='extent'
             NBS component statistic: ``'extent'`` (number of edges, classic NBS)
             or ``'intensity'`` (summed supra-threshold stability). Ignored when
@@ -142,6 +168,16 @@ class CPMAnalysis:
             Seed for permutation generation. Uses a local RNG and does not modify
             the global NumPy/torch random state.
         """
+        for old, (new, why) in _RENAMED_IN_0_7_0.items():
+            if old in removed:
+                raise TypeError(
+                    f"{old!r} was renamed to {new!r} in 0.7.0, because {why}. "
+                    f"Pass {new}={removed[old]!r} instead.")
+        if removed:
+            raise TypeError(
+                f"{type(self).__name__}() got an unexpected keyword argument "
+                f"{sorted(removed)[0]!r}.")
+
         self.results_directory = results_directory
 
         # Convert string to TaskType enum if needed
@@ -171,8 +207,8 @@ class CPMAnalysis:
 
 
         self.n_permutations = n_permutations
-        self.edge_significance_method = edge_significance_method
-        self.nbs_threshold = nbs_threshold
+        self.stability_significance_method = stability_significance_method
+        self.nbs_stability_threshold = nbs_stability_threshold
         self.nbs_component_stat = nbs_component_stat
 
         if device.lower() == 'gpu' or device.lower() == 'cuda':
@@ -403,8 +439,8 @@ class CPMAnalysis:
             self._single_run(X=X, y=y_perms, covariates=covariates, perm_run=True)
             PermutationManager.calculate_permutation_results(
                 self.results_directory, self.logger,
-                method=self.edge_significance_method,
-                nbs_threshold=self.nbs_threshold,
+                method=self.stability_significance_method,
+                nbs_stability_threshold=self.nbs_stability_threshold,
                 nbs_component_stat=self.nbs_component_stat)
 
         self.logger.info("=" * 50)

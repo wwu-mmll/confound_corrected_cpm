@@ -303,3 +303,37 @@ def test_nonlinear_models_are_not_invariant_to_model_input():
             f"{cls.__name__} looks invariant to model_input (gap {gap:.1%} of "
             f"sd(y)); if that is real, this design decision should be revisited")
 
+
+# ---------------------------------------------------------------------------
+# Renamed in 0.7.0: "edge significance" meant stability, not selection
+# ---------------------------------------------------------------------------
+
+RENAMED = [
+    ('edge_significance_method', 'stability_significance_method', 'tfce'),
+    ('nbs_threshold', 'nbs_stability_threshold', 0.7),
+]
+
+
+@pytest.mark.parametrize("old,new,value", RENAMED)
+def test_renamed_parameters_name_their_replacement(tmp_path, old, new, value):
+    """Both spellings described *stability* significance while sounding like
+    they belonged to edge selection, which is a different p-value entirely.
+
+    A bare TypeError from Python would name the old parameter but not the new
+    one, and these shipped in 0.4.0 -- so the error has to carry the migration.
+    """
+    with pytest.raises(TypeError, match=new):
+        CPMAnalysis(results_directory=str(tmp_path), **{old: value})
+
+
+@pytest.mark.parametrize("old,new,value", RENAMED)
+def test_renamed_parameters_still_work_under_the_new_name(tmp_path, old, new, value):
+    cpm = CPMAnalysis(results_directory=str(tmp_path), **{new: value})
+    assert getattr(cpm, new) == value
+
+
+def test_unknown_keyword_arguments_are_still_rejected(tmp_path):
+    """The `**removed` catch-all must not turn typos into silently ignored
+    arguments -- that is the failure mode it would otherwise introduce."""
+    with pytest.raises(TypeError, match="nonsense"):
+        CPMAnalysis(results_directory=str(tmp_path), nonsense=1)

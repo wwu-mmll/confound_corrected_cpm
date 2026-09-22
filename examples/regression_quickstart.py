@@ -13,7 +13,7 @@ The companion script ``classification_quickstart.py`` shows the same workflow
 for a binary target.
 """
 
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, ShuffleSplit
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
 from cccpm.simulation.simulate_sem import simulate_data_given_kappa
@@ -56,11 +56,20 @@ print(f"True R²(y~X | Z)        : {info['R2_X_y_given_Z']:.2f}  (what we hope t
 # 2. Configure edge selection
 # ---------------------------------------------------------------------------
 # Pick which edges enter the model by correlating each edge with the target and
-# keeping those below a p-value threshold. Use 'pearson_partial' instead of
-# 'pearson' to control for the covariates already *during* edge selection.
+# keeping those below a p-value threshold.
+#
+# Confound control is two independent choices. This one, `selection_input`,
+# decides whether the *selection* controls for the covariates: 'residualized'
+# tests each edge with the regression y ~ 1 + Z + edge instead of a plain
+# correlation. The other, `model_input`, is set on CPMAnalysis below.
+#
+# Passing several thresholds turns the p-threshold into a tuned hyperparameter;
+# the inner CV below picks one per outer fold, so the choice never sees the
+# outer test set.
 edge_selection = UnivariateEdgeSelection(
     selection_statistic="pearson",
-    edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
+    selection_input="residualized",               # covariates controlled during selection
+    edge_selection=[PThreshold(threshold=[0.05, 0.01, 0.001], correction=[None])],
 )
 
 # ---------------------------------------------------------------------------
@@ -70,15 +79,23 @@ cpm = CPMAnalysis(
     results_directory="./results/regression_quickstart",
     task_type="regression",                       # or leave as None to auto-detect
     cv=KFold(n_splits=10, shuffle=True, random_state=42),
+    inner_cv=ShuffleSplit(n_splits=1, test_size=0.2, random_state=42),
+                                                  # tunes the p-threshold inside each
+                                                  # outer fold (nested CV)
     edge_selection=edge_selection,
+    model_input="residualized",                   # the second confound-control axis:
+                                                  # deconfound the connectome the models
+                                                  # consume, after edge selection
     n_permutations=1000,                           # use 1000+ for a real analysis
     atlas="Schaefer100-17",                       # built-in atlas → brain plots in the
                                                   # report; or pass a path to a custom
                                                   # CSV (region,x,y,z[,network]).
                                                   # See cccpm.atlases.list_atlases().
     device="cpu",                                 # "cuda" uses the GPU if available
-    edge_significance_method='nbs',
-    nbs_threshold=0.5
+    stability_significance_method="nbs",          # how *stability* significance is
+                                                  # tested -- unrelated to the
+                                                  # PThreshold above
+    nbs_stability_threshold=0.5,                  # a fraction of folds, not a p-value
 )
 
 cpm.run(X=X, y=y, covariates=covariates)
@@ -92,10 +109,10 @@ cpm.run(X=X, y=y, covariates=covariates)
 #   - cv_predictions.csv     : out-of-sample predictions per subject
 #   - report.html            : a full, human-readable HTML report
 #
-# Because the connectome carries genuine confound leakage, run this a second time
-# with model_input='residualized' (which regresses the covariates out of the
-# connectome before summing the selected edges into network strengths) and compare
-# the 'connectome' model across the two runs: the gap between them is the confound
-# inflation the SEM simulator built in on purpose. 'increment' (full - covariates)
-# answers the same question within a single run.
+# This run has confound control on both axes. To see the confound inflation the
+# SEM simulator built in on purpose, run it again with selection_input='raw' and
+# model_input='raw' and compare the 'connectome' model across the two: the gap is
+# the inflation. Within a single run, 'increment' (full - covariates) answers the
+# same question -- read it on explained variance, not Pearson r, where a
+# difference of correlations is not a statistic and the cell is NaN by design.
 print("Done. Open ./results/regression_quickstart/report.html to explore the results.")
