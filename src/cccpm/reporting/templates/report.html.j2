@@ -105,7 +105,7 @@
         {% else %}
         How the connectome model performs across metrics and networks. This analysis ran
         without covariates, so the confound-control variants (covariates, full,
-        connectome_residualized, increment) are not defined.
+        increment) are not defined.
         {% endif %}
       </p>
 
@@ -120,10 +120,6 @@
           {% endif %}
           {% if 'full' in available_models %}
           <li><strong>full</strong> — connectome + covariates combined (best prediction).</li>
-          {% endif %}
-          {% if 'connectome_residualized' in available_models %}
-          <li><strong>connectome_residualized</strong> — the connectome model after the
-            covariate variance is regressed out of the connectivity features.</li>
           {% endif %}
           {% if 'increment' in available_models %}
           <li><strong>increment</strong> — the <em>added</em> value of the connectome over covariates
@@ -154,8 +150,7 @@
         Mean [SD] across outer CV folds. Permutation p-values: * p&lt;0.05, ** p&lt;0.01.
         {% if 'increment' in available_models %}
         Models: <em>connectome</em> (connectivity only), <em>covariates</em> (confounds only),
-        <em>full</em> (connectome + confounds), <em>connectome_residualized</em>
-        (connectome with confound variance removed from the features),
+        <em>full</em> (connectome + confounds),
         <em>increment</em> (full minus covariates).
         {% else %}
         Model: <em>connectome</em> (connectivity only) — this analysis ran without covariates.

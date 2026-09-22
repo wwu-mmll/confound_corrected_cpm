@@ -18,7 +18,7 @@ from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager
 from cccpm.inference import PermutationManager
 from cccpm.preprocessing import (torch_train_test_split, torch_impute_missing_values,
-                                 select_stable_edges)
+                                 residualize_train_test, select_stable_edges)
 from cccpm.validation import (check_data, detect_task_type, validate_task_type,
                               infer_n_nodes)
 from cccpm.memory import plan_permutation_chunk
@@ -48,6 +48,7 @@ class CPMAnalysis:
                  select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
+                 model_input: str = 'raw',
                  calculate_residuals: bool = None,
                  n_permutations: int = 0,
                  edge_significance_method: str = "nbs",
@@ -88,21 +89,31 @@ class CPMAnalysis:
         impute_missing_values: bool, default=True
             Whether to impute missing values in ``X`` and the covariates (NaNs in
             the target ``y`` always raise an error).
+        model_input: str, default='raw'
+            What the predictive models consume. ``'raw'`` uses the connectome as
+            given; ``'residualized'`` regresses the covariates out of it first,
+            fitting the residualiser on each training split and applying it to the
+            held-out split. Independent of ``selection_input``, which controls edge
+            selection: together they are the 2x2 of confound control.
+
+            This is a property of the run, not an extra model. It has to be: OLS
+            is invariant to it once the covariates are in the design -- `full` and
+            `increment` are unchanged -- but a tree, forest or GAM is not. On
+            identical edges, fitting `full` on raw versus residualised connectivity
+            moves predictions by 391% of sd(y) for ``DecisionTreeCPM``, 65% for
+            ``RandomForestCPM`` and 19% for ``GAMCPM``, against 0.0% for
+            ``LinearCPM``. A "residualised" *model* would therefore mean something
+            different for every backend, and the user could not tell from the
+            results which connectome produced `full`.
         calculate_residuals: bool, default=None
             .. deprecated::
-                Use ``UnivariateEdgeSelection(selection_input='residualized')``
-                and read the ``connectome_residualized`` model. ``True`` now
-                sets ``selection_input='residualized'`` on the edge selection
-                and no longer residualises the connectome before *fitting* --
-                the deconfounded-feature model is reported as
-                ``connectome_residualized`` on every run, so residualising the
-                model input would only duplicate it. Two consequences to be
-                aware of when migrating: the number you used to read from
-                ``connectome`` is now in ``connectome_residualized``, and edge
-                selection now uses the properly specified coefficient test
-                (``df = N - 2 - C``) rather than an ordinary correlation
-                against the raw target, so the selected edge sets change.
-                This parameter will be removed in a future release.
+                Use ``model_input='residualized'`` together with
+                ``UnivariateEdgeSelection(selection_input='residualized')``,
+                which is what ``True`` now sets. One consequence to be aware of
+                when migrating: edge selection now uses the properly specified
+                coefficient test (``df = N - 2 - C``) rather than an ordinary
+                correlation against the raw target, so the selected edge sets
+                change. This parameter will be removed in a future release.
         n_permutations: int, default=0
             Number of label permutations for significance testing. ``0`` disables
             permutation testing; use 1000+ for publishable p-values.
@@ -162,21 +173,25 @@ class CPMAnalysis:
         self.select_stable_edges = select_stable_edges
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
+        if model_input not in ('raw', 'residualized'):
+            raise ValueError(
+                f"model_input must be 'raw' or 'residualized', got {model_input!r}.")
+        self.model_input = model_input
+
         if calculate_residuals is not None:
             warnings.warn(
                 "calculate_residuals is deprecated and will be removed in a "
-                "future release. Use UnivariateEdgeSelection("
-                "selection_input='residualized') and read the "
-                "'connectome_residualized' model instead. Note that the value "
-                "you previously read from 'connectome' is now reported as "
-                "'connectome_residualized', and that edge selection now uses "
-                "the coefficient test (df = N - 2 - C) rather than a plain "
+                "future release. Use model_input='residualized' together with "
+                "UnivariateEdgeSelection(selection_input='residualized'), which "
+                "is what True now sets. Note that edge selection now uses the "
+                "coefficient test (df = N - 2 - C) rather than a plain "
                 "correlation against the raw target, so edge sets change.",
                 DeprecationWarning, stacklevel=2,
             )
             if calculate_residuals:
                 self.edge_selection.statistic._input = 'residualized'
                 self.edge_selection.selection_input = 'residualized'
+                self.model_input = 'residualized'
         self.calculate_residuals = calculate_residuals
         self.n_permutations = n_permutations
         self.edge_significance_method = edge_significance_method
@@ -229,6 +244,7 @@ class CPMAnalysis:
             self.logger.info(f"Stability threshold:     {self.stability_threshold}")
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
         self.logger.info(f"Selection input:         {self.edge_selection.statistic._input}")
+        self.logger.info(f"Model input:             {self.model_input}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info(f"Device:                  {self.device}")
         self.logger.info("="*50)
@@ -294,8 +310,8 @@ class CPMAnalysis:
         """
         Which model variants this run defines. Without covariates only
         ``connectome`` is meaningful: ``covariates`` has an empty design,
-        ``full`` collapses onto ``connectome``, ``connectome_residualized`` has nothing to
-        residualise against, and ``increment`` would be identically zero.
+        ``full`` collapses onto ``connectome``, and ``increment`` would be
+        identically zero.
         """
         if getattr(self, 'has_covariates', True):
             return [m.name for m in Models]
@@ -321,6 +337,10 @@ class CPMAnalysis:
             offenders.append(
                 "selection_input='residualized' (confound-controlled edge "
                 "selection needs confounds; use selection_input='raw')")
+        if self.model_input == 'residualized':
+            offenders.append(
+                "model_input='residualized' (there is nothing to residualise "
+                "the connectome against; use model_input='raw')")
 
         if offenders:
             raise ValueError(
@@ -342,7 +362,7 @@ class CPMAnalysis:
         covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
             Omit it (or pass ``None``) for vanilla CPM with no confound control. In that
             mode only the ``connectome`` model is defined -- ``covariates``, ``full``,
-            ``connectome_residualized`` and ``increment`` need covariates and are NaN,
+            ``full`` and ``increment`` need covariates and are reported as NaN,
             and the models that do exist are listed in ``available_models.json``.
             Options that presuppose covariates (a ``*_partial`` edge statistic,
             ``calculate_residuals=True``) then raise up front.
@@ -509,9 +529,18 @@ class CPMAnalysis:
                 X_train, X_test, cov_train, cov_test)
 
         # edges: [Features, 2, Runs] -- one winning configuration per run.
+        # Selection always sees the connectome as supplied; whether it controls
+        # for the covariates is decided inside the statistic by selection_input.
         edges = self._select_edges(X_train, y_train, cov_train, results_manager, outer_fold)
         results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges,
                                     run_idx=run_idx)
+
+        # Deconfound the features the models consume, if asked. Fitted on train
+        # and applied to test, and deliberately *after* selection so the two
+        # choices stay independent.
+        if self.model_input == 'residualized':
+            X_train, X_test = residualize_train_test(
+                X_train, X_test, cov_train, cov_test)
 
         model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
         model.fit(X_train, y_train, cov_train)

@@ -15,7 +15,7 @@ from cccpm.reporting.plots.figure_style import (
     save_figure,
 )
 
-MODEL_ORDER = ["covariates", "connectome", "full", "connectome_residualized", "increment"]
+MODEL_ORDER = ["covariates", "connectome", "full", "increment"]
 
 
 def scatter_plot_main(
@@ -158,13 +158,12 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name)
 def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 grid of histograms showing the distribution of network_strength
-    for two models ('connectome', 'connectome_residualized') and two networks
-    ('positive', 'negative').
+    for the connectome model and two networks ('positive', 'negative').
     """
     apply_nature_style()
 
     # Filter relevant data
-    df = df[df["model"].isin(["connectome", "connectome_residualized"])]
+    df = df[df["model"] == "connectome"]
     df = df[df["network"].isin(["positive", "negative"])]
 
     def histplot_colored(data, color=None, **kwargs):
@@ -202,8 +201,7 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) 
 def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 scatter plot of y_true vs network_strength
-    for two models ('connectome', 'connectome_residualized') and two networks
-    ('positive', 'negative').
+    for the connectome model and two networks ('positive', 'negative').
     """
     apply_nature_style()
 

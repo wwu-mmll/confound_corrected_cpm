@@ -15,8 +15,17 @@ class BaseCPM(ABC):
 
     Matches the tensor-based pipeline interface of LinearCPM but delegates
     the connectome and full model fitting to subclass-defined estimators
-    (sklearn, pygam, etc.).  Covariates and connectome_residualized models always use
-    ordinary least-squares (LinearRegression).
+    (sklearn, pygam, etc.).  The covariates model always uses ordinary
+    least-squares (LinearRegression).
+
+    Whether the connectome has been deconfounded is decided by the caller
+    (``CPMAnalysis(model_input=...)``). It cannot be a model variant here: a
+    tree or GAM is not invariant to shifting a feature by its covariate fit the
+    way OLS is, so a "residualised" model name would mean something different
+    for every backend. Measured on the same edges, fitting `full` on raw versus
+    residualised connectivity moves predictions by 391% of sd(y) for a decision
+    tree, 65% for a random forest and 19% for a GAM -- against 0.0% for
+    LinearCPM.
 
     Constructor
     -----------
@@ -33,7 +42,6 @@ class BaseCPM(ABC):
         self.task_type = task_type
         self.edges = torch.as_tensor(edges, device=self.device)
         self._fitted = []
-        self._resid_models = []
 
     # ------------------------------------------------------------------
     # Abstract / overridable
@@ -69,11 +77,9 @@ class BaseCPM(ABC):
         n_samples, n_runs = y.shape
 
         self._fitted = []
-        self._resid_models = []
 
         for run in range(n_runs):
             run_models = {}
-            run_resid = {}
 
             pos_mask = edges_np[:, Networks.positive, run].astype(bool)
             neg_mask = edges_np[:, Networks.negative, run].astype(bool)
@@ -81,34 +87,23 @@ class BaseCPM(ABC):
             pos_str = X[:, pos_mask].sum(axis=1, keepdims=True) if pos_mask.any() else np.zeros((n_samples, 1), dtype=np.float32)
             neg_str = X[:, neg_mask].sum(axis=1, keepdims=True) if neg_mask.any() else np.zeros((n_samples, 1), dtype=np.float32)
 
-            run_resid['pos'] = LinearRegression().fit(covariates, pos_str)
-            run_resid['neg'] = LinearRegression().fit(covariates, neg_str)
-
-            pos_resid = pos_str - run_resid['pos'].predict(covariates)
-            neg_resid = neg_str - run_resid['neg'].predict(covariates)
-
             y_run = y[:, run]
 
             feats = {
-                'positive': {'conn': pos_str, 'resid': pos_resid},
-                'negative': {'conn': neg_str, 'resid': neg_resid},
-                'both': {
-                    'conn': np.hstack([pos_str, neg_str]),
-                    'resid': np.hstack([pos_resid, neg_resid]),
-                },
+                'positive': pos_str,
+                'negative': neg_str,
+                'both': np.hstack([pos_str, neg_str]),
             }
 
             # Covariates model — same for all networks, fit once
             run_models['covariates'] = LinearRegression().fit(covariates, y_run)
 
             for net in ['positive', 'negative', 'both']:
-                run_models[f'connectome_{net}'] = self.fit_model(feats[net]['conn'], y_run)
-                run_models[f'connectome_residualized_{net}'] = LinearRegression().fit(feats[net]['resid'], y_run)
-                X_full = np.hstack([feats[net]['conn'], covariates])
+                run_models[f'connectome_{net}'] = self.fit_model(feats[net], y_run)
+                X_full = np.hstack([feats[net], covariates])
                 run_models[f'full_{net}'] = self.fit_model(X_full, y_run)
 
             self._fitted.append(run_models)
-            self._resid_models.append(run_resid)
 
         return self
 
@@ -138,16 +133,10 @@ class BaseCPM(ABC):
             pos_str = X[:, pos_mask].sum(axis=1, keepdims=True) if pos_mask.any() else np.zeros((n_samples, 1), dtype=np.float32)
             neg_str = X[:, neg_mask].sum(axis=1, keepdims=True) if neg_mask.any() else np.zeros((n_samples, 1), dtype=np.float32)
 
-            pos_resid = pos_str - self._resid_models[run]['pos'].predict(covariates)
-            neg_resid = neg_str - self._resid_models[run]['neg'].predict(covariates)
-
             feats = {
-                'positive': {'conn': pos_str, 'resid': pos_resid},
-                'negative': {'conn': neg_str, 'resid': neg_resid},
-                'both': {
-                    'conn': np.hstack([pos_str, neg_str]),
-                    'resid': np.hstack([pos_resid, neg_resid]),
-                },
+                'positive': pos_str,
+                'negative': neg_str,
+                'both': np.hstack([pos_str, neg_str]),
             }
 
             nets = [
@@ -161,12 +150,9 @@ class BaseCPM(ABC):
                     self.predict_model(self._fitted[run]['covariates'], covariates).ravel()
                 )
                 predictions[:, Models.connectome, net_idx, run] = (
-                    self.predict_model(self._fitted[run][f'connectome_{net_name}'], feats[net_name]['conn']).ravel()
+                    self.predict_model(self._fitted[run][f'connectome_{net_name}'], feats[net_name]).ravel()
                 )
-                predictions[:, Models.connectome_residualized, net_idx, run] = (
-                    self.predict_model(self._fitted[run][f'connectome_residualized_{net_name}'], feats[net_name]['resid']).ravel()
-                )
-                X_full = np.hstack([feats[net_name]['conn'], covariates])
+                X_full = np.hstack([feats[net_name], covariates])
                 predictions[:, Models.full, net_idx, run] = (
                     self.predict_model(self._fitted[run][f'full_{net_name}'], X_full).ravel()
                 )
@@ -179,11 +165,12 @@ class BaseCPM(ABC):
 
         Returns
         -------
-        dict with "connectome" and "connectome_residualized" sub-dicts, each mapping
-        "positive"/"negative" to tensors [N_samples, N_runs].
+        dict with a "connectome" sub-dict mapping "positive"/"negative" to
+        tensors [N_samples, N_runs]. These are the strengths of whatever
+        connectivity the model was given -- under ``model_input='residualized'``
+        that is already the deconfounded connectome.
         """
         X = np.asarray(X, dtype=np.float32)
-        covariates = np.asarray(covariates, dtype=np.float32)
 
         edges_np = self.edges.cpu().numpy()
         n_samples = X.shape[0]
@@ -191,29 +178,20 @@ class BaseCPM(ABC):
 
         pos_strengths = np.zeros((n_samples, n_runs), dtype=np.float32)
         neg_strengths = np.zeros((n_samples, n_runs), dtype=np.float32)
-        pos_residuals = np.zeros((n_samples, n_runs), dtype=np.float32)
-        neg_residuals = np.zeros((n_samples, n_runs), dtype=np.float32)
 
         for run in range(n_runs):
             pos_mask = edges_np[:, Networks.positive, run].astype(bool)
             neg_mask = edges_np[:, Networks.negative, run].astype(bool)
 
-            pos_str = X[:, pos_mask].sum(axis=1) if pos_mask.any() else np.zeros(n_samples, dtype=np.float32)
-            neg_str = X[:, neg_mask].sum(axis=1) if neg_mask.any() else np.zeros(n_samples, dtype=np.float32)
-
-            pos_strengths[:, run] = pos_str
-            neg_strengths[:, run] = neg_str
-            pos_residuals[:, run] = pos_str - self._resid_models[run]['pos'].predict(covariates).ravel()
-            neg_residuals[:, run] = neg_str - self._resid_models[run]['neg'].predict(covariates).ravel()
+            pos_strengths[:, run] = (X[:, pos_mask].sum(axis=1) if pos_mask.any()
+                                     else np.zeros(n_samples, dtype=np.float32))
+            neg_strengths[:, run] = (X[:, neg_mask].sum(axis=1) if neg_mask.any()
+                                     else np.zeros(n_samples, dtype=np.float32))
 
         return {
             "connectome": {
                 Networks.positive.name: torch.from_numpy(pos_strengths).to(self.device),
                 Networks.negative.name: torch.from_numpy(neg_strengths).to(self.device),
-            },
-            "connectome_residualized": {
-                Networks.positive.name: torch.from_numpy(pos_residuals).to(self.device),
-                Networks.negative.name: torch.from_numpy(neg_residuals).to(self.device),
             },
         }
 

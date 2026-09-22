@@ -7,19 +7,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
-- **Confound control is now two choices instead of four levers.**
+- **Confound control is now two independent run-level choices instead of four levers.**
   `UnivariateEdgeSelection` gains `selection_statistic` (`'pearson'` | `'spearman'`)
-  and `selection_input` (`'raw'` | `'residualized'`). `selection_input='residualized'`
-  is the per-edge regression `y ~ 1 + Z + edge` — the semipartial correlation as the
-  reported effect size, the coefficient's p-value with `df = N - 2 - C` — so a
-  `p < 0.05` threshold means a 5% per-edge false-positive rate whatever the
-  confounding. The second choice is simply which model you read, and costs nothing:
-  `connectome_residualized` is computed on every run.
-- **`Models.residuals` renamed to `Models.connectome_residualized`.** The old name
-  described a mechanism rather than the model, which is the connectome model with the
-  covariate variance removed from the features. Numerically unchanged. This renames a
-  value in the `model` column of `cv_results_full.csv`, `cv_results_summary.csv`,
-  `cv_predictions.csv` and `cv_network_strengths.csv`.
+  and `selection_input` (`'raw'` | `'residualized'`); `CPMAnalysis` gains `model_input`
+  (`'raw'` | `'residualized'`). `selection_input='residualized'` is the per-edge
+  regression `y ~ 1 + Z + edge` — the semipartial correlation as the reported effect
+  size, the coefficient's p-value with `df = N - 2 - C` — so a `p < 0.05` threshold
+  means a 5% per-edge false-positive rate whatever the confounding.
+  `model_input='residualized'` regresses the covariates out of the connectome the
+  models consume, fitted on train and applied to test, after edge selection.
+- **`Models.residuals` is removed.** Deconfounding the features is a property of the
+  run (`model_input`), not a model variant. It cannot be a model name: OLS is invariant
+  to it once the covariates are in the design, but the non-linear backends are not — on
+  identical edges `full` moves by 391% of sd(y) for `DecisionTreeCPM`, 65% for
+  `RandomForestCPM` and 19% for `GAMCPM` — so the name would mean something different
+  for every backend, and users could not tell which connectome produced `full`. The
+  `model` column of `cv_results_*.csv`, `cv_predictions.csv` and
+  `cv_network_strengths.csv` loses the `residuals` value; run with
+  `model_input='residualized'` and read `connectome` instead.
 - The `presence_filter` now always sees the raw connectome. Previously
   `calculate_residuals=True` residualised the connectome before selection, so the
   filter looked for structural zeros in residualised values, where they no longer
@@ -32,13 +37,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identical for one release (verified exactly, not approximately).
   `'point_biserial'` was never a separate statistic — Pearson against a 0/1 target
   *is* the point-biserial correlation.
-- `CPMAnalysis(calculate_residuals=...)`. Use `selection_input='residualized'` and read
-  `connectome_residualized`. **Two behaviour changes when migrating:** the number you
-  read from `connectome` now lives in `connectome_residualized`, and edge selection now
-  uses the coefficient test rather than an ordinary correlation against the raw target,
-  so the selected edge sets change. The old path's effective alpha shrank as
-  confounding grew (measured 5.1% -> 3.3% -> 2.1% at nominal 5%); the new one is
-  nominal at every confound level.
+- `CPMAnalysis(calculate_residuals=...)`. It controlled both selection and the model
+  input, so `True` now sets `selection_input='residualized'` and
+  `model_input='residualized'` together. **One behaviour change when migrating:** edge
+  selection now uses the coefficient test rather than an ordinary correlation against
+  the raw target, so the selected edge sets change. The old path's effective alpha
+  shrank as confounding grew (measured 5.1% -> 3.3% -> 2.1% at nominal 5%); the new one
+  is nominal at every confound level.
 
 ### Added
 - Vanilla CPM without covariates: `covariates` is optional in `CPMAnalysis.run`. Only

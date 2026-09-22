@@ -82,8 +82,8 @@ class TestModelInterface:
         model.fit(X, y, cov)
         ns = model.get_network_strengths(X, cov)
 
-        assert set(ns.keys()) == {"connectome", "connectome_residualized"}
-        for group in ["connectome", "connectome_residualized"]:
+        assert set(ns.keys()) == {"connectome"}
+        for group in ["connectome"]:
             assert "positive" in ns[group]
             assert "negative" in ns[group]
             assert isinstance(ns[group]["positive"], torch.Tensor)

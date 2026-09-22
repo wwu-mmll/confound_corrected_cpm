@@ -21,11 +21,17 @@ class LinearCPM:
 
     Predictions come back as [N_samples, N_models, N_networks, N_runs].
 
+    Whether the covariate variance has been taken out of ``X`` is decided by the
+    caller (``CPMAnalysis(model_input=...)``), not here: this class fits whatever
+    connectivity it is given. That is what makes deconfounding a property of the
+    run rather than an extra model, and it is the only form that generalises --
+    the non-linear backends are not invariant to it, and a multivariate model
+    computes no network strength to residualise at all.
+
     Without covariates only the ``connectome`` model is defined -- ``covariates``
-    is an empty design, ``full`` collapses to ``connectome``, ``connectome_residualized`` has
-    nothing to residualise against and ``increment`` would be identically zero.
-    Those slots are filled with NaN rather than a number that looks meaningful;
-    see ``available_models``.
+    is an empty design, ``full`` collapses to ``connectome``, and ``increment``
+    would be identically zero. Those slots are filled with NaN rather than a
+    number that looks meaningful; see ``available_models``.
     """
     name = "LinearCPM"
 
@@ -46,7 +52,6 @@ class LinearCPM:
         self.edges = edges
 
         self.coefs = {}         # fitted coefficients per model variant
-        self.resid_models = {}  # covariate models used to residualise strengths
         self.has_covariates = None   # set by fit()
 
     # --- covariate handling ------------------------------------------------
@@ -114,26 +119,11 @@ class LinearCPM:
         cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
         cov_b = self._expand_covariates(cov, R)                # [R, N, C]
 
-        # Residualisers: network strength ~ covariates. Always OLS -- these
-        # remove covariate variance from a continuous strength, independent of
-        # whether the outcome is continuous or binary.
-        self.resid_models['pos'] = self._solve_ols(cov_b, pos_str.unsqueeze(-1))
-        self.resid_models['neg'] = self._solve_ols(cov_b, neg_str.unsqueeze(-1))
-        pos_resid = pos_str - self._predict_linear(cov_b, self.resid_models['pos']).squeeze(-1)
-        neg_resid = neg_str - self._predict_linear(cov_b, self.resid_models['neg']).squeeze(-1)
-
-        resid = {
-            'positive': pos_resid.unsqueeze(-1),
-            'negative': neg_resid.unsqueeze(-1),
-            'both': torch.stack([pos_resid, neg_resid], dim=-1),
-        }
-
         self.coefs['covariates'] = solve(cov_b, y_runs.unsqueeze(-1))  # [R, C+1, 1]
 
         for net, X_conn in conn.items():
             X_full = torch.cat([X_conn, cov_b], dim=-1)
             self.coefs[f'connectome_{net}'] = solve(X_conn, y_batch)
-            self.coefs[f'connectome_residualized_{net}'] = solve(resid[net], y_batch)
             self.coefs[f'full_{net}'] = solve(X_full, y_batch)
 
         return self
@@ -162,8 +152,7 @@ class LinearCPM:
         if not self.has_covariates:
             # Every covariate-dependent variant is undefined here. NaN, not a
             # number that would read as a real (and terrible) model score.
-            for model in (Models.covariates, Models.full,
-                          Models.connectome_residualized, Models.increment):
+            for model in (Models.covariates, Models.full, Models.increment):
                 predictions[:, model] = float('nan')
             for net_idx, X_conn in conn:
                 predictions[:, Models.connectome, net_idx] = self._predict_linear(
@@ -171,16 +160,6 @@ class LinearCPM:
         else:
             cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
             cov_b = self._expand_covariates(cov, R)
-
-            pos_resid = pos_str - self._predict_linear(
-                cov_b, self.resid_models['pos']).squeeze(-1)
-            neg_resid = neg_str - self._predict_linear(
-                cov_b, self.resid_models['neg']).squeeze(-1)
-            resid = {
-                Networks.positive: pos_resid.unsqueeze(-1),
-                Networks.negative: neg_resid.unsqueeze(-1),
-                Networks.both: torch.stack([pos_resid, neg_resid], dim=-1),
-            }
 
             # Covariates model: same for every network.
             cov_pred = self._predict_linear(cov_b, self.coefs['covariates'])   # [R, N, 1]
@@ -193,8 +172,6 @@ class LinearCPM:
                 # each _predict_linear -> [R, N, 1]; reorder to [N, R]
                 predictions[:, Models.connectome, net_idx] = self._predict_linear(
                     X_conn, self.coefs[f'connectome_{name}']).squeeze(-1).t()
-                predictions[:, Models.connectome_residualized, net_idx] = self._predict_linear(
-                    resid[net_idx], self.coefs[f'connectome_residualized_{name}']).squeeze(-1).t()
                 predictions[:, Models.full, net_idx] = self._predict_linear(
                     X_full, self.coefs[f'full_{name}']).squeeze(-1).t()
 
@@ -270,36 +247,22 @@ class LinearCPM:
 
     def get_network_strengths(self, X: np.ndarray, covariates: np.ndarray = None):
         """
-        Per-subject positive/negative network strengths, raw and residualised,
-        for the HTML report.
+        Per-subject positive/negative network strengths for the HTML report.
 
-        Returns a dict of [N_samples, N_runs] tensors. Without covariates there
-        is nothing to residualise against, so only the ``connectome`` entry is
-        returned and the report omits that comparison.
+        These are the strengths of whatever connectivity the model was given --
+        under ``model_input='residualized'`` that is the deconfounded
+        connectome, so no separate residualised entry is needed or wanted.
+
+        Returns a dict of [N_samples, N_runs] tensors.
         """
         X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
-
-        R = self.edges.shape[2]
 
         pos_str, neg_str = self._network_strengths(X)        # [R, N]
         pos_str, neg_str = pos_str.t(), neg_str.t()          # [N, R]
 
-        strengths = {
+        return {
             "connectome": {
                 Networks.positive.name: pos_str,
                 Networks.negative.name: neg_str,
             },
         }
-        if not self.has_covariates:
-            return strengths
-
-        cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
-        cov_runs = self._expand_covariates(cov, R)
-        pred_pos = self._predict_linear(cov_runs, self.resid_models['pos']).squeeze(-1).t()
-        pred_neg = self._predict_linear(cov_runs, self.resid_models['neg']).squeeze(-1).t()
-
-        strengths["connectome_residualized"] = {
-            Networks.positive.name: pos_str - pred_pos,
-            Networks.negative.name: neg_str - pred_neg,
-        }
-        return strengths

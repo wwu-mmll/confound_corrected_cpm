@@ -27,12 +27,19 @@ class EdgeSignificance(str, Enum):
 
 
 class Models(IntEnum):
-    """Model types in CPM analysis."""
+    """
+    Model types in CPM analysis.
+
+    Whether the connectome fed to these models has been deconfounded is a
+    property of the run (``CPMAnalysis(model_input=...)``), not a separate
+    model. See that parameter for why: the non-linear backends are not
+    invariant to it, so it cannot be a model name without meaning different
+    things for different backends.
+    """
     connectome = 0
     covariates = 1
     full = 2
-    connectome_residualized = 3
-    increment = 4
+    increment = 3
 
 
 class Metrics(IntEnum):

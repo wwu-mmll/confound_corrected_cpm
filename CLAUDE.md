@@ -74,7 +74,7 @@ mkdocs build
 
 ### Model Variants
 
-Each fold fits four model types (defined in `Models` enum): **connectome**, **covariates**, **full**, **connectome_residualized**, plus **increment** (full − covariates) computed at aggregation. `connectome_residualized` is the connectome model with the covariate variance removed from the features; it is computed at the network-strength level, which is provably identical to residualising the edges (verified 4.8e-07) and far cheaper. Each is evaluated across network types (positive, negative, both).
+Each fold fits three model types (defined in `Models` enum): **connectome**, **covariates**, **full**, plus **increment** (full − covariates) computed at aggregation. Each is evaluated across network types (positive, negative, both). Whether the connectome has been deconfounded is a property of the run (`model_input`), not a model name.
 
 Passing `covariates=None` to `CPMAnalysis.run` is vanilla CPM: only **connectome** is
 defined, the other variants are NaN-filled (the results tensor keeps its full shape),
@@ -91,12 +91,22 @@ Two independent choices, not four levers:
   `y ~ 1 + Z + edge`: semipartial correlation reported as the effect size, the
   coefficient's p-value with `df = N - 2 - C`. It is a design decision, deliberately *not*
   part of the parameter grid.
-- **which model you read** — `connectome` uses raw network strengths,
-  `connectome_residualized` uses deconfounded ones. Both are computed on every run, so
-  this costs nothing and needs no knob.
+- **`model_input`** (`'raw'` | `'residualized'`, on `CPMAnalysis`) — is the covariate
+  variance regressed out of the connectome the models consume? Fitted on train, applied
+  to test, and applied *after* edge selection so the two choices stay independent.
 
-`edge_statistic` (including `*_partial` and `point_biserial`) and
-`CPMAnalysis(calculate_residuals=...)` are deprecated onto these for one release.
+This has to be a run-level knob rather than an extra model. OLS is invariant to it once
+the covariates are in the design (`full` and `increment` are unchanged — residualising
+moves variance from the strength column into the Z columns, which are already there), but
+the non-linear backends are not: on identical edges, `full` moves by 391% of sd(y) for
+`DecisionTreeCPM`, 65% for `RandomForestCPM` and 19% for `GAMCPM`. A "residualised" model
+name would mean something different for every backend, and a user could not tell which
+connectome produced `full`. Guarded by
+`tests/test_confound_api.py::test_nonlinear_models_are_not_invariant_to_model_input`.
+
+`edge_statistic` (including `*_partial` and `point_biserial`) is deprecated onto
+`selection_statistic`/`selection_input`, and `CPMAnalysis(calculate_residuals=...)` onto
+both knobs at once, for one release.
 
 ### Package Structure
 

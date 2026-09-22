@@ -4,10 +4,11 @@ The confound-control API: selection_statistic x selection_input.
 Four apparent confound levers in CCCPM reduce to two independent choices:
 
   S  does edge *selection* control for the confounds?   -> selection_input
-  F  are the *features* deconfounded before the model?  -> which model you read
+  F  is the *connectome* deconfounded before the model? -> model_input
 
-F costs nothing: `connectome_residualized` is computed on every run, so a single
-run reports both of its cells. Only S is a run-level choice.
+Both are run-level choices, and F has to be: OLS is invariant to it once the
+covariates are in the design, but a tree, forest or GAM is not, so it cannot be
+a model name without meaning something different for each backend.
 
 These tests pin that structure, the exact numeric equivalence of the deprecated
 spellings, and the property that motivated choosing the coefficient test over a
@@ -82,15 +83,17 @@ def test_unknown_values_are_rejected():
         EdgeStatistic(edge_statistic='pearson_semipartial')
 
 
-def test_calculate_residuals_is_deprecated_onto_selection_input(tmp_path):
+def test_calculate_residuals_is_deprecated_onto_both_knobs(tmp_path):
+    """It controlled selection *and* the model input, so it maps onto both."""
     ue = UnivariateEdgeSelection(
         selection_statistic="pearson",
         edge_selection=[PThreshold(threshold=0.05, correction=[None])])
-    with pytest.warns(DeprecationWarning, match="connectome_residualized"):
-        CPMAnalysis(results_directory=str(tmp_path),
-                    cv=KFold(n_splits=3), edge_selection=ue,
-                    calculate_residuals=True, n_permutations=0)
+    with pytest.warns(DeprecationWarning, match="model_input='residualized'"):
+        cpm = CPMAnalysis(results_directory=str(tmp_path),
+                          cv=KFold(n_splits=3), edge_selection=ue,
+                          calculate_residuals=True, n_permutations=0)
     assert ue.statistic._input == 'residualized'
+    assert cpm.model_input == 'residualized'
 
 
 # ---------------------------------------------------------------------------
@@ -164,31 +167,52 @@ def test_threshold_means_what_it_says_whatever_the_confounding(confound_beta):
 # The 2x2, end to end
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("selection_input", ["raw", "residualized"])
-def test_one_run_reports_both_feature_cells(tmp_path, selection_input):
-    """connectome and connectome_residualized are both defined on every run, so
-    the F axis of the 2x2 needs no second run and no knob."""
-    X, y, Z = _data(n=200)
+def _run(tmp_path, selection_input, model_input, n=200):
+    X, y, Z = _data(n=n)
     ue = UnivariateEdgeSelection(
         selection_statistic="pearson", selection_input=selection_input,
         edge_selection=[PThreshold(threshold=0.05, correction=[None])])
     cpm = CPMAnalysis(
         results_directory=str(tmp_path),
         cv=KFold(n_splits=3, shuffle=True, random_state=0),
-        edge_selection=ue, n_permutations=0, task_type="regression")
+        edge_selection=ue, model_input=model_input,
+        n_permutations=0, task_type="regression")
     cpm.run(X=X, y=y.ravel(), covariates=Z)
-
     ag = cpm.results_manager.agg_results
-    for model in ("connectome", "connectome_residualized", "covariates",
-                  "full", "increment"):
-        value = np.ravel(ag.loc[(model, "both"), ("pearson_score", "mean")])
-        assert np.isfinite(value).all(), f"{model} should be defined"
+    return {m: float(np.ravel(ag.loc[(m, "both"), ("pearson_score", "mean")])[0])
+            for m in ("connectome", "covariates", "full", "increment")}
 
-    # They are different models, not a relabelling of the same numbers.
-    plain = np.ravel(ag.loc[("connectome", "both"), ("pearson_score", "mean")])[0]
-    adjusted = np.ravel(
-        ag.loc[("connectome_residualized", "both"), ("pearson_score", "mean")])[0]
-    assert plain != pytest.approx(adjusted, abs=1e-9)
+
+@pytest.mark.parametrize("selection_input", ["raw", "residualized"])
+@pytest.mark.parametrize("model_input", ["raw", "residualized"])
+def test_every_cell_of_the_2x2_runs(tmp_path, selection_input, model_input):
+    """Each cell is one run reporting one of each model -- no ambiguity about
+    which connectome produced `full`."""
+    out = _run(tmp_path, selection_input, model_input)
+    for model, value in out.items():
+        assert np.isfinite(value), f"{model} should be defined"
+
+
+def test_model_input_changes_the_connectome_model(tmp_path):
+    raw = _run(tmp_path, "residualized", "raw")
+    res = _run(tmp_path, "residualized", "residualized")
+    assert raw["connectome"] != pytest.approx(res["connectome"], abs=1e-6)
+
+
+def test_model_input_leaves_full_and_covariates_alone_for_the_linear_model(tmp_path):
+    """OLS is invariant once the covariates are in the design: residualising the
+    connectome moves variance from the strength column into the Z columns, which
+    are already there, so the span -- and the fit -- is unchanged.
+
+    This is a property of the linear solver, NOT of CPM. The non-linear backends
+    are not invariant to it, which is exactly why model_input is a run-level
+    choice rather than a model name.
+    """
+    raw = _run(tmp_path, "residualized", "raw")
+    res = _run(tmp_path, "residualized", "residualized")
+    assert raw["full"] == pytest.approx(res["full"], abs=1e-4)
+    assert raw["covariates"] == pytest.approx(res["covariates"], abs=1e-4)
+    assert raw["increment"] == pytest.approx(res["increment"], abs=1e-4)
 
 
 def test_selection_input_is_not_a_tuned_hyperparameter():
@@ -200,3 +224,50 @@ def test_selection_input_is_not_a_tuned_hyperparameter():
     for params in ue.param_grid:
         assert 'selection_input' not in params
         assert not any('selection_input' in str(k) for k in params)
+
+
+def test_nonlinear_models_are_not_invariant_to_model_input():
+    """The reason model_input cannot be a model name.
+
+    OLS absorbs a shift of the connectome column into the covariate columns, so
+    `full` is unchanged. A tree splits on `s <= t`, and `s_resid <= t` is a
+    different partition -- there is no coefficient to absorb the shift. Measured
+    below: the same edges, the same data, `full` moving by a large fraction of
+    sd(y) for every non-linear backend and by nothing for the linear one.
+
+    If this ever passed for the non-linear models, `connectome_residualized`
+    could go back to being a model variant. It does not.
+    """
+    from cccpm.models.linear_model import LinearCPM
+    from cccpm.models.nonlinear_models import (DecisionTreeCPM, GAMCPM,
+                                               RandomForestCPM)
+    from cccpm.constants import Models, Networks
+    from cccpm.preprocessing import residualize_train_test
+
+    rng = np.random.RandomState(2)
+    n, n_features, n_confounds, ntr = 400, 200, 3, 260
+    X = rng.randn(n, n_features)
+    Z = rng.randn(n, n_confounds)
+    y = X[:, :20].sum(1) * 0.1 + Z[:, 0] * 0.9 + rng.randn(n)
+
+    Xtr, Xte = torch.as_tensor(X[:ntr]).float(), torch.as_tensor(X[ntr:]).float()
+    Ztr, Zte = torch.as_tensor(Z[:ntr]).float(), torch.as_tensor(Z[ntr:]).float()
+    ytr = torch.as_tensor(y[:ntr].reshape(-1, 1)).float()
+
+    edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
+    edges[:20, Networks.positive, 0] = True
+    edges[20:40, Networks.negative, 0] = True
+    Xtr_r, Xte_r = residualize_train_test(Xtr, Xte, Ztr, Zte)
+
+    def full_gap(cls):
+        a = cls(edges=edges, device='cpu').fit(Xtr, ytr, Ztr).predict(Xte, Zte)
+        b = cls(edges=edges, device='cpu').fit(Xtr_r, ytr, Ztr).predict(Xte_r, Zte)
+        a, b = np.asarray(a)[:, Models.full], np.asarray(b)[:, Models.full]
+        return np.abs(a - b).max() / y.std()
+
+    assert full_gap(LinearCPM) < 1e-4, "OLS must be invariant"
+    for cls in (DecisionTreeCPM, RandomForestCPM, GAMCPM):
+        gap = full_gap(cls)
+        assert gap > 0.05, (
+            f"{cls.__name__} looks invariant to model_input (gap {gap:.1%} of "
+            f"sd(y)); if that is real, this design decision should be revisited")

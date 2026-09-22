@@ -170,34 +170,24 @@ def test_model_variants_match_sklearn():
     # full: y ~ strengths + Z
     p_full = LinearRegression().fit(np.column_stack([str_tr, Ztr]), ytr).predict(
         np.column_stack([str_te, Zte]))
-    # residuals: residualise each strength on Z (fit on train), then y ~ residuals
-    def resid(col_tr, col_te):
-        m = LinearRegression().fit(Ztr, col_tr)
-        return col_tr - m.predict(Ztr), col_te - m.predict(Zte)
-    pr_tr, pr_te = resid(pos_tr, pos_te)
-    nr_tr, nr_te = resid(neg_tr, neg_te)
-    p_res = LinearRegression().fit(
-        np.column_stack([pr_tr, nr_tr]), ytr).predict(np.column_stack([pr_te, nr_te]))
-
     np.testing.assert_allclose(pred[:, Models.connectome], p_conn, atol=2e-3)
     np.testing.assert_allclose(pred[:, Models.covariates], p_cov, atol=2e-3)
     np.testing.assert_allclose(pred[:, Models.full], p_full, atol=2e-3)
-    np.testing.assert_allclose(pred[:, Models.connectome_residualized], p_res, atol=2e-3)
 
 
 # --------------------------------------------------------------------------- #
 # 3. End-to-end cross-validated pipeline: toolbox vs sklearn + inflation story #
 # --------------------------------------------------------------------------- #
-def _toolbox_connectome_ev(X, y, Z, selection_input, model, cv, tmp_path):
+def _toolbox_connectome_ev(X, y, Z, selection_input, model_input, cv, tmp_path):
     ue = UnivariateEdgeSelection(
         selection_statistic="pearson", selection_input=selection_input,
         edge_selection=[PThreshold(threshold=P_THRESHOLD, correction=[None])])
     cpm = CPMAnalysis(
         results_directory=str(tmp_path), cv=cv, edge_selection=ue,
-        n_permutations=0, task_type="regression")
+        model_input=model_input, n_permutations=0, task_type="regression")
     cpm._single_run(X=X, y=y.reshape(-1, 1), covariates=Z, perm_run=False)
     ag = cpm.results_manager.agg_results
-    val = ag.loc[(model, "both"), ("explained_variance_score", "mean")]
+    val = ag.loc[("connectome", "both"), ("explained_variance_score", "mean")]
     return float(np.ravel(val)[0])
 
 
@@ -207,7 +197,7 @@ def _sklearn_connectome_ev(X, y, Z, selection_input, model_input, cv):
     `selection_input` decides whether edge selection controls for Z; per-edge
     that is the regression y ~ 1 + Z + edge, which is what ref_semipartial
     computes. `model_input` decides whether the covariate variance is taken out
-    of the features the model consumes -- the connectome_residualized model.
+    of the connectome the model consumes.
     """
     evs = []
     for tr, te in cv.split(X, y):
@@ -233,13 +223,11 @@ def _sklearn_connectome_ev(X, y, Z, selection_input, model_input, cv):
     return float(np.mean(evs))
 
 
-# The confound 2x2, as the new API expresses it: selection_input is a run-level
-# choice; the feature choice is just which model you read, because
-# connectome_residualized is computed on every run.
+# The confound 2x2: two independent run-level choices.
 CONFIGS = [
-    ("raw",     "raw",          "connectome"),
-    ("partial", "residualized", "connectome"),
-    ("resid",   "residualized", "connectome_residualized"),
+    ("raw",     "raw",          "raw"),
+    ("partial", "residualized", "raw"),
+    ("resid",   "residualized", "residualized"),
 ]
 
 
@@ -252,9 +240,8 @@ def test_pipeline_matches_sklearn_and_shows_inflation(tmp_path):
     cv_sk = KFold(n_splits=5, shuffle=True, random_state=0)
 
     ev = {}
-    for name, selection_input, model in CONFIGS:
-        model_input = "residualized" if model.endswith("_residualized") else "raw"
-        tb = _toolbox_connectome_ev(X, y, Z, selection_input, model, cv_tb, tmp_path)
+    for name, selection_input, model_input in CONFIGS:
+        tb = _toolbox_connectome_ev(X, y, Z, selection_input, model_input, cv_tb, tmp_path)
         sk = _sklearn_connectome_ev(X, y, Z, selection_input, model_input, cv_sk)
         # Toolbox and independent sklearn pipeline agree (small tolerance absorbs
         # boundary-of-threshold noise edges that carry ~no signal).

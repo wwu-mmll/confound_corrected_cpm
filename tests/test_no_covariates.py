@@ -3,7 +3,7 @@ Vanilla CPM: running without covariates.
 
 `covariates` used to be a required argument, and omitting it crashed deep inside
 `check_data`. It is now optional, which makes exactly one model meaningful --
-`connectome`. The others (`covariates`, `full`, `connectome_residualized`, `increment`) all
+`connectome`. The others (`covariates`, `full`, `increment`) all
 need a confound design and are reported as NaN rather than as a number that
 would read as a real, terrible model score.
 
@@ -26,8 +26,7 @@ from cccpm.models.linear_model import LinearCPM
 from cccpm.validation import check_data, get_variable_names
 
 
-COVARIATE_DEPENDENT = (Models.covariates, Models.full,
-                       Models.connectome_residualized, Models.increment)
+COVARIATE_DEPENDENT = (Models.covariates, Models.full, Models.increment)
 
 
 def _rendered_text(html):
@@ -196,7 +195,7 @@ def test_run_without_covariates_end_to_end(tmp_path, binary):
     connectome = ag.loc[("connectome", "both"), (metric, "mean")]
     assert np.isfinite(np.ravel(connectome)).all()
 
-    for name in ("covariates", "full", "connectome_residualized", "increment"):
+    for name in ("covariates", "full", "increment"):
         assert np.isnan(np.ravel(ag.loc[(name, "both"), (metric, "mean")])).all(), name
 
     # The report renders, and says nothing about models that do not exist.
@@ -233,7 +232,7 @@ def test_permutation_p_values_are_nan_for_undefined_models(tmp_path):
 
     metric = 'pearson_score'
     assert np.isfinite(p_values.loc[('both', 'connectome'), metric])
-    for name in ('covariates', 'full', 'connectome_residualized', 'increment'):
+    for name in ('covariates', 'full', 'increment'):
         value = p_values.loc[('both', name), metric]
         assert np.isnan(value), f"{name} got p={value}, but the model does not exist"
 
@@ -242,7 +241,7 @@ def test_permutation_p_values_are_nan_for_undefined_models(tmp_path):
     assert "nan" not in _rendered_text(html)
 
 
-def test_network_strengths_omit_residualized_model_without_covariates(tmp_path):
+def test_network_strengths_hold_only_the_connectome(tmp_path):
     X, y, _ = _data()
     cpm = _analysis(tmp_path, task_type="regression")
     cpm.run(X=X, y=y)
