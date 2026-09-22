@@ -47,45 +47,43 @@ failure split cleanly by operating system rather than by Python version.
       in a target name raises on write. The tests now all pass `encoding=`;
       the package should too.
 
-## 2. Test suite: 358 tests, 5m38s local (~13 min on the Windows runner)
+## 2. Test suite: 359 tests, 5m40s local (~13 min on the Windows runner)
 
-The suite grew past the point where its size is itself a maintenance cost.
-Target **~250 tests** and **~4 min** local, with no loss of real coverage.
-Principle: *one test per behaviour, not per assertion; never parametrize over
-source files.*
+Audited test by test on 2026-09-22 — the findings, with per-group reasoning, are
+in `TEST_AUDIT.md`. **Awaiting Nils' decision on what goes; nothing cut yet.**
 
-- [ ] **Stop parametrizing over the package's own files (−76 tests).**
-      `test_module_structure.py` is two AST checks × 21 core modules = 42 tests;
-      `test_device_portability.py` is one AST check × 37 files = 37 tests. Each
-      check should be a single test that walks the files and collects offenders
-      — the assertion messages already name the offending module, so the
-      per-file test IDs buy nothing. 79 tests → 3.
-- [ ] **Share the four-cell CPM runs in `test_report_states_its_configuration.py`**
-      (14 tests, ~40s). `test_run_config_is_persisted` and
-      `test_confound_control_is_explained_in_the_body` each re-run a full
-      analysis for all four 2×2 cells at ~3.8s apiece. A module-scoped fixture
-      that runs the four cells once cuts ~30s and lets the four-headline test
-      reuse them too.
-- [ ] **Collapse one-assertion families.** Argument-validation tests in
-      `test_validation.py` (15), `test_simulate_sem.py` (12),
-      `test_simulate_simple.py` (6) and `test_atlases.py` (18) are largely one
-      `pytest.raises` or one shape check each; a single table-driven test per
-      family says the same thing. Roughly −19.
-- [ ] **Remove genuine duplication.** `test_scoring.py`'s
-      `test_mse_vs_sklearn` / `test_mae_vs_sklearn` /
-      `test_explained_variance_vs_sklearn` / `test_pearson_vs_scipy` are
-      subsumed by `test_all_metrics_vs_sklearn_random_data` in the same class
-      (−4). `TestTaskTypeDetection` in `test_classification.py` overlaps
-      `test_validation.py` (−3). The three
-      `test_calculate_group_p_value_*` cases in `test_inference.py` are one
-      behaviour (−2).
-- [ ] **Leave the slow tests alone.** `test_integration.py` (69s: three example
-      scripts as subprocesses) and `test_reporting.py::test_report_generates_with_atlas`
-      (23s: the netplotbrain path) are the most expensive tests in the suite and
-      also the only ones covering what they cover. They stay.
-- [ ] Each deletion must be justified by *what would still fail* if the code
-      regressed. Anything that is the only cover for a behaviour stays,
-      however small.
+The headline number measures the wrong thing. 237 of the 359 tests cost about
+five seconds *combined*; the 336s of runtime lives in 122 tests in nine files,
+almost all of it repeated `CPMAnalysis.run()` calls. Count and runtime are two
+separate problems and the fixes barely overlap.
+
+- [ ] **Stop parametrizing over the package's own source files (−76, 22% of the
+      suite, zero coverage change).** `test_module_structure.py` is 2 AST checks
+      × 21 modules; `test_device_portability.py` is 1 × 37 files. The assertion
+      messages already name the offender.
+- [ ] **Delete the 15 genuinely redundant tests** listed in `TEST_AUDIT.md` §2 —
+      each is covered in full by a test that does strictly more.
+- [ ] **Merge 27 collected tests into 9** where one behaviour is spread over many
+      test functions (`TEST_AUDIT.md` §3). Every assertion is retained.
+- [ ] **Share the repeated pipeline runs (−50s, ~15% of runtime, no test
+      deleted).** `test_confound_api.py` runs eight analyses where four distinct
+      configurations exist; `test_report_states_its_configuration.py` runs
+      fourteen where four do. Module-scoped fixtures keyed on the configuration.
+- [ ] **Leave the three expensive files alone.** `test_integration.py` (68s, the
+      only guard against example rot), `test_reporting.py`'s atlas test (23s, the
+      only netplotbrain cover), and `test_feature_interactions.py`'s 2^4 grid
+      (62s — it exists because two features were silently inert *in combination*,
+      which is what a full factorial catches and per-feature tests do not).
+      Cutting the grid to a pairwise covering array would save 40s and is the one
+      honest place left to take time, but it is a real reduction in coverage.
+- [ ] **Delete the migration guards in 0.8.0**, not now (`TEST_AUDIT.md` §6):
+      ~8 tests pinning the removed-0.6.x-spelling error messages, worth having
+      through this release and pointless after it.
+- [ ] `test_scoring.py::test_metrics_ordering` asserts shapes, not ordering.
+      Give it a real assertion or rename it (`TEST_AUDIT.md`, last section).
+
+Projected: **359 → 241 tests, 5m40s → ~4m45s**, with nothing that carries unique
+coverage removed.
 
 ## 3. Docs & report
 
