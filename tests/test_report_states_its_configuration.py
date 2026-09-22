@@ -15,10 +15,13 @@ import itertools
 import json
 import os
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
 from sklearn.model_selection import KFold
+
+from conftest import report_text
 
 from cccpm import CPMAnalysis, PThreshold, UnivariateEdgeSelection
 from cccpm.reporting.reporting_utils import parse_config_block
@@ -50,11 +53,12 @@ def _run(results_dir, selection_input, model_input, covariates=True, n_permutati
 
 
 def _rendered_text(results_dir):
-    """Report text with embedded figures stripped -- base64 is not prose."""
-    html = open(os.path.join(results_dir, 'report.html')).read()
-    return re.sub(r"\s+", " ",
-                  re.sub(r"<[^>]+>", " ",
-                         re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "", html)))
+    """Report text with markup and embedded figures stripped.
+
+    Thin alias for ``conftest.report_text`` -- base64 is not prose, and the
+    report is UTF-8 whatever the runner's locale.
+    """
+    return report_text(results_dir)
 
 
 def _headline(results_dir):
@@ -65,7 +69,7 @@ def _headline(results_dir):
     pass even with the headline saying nothing -- which is exactly what this
     test is for. (Checked: it does pass that way if you are not careful.)
     """
-    html = open(os.path.join(results_dir, 'report.html')).read()
+    html = Path(results_dir, 'report.html').read_text(encoding='utf-8')
     match = re.search(r'<div class="headline-callout">(.*?)</div>', html, re.S)
     assert match, "headline callout not found in the report"
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip()
@@ -80,7 +84,7 @@ def test_run_config_is_persisted(tmp_path, selection_input, model_input):
     """Written as a file, not parsed back out of cpm_log.txt: a run with logging
     turned down must still produce a report that knows its own configuration."""
     d = _run(tmp_path, selection_input, model_input)
-    with open(os.path.join(d, 'run_config.json')) as f:
+    with open(os.path.join(d, 'run_config.json'), encoding='utf-8') as f:
         cfg = json.load(f)
     assert cfg['selection_input'] == selection_input
     assert cfg['model_input'] == model_input
@@ -146,7 +150,7 @@ def test_suppressed_increment_is_explained(tmp_path):
 
 def test_report_without_covariates_says_so(tmp_path):
     d = _run(tmp_path, "raw", "raw", covariates=False)
-    with open(os.path.join(d, 'run_config.json')) as f:
+    with open(os.path.join(d, 'run_config.json'), encoding='utf-8') as f:
         assert json.load(f)['has_covariates'] is False
     assert "no covariates" in _rendered_text(d)
 

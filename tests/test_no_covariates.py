@@ -20,6 +20,8 @@ import pytest
 import torch
 from sklearn.model_selection import KFold
 
+from conftest import report_text
+
 from cccpm import CPMAnalysis, PThreshold, UnivariateEdgeSelection
 from cccpm.constants import Models, Networks
 from cccpm.models.linear_model import LinearCPM
@@ -29,14 +31,13 @@ from cccpm.validation import check_data, get_variable_names
 COVARIATE_DEPENDENT = (Models.covariates, Models.full, Models.increment)
 
 
-def _rendered_text(html):
-    """The report's text with embedded images stripped.
+def _says_nan(results_directory):
+    """Does the reader actually see the word "nan" anywhere in the report?
 
-    Figures are inlined as base64 data URIs, and base64 is base64 -- "nan" and
-    "NaN" turn up inside the image bytes of any report. Searching the raw HTML
-    for them finds those, not anything a reader would see.
+    Anchored, and over flattened text rather than raw HTML -- see
+    ``conftest.report_text`` for why both halves of that matter.
     """
-    return re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "", html).lower()
+    return re.search(r"\bnan\b", report_text(results_directory), re.I) is not None
 
 
 def _data(seed=0, n=120, n_nodes=10, binary=False):
@@ -170,7 +171,7 @@ def test_run_without_covariates_end_to_end(tmp_path, binary):
     cpm = _analysis(tmp_path, task_type=task)
     cpm.run(X=X, y=y)
 
-    with open(os.path.join(str(tmp_path), 'available_models.json')) as f:
+    with open(os.path.join(str(tmp_path), 'available_models.json'), encoding='utf-8') as f:
         assert json.load(f) == ['connectome']
 
     metric = "accuracy" if binary else "pearson_score"
@@ -184,11 +185,10 @@ def test_run_without_covariates_end_to_end(tmp_path, binary):
     # NaN means "not applicable" and must never reach the reader as "nan":
     # the same formatting path also carries the suppressed Pearson increment.
     # The report renders, and says nothing about models that do not exist.
-    report = os.path.join(str(tmp_path), 'report.html')
-    assert os.path.exists(report)
-    html = open(report).read()
-    assert "Covariates only" not in html
-    assert "nan" not in _rendered_text(html)
+    assert os.path.exists(os.path.join(str(tmp_path), 'report.html'))
+    text = report_text(tmp_path)
+    assert "Covariates only" not in text
+    assert not _says_nan(tmp_path)
 
 
 def test_permutation_p_values_are_nan_for_undefined_models(tmp_path):
@@ -222,8 +222,7 @@ def test_permutation_p_values_are_nan_for_undefined_models(tmp_path):
         assert np.isnan(value), f"{name} got p={value}, but the model does not exist"
 
     # And the report shows none of them.
-    html = open(os.path.join(str(tmp_path), 'report.html')).read()
-    assert "nan" not in _rendered_text(html)
+    assert not _says_nan(tmp_path)
 
 
 def test_network_strengths_hold_only_the_connectome(tmp_path):
