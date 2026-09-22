@@ -68,7 +68,7 @@ cpm = CPMAnalysis(
     task_type="classification",                   # or leave as None to auto-detect
     cv=StratifiedKFold(n_splits=10, shuffle=True, random_state=42),
     edge_selection=edge_selection,
-    n_permutations=100,                           # use 1000+ for a real analysis
+    n_permutations=1000,                           # use 1000+ for a real analysis
     atlas="Schaefer100-17",                       # built-in atlas → brain plots in the
                                                   # report; or pass a path to a custom
                                                   # CSV (region,x,y,z[,network]).

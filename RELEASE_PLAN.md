@@ -48,31 +48,66 @@ failure split cleanly by operating system rather than by Python version.
       in a target name raises on write. The tests now all pass `encoding=`;
       the package should too.
 
-## 2. Test suite: 283 tests, 4m55s local
+## 2. Test suite: 287 tests, 4m27s local
 
 Down from 359 / 5m40s. The source-file parametrisations are collapsed (two AST
 checks that were 79 collected tests are now 3, each verified to still name the
 offending file and line) and the repeated pipeline runs are shared behind
 module-scoped fixtures: `test_confound_api.py` 34.7s → 19.8s,
-`test_report_states_its_configuration.py` 63.5s → 25.1s. Full findings and the
-per-group reasoning are in `TEST_AUDIT.md`.
+`test_report_states_its_configuration.py` 63.5s → 25.1s.
 
-**Awaiting Nils' decision** on the judgement calls:
+Worth keeping in mind for anything further: the count and the runtime are nearly
+disjoint problems. 237 of the tests cost about five seconds combined — the time
+is repeated `CPMAnalysis.run()` calls, not the number of test functions.
 
-- [ ] **Delete the 15 genuinely redundant tests** (`TEST_AUDIT.md` §2) — each
-      covered in full by a test that does strictly more.
-- [ ] **Merge 27 collected tests into 9** (`TEST_AUDIT.md` §3) where one
-      behaviour is spread over many test functions. Every assertion retained.
-- [ ] **Delete the migration guards in 0.8.0**, not now (`TEST_AUDIT.md` §6).
-      This now includes the two `test_renamed_parameters_*` cases added for
-      `stability_significance_method` / `nbs_stability_threshold`.
-- [ ] `test_scoring.py::test_metrics_ordering` asserts shapes, not ordering.
-      Give it a real assertion or rename it.
+**Awaiting Nils' decision.** Each of these was checked against what would still
+fail if the code regressed; none is the only cover for anything.
+
+- [ ] **Delete the 15 redundant tests**, each covered in full by a test that
+      does strictly more:
+      `test_models.py::TestModelInterface::test_chaining` (×4 model classes —
+      `test_fit_predict_shape` already calls `fit(...).predict(...)`);
+      `test_ground_truth.py::TestEdgeSelectionStatistics` (2 —
+      `test_edge_selection.py::test_edge_selection_recovers_signed_edges` covers
+      both signs, 2 statistics, a binary target and both `selection_input`
+      values); `test_cpm_analysis.py::test_nan_in_X` and `test_nan_in_y` (2 —
+      identical to `test_validation.py::test_missing_values_behavior`, and
+      misfiled); `test_scoring.py`'s `test_mse_vs_sklearn` /
+      `test_mae_vs_sklearn` / `test_explained_variance_vs_sklearn` /
+      `test_pearson_vs_scipy` (4 — subsumed by
+      `test_all_metrics_vs_sklearn_random_data`, which uses signal + noise
+      rather than pure noise so a scale error actually shows);
+      `test_ground_truth.py::test_ols_with_uniform_coefficients` (1 — a strict
+      special case of `test_ols_with_positive_and_negative_edges`); the two
+      `test_task_type_detected` cases (2 — unit-tested in
+      `test_classification.py`, and each class already asserts the consequence).
+- [ ] **Merge 27 collected tests into 9**, retaining every assertion, where one
+      behaviour is spread over many test functions: `test_validation.py`'s
+      covariate coercion (5→1) and `get_variable_names` (3→1);
+      `test_classification.py::TestTaskTypeDetection` (6→2 — *not* covered by
+      `test_validation.py`, which only tests `check_data` and
+      `get_variable_names`); `test_inference.py`'s `_calculate_group_p_value`
+      cases (5→1); `test_atlases.py`'s bundled-table assertions (5→2) and
+      `resolve_atlas` (5→2); `test_simulate_sem.py`'s argument validation (7→1,
+      **and add `match=`** — today they assert only that *some* `ValueError`
+      came out); `test_results_manager.py::test_interpretable_increments_survive`
+      (6→1).
+- [ ] **Delete the migration guards in 0.8.0**, not now: the ~8 tests in
+      `test_confound_api.py` pinning the removed-0.6.x-spelling errors, plus the
+      `test_renamed_parameters_*` cases added for
+      `stability_significance_method` / `nbs_stability_threshold`. Worth having
+      through this release, pointless after it.
+- [ ] `test_scoring.py::test_metrics_ordering` asserts shapes, not ordering —
+      true for any in-range index. The enum-to-row mapping *is* checked, but by
+      `test_all_metrics_vs_sklearn_random_data`. Give it a real assertion or
+      rename it.
 
 Leave the three expensive files alone: `test_integration.py` (the only guard
 against example rot), `test_reporting.py`'s atlas test (the only netplotbrain
-cover) and `test_feature_interactions.py`'s 2^4 grid (it exists because two
-features were silently inert *in combination*).
+cover) and `test_feature_interactions.py`'s 2^4 grid (62s — it exists because
+two features were silently inert *in combination*, which is what a full
+factorial catches and per-feature tests do not; a pairwise covering array would
+save 40s but is a real reduction in coverage).
 
 ## 3. Docs & report
 
