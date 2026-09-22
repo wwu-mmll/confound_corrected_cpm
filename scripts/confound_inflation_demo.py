@@ -49,7 +49,7 @@ Expected result: raw ≈ partial ≈ R2(y~X) (flat across κ, inflated), while
 residualized-X and the residuals model track the falling true curve
 (1 − κ)·R2(y~X). The widening gap is the headline.
 
-Run:  poetry run python examples/confound_inflation_demo.py
+Run:  poetry run python scripts/confound_inflation_demo.py
 """
 
 import contextlib

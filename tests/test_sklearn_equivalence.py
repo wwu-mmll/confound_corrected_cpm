@@ -4,7 +4,7 @@ solvers must agree with an independent scikit-learn / scipy / numpy
 re-implementation.
 
 This is the credibility backbone for the confound-inflation simulation
-(``examples/confound_inflation_demo.py``): it proves that
+(``scripts/confound_inflation_demo.py``): it proves that
 
   * the vectorised torch edge statistics (Pearson, partial/semipartial, Spearman)
     equal the textbook definitions computed with scipy/numpy,

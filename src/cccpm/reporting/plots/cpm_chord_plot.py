@@ -115,10 +115,3 @@ def plot_netplotbrain(results_folder, selected_metric, atlas_labels):
         edges_netplot = None
     fig.savefig(os.path.join(results_folder, "plots", f"netplotbrain_{selected_metric}.png"))
     return os.path.join(results_folder, "plots", f"netplotbrain_{selected_metric}.png"), edges_netplot
-
-
-if __name__ == "__main__":
-    results_directory = '/spm-data/vault-data3/mmll/projects/cpm_python/results/hcp_SSAGA_TB_Yrs_Smoked_spearman_partial_p=0.001/'
-    selected_metric = "sig_stability_negative_edges"
-    #plot_cpm_chord_plot(results_directory, selected_metric)
-    plot_netplotbrain(results_directory, selected_metric)

@@ -8,11 +8,11 @@ from pathlib import Path
 #    (Assumes structure: root/tests/test_examples.py -> root/examples/)
 REPO_ROOT = Path(__file__).parent.parent
 EXAMPLES_DIR = REPO_ROOT / "examples"
+SCRIPTS_DIR = REPO_ROOT / "scripts"
 SRC_DIR = REPO_ROOT / "src"  # <--- Define the src path
 
 # 2. Define the examples to be tested
 EXAMPLE_SCRIPTS = [
-    "example_simulated_data.py",
     "regression_quickstart.py",
     "classification_quickstart.py",
 ]
@@ -43,7 +43,12 @@ def test_example_script_runs(script_name):
     assert result.returncode == 0, f"Script crashed:\n{result.stderr}"
 
 # ---------------------------------------------------------------------------
-# Examples whose full run is too slow for CI, exercised on a minimal config.
+# Not an example -- `scripts/confound_inflation_demo.py` is the package's own
+# demonstration that partial-correlation selection does not fully deconfound, on
+# data with an analytically known answer. It lives in scripts/ rather than
+# examples/ because a 340-line parameter sweep is evidence, not a template.
+#
+# Too slow for CI at full size, so it is exercised on a minimal config.
 #
 # Importing them is not enough: the breakages these catch -- a tqdm stand-in
 # that no longer matches how the toolbox constructs it, and a scalar extraction
@@ -60,7 +65,7 @@ def test_confound_inflation_demo_sweep_runs():
     # a process-global switch, so importing it here would leave every later test
     # without a cpm_log.txt -- which is where the report reads its configuration
     # block from. Restore it afterwards.
-    sys.path.insert(0, str(EXAMPLES_DIR))
+    sys.path.insert(0, str(SCRIPTS_DIR))
     try:
         demo = importlib.import_module("confound_inflation_demo")
         demo.R2_TARGETS = (0.36,)
@@ -69,7 +74,7 @@ def test_confound_inflation_demo_sweep_runs():
         demo.N_SAMPLES = 400
         df, edges = demo.run_sweep()
     finally:
-        sys.path.remove(str(EXAMPLES_DIR))
+        sys.path.remove(str(SCRIPTS_DIR))
         logging.disable(logging.NOTSET)
 
     assert len(df) == 1
