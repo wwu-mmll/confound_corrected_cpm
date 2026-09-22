@@ -178,11 +178,19 @@ def parse_config_block(log_path: str) -> list[tuple[str, str]]:
     raw = extract_log_block(log_path)
     pairs = []
     for line in raw.splitlines():
-        line = line.strip()
-        if not line:
+        if not line.strip():
             continue
+        # Values can wrap: an estimator repr is logged over several lines, and
+        # its continuations are indented. Treating them as new keys produced
+        # rows like "threshold=[0.05])]," with an empty value in the report's
+        # configuration table.
+        is_continuation = line[:1].isspace() and pairs
+        line = line.strip()
         m = re.match(r"^([^:]+):\s*(.*)$", line)
-        if m:
+        if is_continuation:
+            key, value = pairs[-1]
+            pairs[-1] = (key, f"{value} {line}".strip())
+        elif m:
             pairs.append((m.group(1).strip(), m.group(2).strip()))
         else:
             pairs.append((line, ""))

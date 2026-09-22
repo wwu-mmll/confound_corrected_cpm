@@ -56,9 +56,24 @@ stops. Every removal raises with its replacement named.
   **Pearson r** — comparing two correlations needs Fisher z or Steiger's test, not
   subtraction — and for **F1**, a harmonic mean whose difference has no established
   interpretation. See `constants.INCREMENTABLE_METRICS`.
-- Report tables render a deliberate NaN as an em dash rather than the string `nan`.
+- Report tables render a deliberate NaN as an em dash rather than the string `nan`,
+  and the Model Comparison section explains why `increment` shows one for Pearson r
+  and F1, so it does not read as a failed computation.
+- The Analysis Configuration table no longer turns the wrapped lines of a
+  multi-line estimator repr into their own empty rows.
 
 ### Added
+- **The report states which confound configuration produced it.** `run_config.json`
+  records `selection_input` / `model_input` / `selection_statistic` alongside
+  `task_type.txt`; the headline and a stat chip name the cell of the 2x2
+  (`none` / `edge selection only` / `features only` / `edge selection and features`),
+  and the Model Comparison section explains what it means. Previously a naive run and
+  a fully controlled one opened with the identical sentence and the configuration was
+  only in the appendix table. Result directories written before 0.7.0 say nothing
+  rather than guessing.
+- The model glossary describes the models *this* run produced — under
+  `model_input='residualized'`, `connectome` is labelled as the deconfounded-strength
+  model rather than "connectivity alone".
 - Vanilla CPM without covariates: `covariates` is optional in `CPMAnalysis.run`. Only
   the `connectome` model is defined; the rest are NaN and `available_models.json`
   records which rows are real. Options requiring covariates raise up front.

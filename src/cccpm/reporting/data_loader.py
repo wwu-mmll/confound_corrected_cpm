@@ -84,6 +84,20 @@ class ReportDataLoader:
             available = set(json.load(f))
         return [m for m in MODEL_ORDER if m in available]
 
+    def load_run_config(self) -> dict:
+        """
+        The confound configuration this run used.
+
+        Empty for result directories written before `run_config.json` existed;
+        callers must treat a missing key as "unknown" rather than as a default,
+        so an old report does not claim a configuration it cannot know.
+        """
+        path = os.path.join(self.results_directory, 'run_config.json')
+        if not os.path.exists(path):
+            return {}
+        with open(path) as f:
+            return json.load(f)
+
     def load_cv_results(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Load cross-validation results (full and summary).

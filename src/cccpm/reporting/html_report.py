@@ -58,6 +58,8 @@ class HTMLReporter:
         # Model variants this run defines; the rest are NaN placeholders and
         # their sections are omitted rather than rendered blank.
         self.available_models = self.data_loader.load_available_models()
+        # Which cell of the confound 2x2 this run is; {} for older results.
+        self.run_config = self.data_loader.load_run_config()
         self._load_data()
 
     def _load_data(self) -> None:
@@ -98,6 +100,7 @@ class HTMLReporter:
             version=cccpm.__version__,
             run_date=datetime.date.today().isoformat(),
             available_models=self.available_models,
+            run_config=self.run_config,
         ))
 
         ctx.update(build_data_context(summary_df, scatter_path, self.results_directory))

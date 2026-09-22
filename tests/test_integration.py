@@ -53,8 +53,13 @@ def test_example_script_runs(script_name):
 
 def test_confound_inflation_demo_sweep_runs():
     import importlib
+    import logging
     import sys
 
+    # The demo silences logging at module level (it runs a large sweep). That is
+    # a process-global switch, so importing it here would leave every later test
+    # without a cpm_log.txt -- which is where the report reads its configuration
+    # block from. Restore it afterwards.
     sys.path.insert(0, str(EXAMPLES_DIR))
     try:
         demo = importlib.import_module("confound_inflation_demo")
@@ -65,6 +70,7 @@ def test_confound_inflation_demo_sweep_runs():
         df, edges = demo.run_sweep()
     finally:
         sys.path.remove(str(EXAMPLES_DIR))
+        logging.disable(logging.NOTSET)
 
     assert len(df) == 1
     row = df.iloc[0]

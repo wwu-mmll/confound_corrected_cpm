@@ -106,6 +106,13 @@ live in `connectome.py`.)
       permutation testing, and passing `atlas` for brain plots.
 - [ ] Add in-report captions; finish the accessibility/print audit.
 - [ ] Optional: a real-data (or realistic simulated) end-to-end tutorial.
+- [ ] **Cross-run comparison report** (feature idea, 2026-09-22). Confound control is
+      two run-level choices, so the 2x2 is four separate analyses and no single report
+      can show the raw-vs-deconfounded comparison that is the scientifically
+      interesting output. A report that reads several results directories and puts them
+      side by side would. `cccpm_paper`'s `figures/fig_empirical.py` does this by hand
+      today. Agreed with Nils to log it rather than build it now — it is a new feature,
+      not reporting follow-through.
 - [ ] Optional: extract the brain figures into `wwu-mmll/brainplots`, publish it,
       and depend on it via `cccpm[plots]` (code currently lives in CCCPM).
 - [~] `examples/` curation: `example_simulated_classification.py` overlaps the

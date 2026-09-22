@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import warnings
 
@@ -377,6 +378,19 @@ class CPMAnalysis:
         # Save task type to results directory for HTML report
         with open(os.path.join(self.results_directory, 'task_type.txt'), 'w') as f:
             f.write(self.task_type.value)
+
+        # Same, for the confound configuration. The report has to be able to say
+        # which cell of the selection_input x model_input 2x2 produced it --
+        # otherwise a naive run and a fully controlled one are indistinguishable
+        # to anyone who is handed the HTML. Written as a file rather than parsed
+        # back out of the log, so it survives a run with logging turned down.
+        with open(os.path.join(self.results_directory, 'run_config.json'), 'w') as f:
+            json.dump({
+                'selection_statistic': self.edge_selection.statistic._statistic,
+                'selection_input': self.edge_selection.statistic._input,
+                'model_input': self.model_input,
+                'has_covariates': self.has_covariates,
+            }, f)
 
         # Estimate models on actual data
         self._single_run(X=X, y=y.reshape(-1, 1), covariates=covariates, perm_run=False)
