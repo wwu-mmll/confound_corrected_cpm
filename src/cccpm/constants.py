@@ -31,7 +31,7 @@ class Models(IntEnum):
     connectome = 0
     covariates = 1
     full = 2
-    residuals = 3
+    connectome_residualized = 3
     increment = 4
 
 

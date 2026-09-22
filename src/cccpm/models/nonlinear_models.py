@@ -15,7 +15,7 @@ class BaseCPM(ABC):
 
     Matches the tensor-based pipeline interface of LinearCPM but delegates
     the connectome and full model fitting to subclass-defined estimators
-    (sklearn, pygam, etc.).  Covariates and residuals models always use
+    (sklearn, pygam, etc.).  Covariates and connectome_residualized models always use
     ordinary least-squares (LinearRegression).
 
     Constructor
@@ -103,7 +103,7 @@ class BaseCPM(ABC):
 
             for net in ['positive', 'negative', 'both']:
                 run_models[f'connectome_{net}'] = self.fit_model(feats[net]['conn'], y_run)
-                run_models[f'residuals_{net}'] = LinearRegression().fit(feats[net]['resid'], y_run)
+                run_models[f'connectome_residualized_{net}'] = LinearRegression().fit(feats[net]['resid'], y_run)
                 X_full = np.hstack([feats[net]['conn'], covariates])
                 run_models[f'full_{net}'] = self.fit_model(X_full, y_run)
 
@@ -163,8 +163,8 @@ class BaseCPM(ABC):
                 predictions[:, Models.connectome, net_idx, run] = (
                     self.predict_model(self._fitted[run][f'connectome_{net_name}'], feats[net_name]['conn']).ravel()
                 )
-                predictions[:, Models.residuals, net_idx, run] = (
-                    self.predict_model(self._fitted[run][f'residuals_{net_name}'], feats[net_name]['resid']).ravel()
+                predictions[:, Models.connectome_residualized, net_idx, run] = (
+                    self.predict_model(self._fitted[run][f'connectome_residualized_{net_name}'], feats[net_name]['resid']).ravel()
                 )
                 X_full = np.hstack([feats[net_name]['conn'], covariates])
                 predictions[:, Models.full, net_idx, run] = (
@@ -179,7 +179,7 @@ class BaseCPM(ABC):
 
         Returns
         -------
-        dict with "connectome" and "residuals" sub-dicts, each mapping
+        dict with "connectome" and "connectome_residualized" sub-dicts, each mapping
         "positive"/"negative" to tensors [N_samples, N_runs].
         """
         X = np.asarray(X, dtype=np.float32)
@@ -211,7 +211,7 @@ class BaseCPM(ABC):
                 Networks.positive.name: torch.from_numpy(pos_strengths).to(self.device),
                 Networks.negative.name: torch.from_numpy(neg_strengths).to(self.device),
             },
-            "residuals": {
+            "connectome_residualized": {
                 Networks.positive.name: torch.from_numpy(pos_residuals).to(self.device),
                 Networks.negative.name: torch.from_numpy(neg_residuals).to(self.device),
             },

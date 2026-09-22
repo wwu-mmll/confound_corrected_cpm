@@ -79,7 +79,7 @@ class PermutationManager:
             # the +1 correction would report the *floor* -- 1/(n_perms+1), the
             # most significant p-value the test can produce -- for a model that
             # does not exist. (This is what a run without covariates hits: the
-            # covariates/full/residuals/increment rows are NaN placeholders.)
+            # covariates/full/connectome_residualized/increment rows are NaN.)
             if pd.isna(observed) or null.isna().all():
                 result_dict[column] = float('nan')
                 continue

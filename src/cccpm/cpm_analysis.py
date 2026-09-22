@@ -277,7 +277,7 @@ class CPMAnalysis:
         """
         Which model variants this run defines. Without covariates only
         ``connectome`` is meaningful: ``covariates`` has an empty design,
-        ``full`` collapses onto ``connectome``, ``residuals`` has nothing to
+        ``full`` collapses onto ``connectome``, ``connectome_residualized`` has nothing to
         residualise against, and ``increment`` would be identically zero.
         """
         if getattr(self, 'has_covariates', True):
@@ -329,7 +329,7 @@ class CPMAnalysis:
         covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
             Omit it (or pass ``None``) for vanilla CPM with no confound control. In that
             mode only the ``connectome`` model is defined -- ``covariates``, ``full``,
-            ``residuals`` and ``increment`` all need covariates and are reported as NaN,
+            ``connectome_residualized`` and ``increment`` need covariates and are NaN,
             and the models that do exist are listed in ``available_models.json``.
             Options that presuppose covariates (a ``*_partial`` edge statistic,
             ``calculate_residuals=True``) then raise up front.
@@ -347,7 +347,7 @@ class CPMAnalysis:
         if not self.has_covariates:
             self.logger.info(
                 "No covariates supplied: running vanilla CPM. Only the "
-                "'connectome' model is defined; covariates/full/residuals/"
+                "'connectome' model is defined; covariates/full/"
                 "increment are reported as NaN.")
             # A zero-width design keeps every tensor operation downstream valid
             # without a `None` check in each of them. LinearCPM reads the width,

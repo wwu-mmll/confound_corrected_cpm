@@ -15,7 +15,7 @@ from cccpm.reporting.plots.figure_style import (
     save_figure,
 )
 
-MODEL_ORDER = ["covariates", "connectome", "full", "residuals", "increment"]
+MODEL_ORDER = ["covariates", "connectome", "full", "connectome_residualized", "increment"]
 
 
 def scatter_plot_main(
@@ -99,7 +99,6 @@ def scatter_plot_main(
 def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     apply_nature_style()
 
-    #df = df[df['model'].isin(['connectome', 'residuals', 'full'])]
     df = df[df['model'].isin(['connectome'])]
 
     def regplot_colored(data, **kwargs):
@@ -159,12 +158,13 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name)
 def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 grid of histograms showing the distribution of network_strength
-    for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
+    for two models ('connectome', 'connectome_residualized') and two networks
+    ('positive', 'negative').
     """
     apply_nature_style()
 
     # Filter relevant data
-    df = df[df["model"].isin(["connectome", "residuals"])]
+    df = df[df["model"].isin(["connectome", "connectome_residualized"])]
     df = df[df["network"].isin(["positive", "negative"])]
 
     def histplot_colored(data, color=None, **kwargs):
@@ -202,7 +202,8 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) 
 def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 scatter plot of y_true vs network_strength
-    for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
+    for two models ('connectome', 'connectome_residualized') and two networks
+    ('positive', 'negative').
     """
     apply_nature_style()
 

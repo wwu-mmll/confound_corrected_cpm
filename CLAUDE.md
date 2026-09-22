@@ -74,7 +74,7 @@ mkdocs build
 
 ### Model Variants
 
-Each fold fits four model types (defined in `Models` enum): **connectome**, **covariates**, **full**, **residuals**, plus **increment** (full − covariates) computed at aggregation. Each is evaluated across network types (positive, negative, both).
+Each fold fits four model types (defined in `Models` enum): **connectome**, **covariates**, **full**, **connectome_residualized**, plus **increment** (full − covariates) computed at aggregation. `connectome_residualized` is the connectome model with the covariate variance removed from the features; it is computed at the network-strength level, which is provably identical to residualising the edges (verified 4.8e-07) and far cheaper. Each is evaluated across network types (positive, negative, both).
 
 Passing `covariates=None` to `CPMAnalysis.run` is vanilla CPM: only **connectome** is
 defined, the other variants are NaN-filled (the results tensor keeps its full shape),

@@ -22,7 +22,7 @@ class LinearCPM:
     Predictions come back as [N_samples, N_models, N_networks, N_runs].
 
     Without covariates only the ``connectome`` model is defined -- ``covariates``
-    is an empty design, ``full`` collapses to ``connectome``, ``residuals`` has
+    is an empty design, ``full`` collapses to ``connectome``, ``connectome_residualized`` has
     nothing to residualise against and ``increment`` would be identically zero.
     Those slots are filled with NaN rather than a number that looks meaningful;
     see ``available_models``.
@@ -133,7 +133,7 @@ class LinearCPM:
         for net, X_conn in conn.items():
             X_full = torch.cat([X_conn, cov_b], dim=-1)
             self.coefs[f'connectome_{net}'] = solve(X_conn, y_batch)
-            self.coefs[f'residuals_{net}'] = solve(resid[net], y_batch)
+            self.coefs[f'connectome_residualized_{net}'] = solve(resid[net], y_batch)
             self.coefs[f'full_{net}'] = solve(X_full, y_batch)
 
         return self
@@ -163,7 +163,7 @@ class LinearCPM:
             # Every covariate-dependent variant is undefined here. NaN, not a
             # number that would read as a real (and terrible) model score.
             for model in (Models.covariates, Models.full,
-                          Models.residuals, Models.increment):
+                          Models.connectome_residualized, Models.increment):
                 predictions[:, model] = float('nan')
             for net_idx, X_conn in conn:
                 predictions[:, Models.connectome, net_idx] = self._predict_linear(
@@ -193,8 +193,8 @@ class LinearCPM:
                 # each _predict_linear -> [R, N, 1]; reorder to [N, R]
                 predictions[:, Models.connectome, net_idx] = self._predict_linear(
                     X_conn, self.coefs[f'connectome_{name}']).squeeze(-1).t()
-                predictions[:, Models.residuals, net_idx] = self._predict_linear(
-                    resid[net_idx], self.coefs[f'residuals_{name}']).squeeze(-1).t()
+                predictions[:, Models.connectome_residualized, net_idx] = self._predict_linear(
+                    resid[net_idx], self.coefs[f'connectome_residualized_{name}']).squeeze(-1).t()
                 predictions[:, Models.full, net_idx] = self._predict_linear(
                     X_full, self.coefs[f'full_{name}']).squeeze(-1).t()
 
@@ -298,7 +298,7 @@ class LinearCPM:
         pred_pos = self._predict_linear(cov_runs, self.resid_models['pos']).squeeze(-1).t()
         pred_neg = self._predict_linear(cov_runs, self.resid_models['neg']).squeeze(-1).t()
 
-        strengths["residuals"] = {
+        strengths["connectome_residualized"] = {
             Networks.positive.name: pos_str - pred_pos,
             Networks.negative.name: neg_str - pred_neg,
         }

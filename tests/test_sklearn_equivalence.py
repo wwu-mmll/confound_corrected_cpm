@@ -182,7 +182,7 @@ def test_model_variants_match_sklearn():
     np.testing.assert_allclose(pred[:, Models.connectome], p_conn, atol=2e-3)
     np.testing.assert_allclose(pred[:, Models.covariates], p_cov, atol=2e-3)
     np.testing.assert_allclose(pred[:, Models.full], p_full, atol=2e-3)
-    np.testing.assert_allclose(pred[:, Models.residuals], p_res, atol=2e-3)
+    np.testing.assert_allclose(pred[:, Models.connectome_residualized], p_res, atol=2e-3)
 
 
 # --------------------------------------------------------------------------- #

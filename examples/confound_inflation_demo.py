@@ -124,7 +124,7 @@ def run_cpm(X, y, Z, statistic, calculate_residuals):
     def ev(model):
         return float(ag.loc[model, "both"]["explained_variance_score"]["mean"])
 
-    return {m: ev(m) for m in ("connectome", "covariates", "full", "residuals")}
+    return {m: ev(m) for m in ("connectome", "covariates", "full", "connectome_residualized")}
 
 
 def selected_edge_mask(X, y, Z, statistic):
@@ -175,7 +175,7 @@ def run_sweep():
                     connectome_raw=raw["connectome"],
                     connectome_partial=partial["connectome"],
                     connectome_residualizedX=residx["connectome"],
-                    residuals_model=raw["residuals"],
+                    residuals_model=raw["connectome_residualized"],
                     increment_full=raw["full"] - raw["covariates"],
                 ))
 

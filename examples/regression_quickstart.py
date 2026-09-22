@@ -93,6 +93,7 @@ cpm.run(X=X, y=y, covariates=covariates)
 #   - report.html            : a full, human-readable HTML report
 #
 # Because the connectome carries genuine confound leakage, compare the 'connectome'
-# model against the 'residuals' model (which removes the covariates first): the gap
+# model against the 'connectome_residualized' model (confound variance removed from
+# the features first): the gap
 # between them is the confound inflation the SEM simulator built in on purpose.
 print("Done. Open ./results/regression_quickstart/report.html to explore the results.")

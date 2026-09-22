@@ -249,7 +249,7 @@ class ResultsManager:
                 'repeat': repeat,
             })
             # Iterate what the model actually produced: without covariates
-            # there is no 'residuals' entry to store.
+            # there is no 'connectome_residualized' entry to store.
             for m in network_strengths
             for n in ['positive', 'negative']
         ]
