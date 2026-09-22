@@ -55,7 +55,9 @@ y = (sim["y"].ravel() > np.median(sim["y"])).astype(float)   # median split → 
 # binary target. Use 'point_biserial_partial' to control for covariates during
 # edge selection.
 edge_selection = UnivariateEdgeSelection(
-    edge_statistic="point_biserial",
+    # A binary 0/1 target through the Pearson path IS the point-biserial
+    # correlation -- no separate statistic needed.
+    selection_statistic="pearson",
     edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
 )
 

@@ -36,11 +36,13 @@ For every cell the toolbox is run in three configurations and the connectome
 model's out-of-sample explained variance is compared to the naive and the true
 reference values:
 
-    (a) raw            — edge_statistic='pearson',         calculate_residuals=False
-    (b) partial        — edge_statistic='pearson_partial',  calculate_residuals=False
-    (c) residualized-X — edge_statistic='pearson',          calculate_residuals=True
+    (a) raw            — selection_input='raw',          model_input='raw'
+    (b) partial        — selection_input='residualized',  model_input='raw'
+    (c) residualized-X — selection_input='residualized',  model_input='residualized'
 
-We also read the toolbox's own ``residuals`` model (residualizes the aggregate
+We also run the fourth cell of that 2x2 (``selection_input='raw'``,
+``model_input='residualized'``) — historically the ``residuals`` model (which
+residualized the aggregate
 strength) as a fourth, alternative deconfounding route.
 
 Expected result: raw ≈ partial ≈ R2(y~X) (flat across κ, inflated), while
@@ -78,7 +80,27 @@ logging.disable(logging.CRITICAL)
 # The full CPMAnalysis.run() also writes an HTML report per call (~seconds); we
 # only need the cross-validated metrics, so we call the internal _single_run and
 # silence the per-fold progress bar for this batch sweep.
-_ca.tqdm = lambda iterable, **kwargs: iterable
+# Silence the per-fold progress bar. `tqdm` is constructed with keyword-only
+# arguments (`tqdm(total=...)`) and driven with `.update()`/`.close()`, so the
+# stand-in has to be an object, not a pass-through lambda.
+class _SilentBar:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def update(self, *args, **kwargs):
+        pass
+
+    def close(self):
+        pass
+
+    def set_postfix(self, *args, **kwargs):
+        pass
+
+    def __iter__(self):
+        return iter(())
+
+
+_ca.tqdm = _SilentBar
 
 # ── Configuration ───────────────────────────────────────────────────────────
 R2_TARGETS = GRID_R2_X_Y            # (0.09, 0.36, 0.81)
@@ -99,21 +121,22 @@ _SCRATCH = tempfile.mkdtemp(prefix="cccpm_confound_demo_")
 
 
 # ── Toolbox helpers ─────────────────────────────────────────────────────────
-def _edge_selection(statistic):
+def _edge_selection(selection_input):
     return UnivariateEdgeSelection(
-        edge_statistic=statistic,
+        selection_statistic="pearson",
+        selection_input=selection_input,
         edge_selection=[PThreshold(threshold=P_THRESHOLD, correction=[None])],
     )
 
 
-def run_cpm(X, y, Z, statistic, calculate_residuals):
-    """Run one CPM configuration and return the 'both'-network explained variance
-    for every model variant (connectome/covariates/full/residuals)."""
+def run_cpm(X, y, Z, selection_input, model_input="raw"):
+    """Run one cell of the confound 2x2 and return the 'both'-network explained
+    variance for every model variant."""
     cpm = CPMAnalysis(
         results_directory=_SCRATCH,
         cv=KFold(n_splits=5, shuffle=True, random_state=42),
-        edge_selection=_edge_selection(statistic),
-        calculate_residuals=calculate_residuals,
+        edge_selection=_edge_selection(selection_input),
+        model_input=model_input,
         n_permutations=0,
         task_type="regression",
     )
@@ -122,14 +145,16 @@ def run_cpm(X, y, Z, statistic, calculate_residuals):
     ag = cpm.results_manager.agg_results
 
     def ev(model):
-        return float(ag.loc[model, "both"]["explained_variance_score"]["mean"])
+        # agg_results keeps a runs level, so this is a one-element Series.
+        return float(np.ravel(
+            ag.loc[model, "both"]["explained_variance_score"]["mean"])[0])
 
-    return {m: ev(m) for m in ("connectome", "covariates", "full", "connectome_residualized")}
+    return {m: ev(m) for m in ("connectome", "covariates", "full")}
 
 
-def selected_edge_mask(X, y, Z, statistic):
+def selected_edge_mask(X, y, Z, selection_input):
     """Boolean mask (n_features,) of edges selected on the full dataset."""
-    ue = _edge_selection(statistic)
+    ue = _edge_selection(selection_input)
     ue.fit_transform(X=X, y=y.reshape(-1, 1), covariates=Z)
     selector = PThreshold(threshold=P_THRESHOLD, correction=None)
     edges = selector.select(r=ue.r_edges, p=ue.p_edges)   # [F, 2, runs]
@@ -164,9 +189,10 @@ def run_sweep():
                 # Validate the generated data matches the analytic targets.
                 emp = compute_r2s(sim)
 
-                raw = run_cpm(X, y, Z, "pearson", False)
-                partial = run_cpm(X, y, Z, "pearson_partial", False)
-                residx = run_cpm(X, y, Z, "pearson", True)
+                raw = run_cpm(X, y, Z, "raw", "raw")
+                partial = run_cpm(X, y, Z, "residualized", "raw")
+                residx = run_cpm(X, y, Z, "residualized", "residualized")
+                raw_resid = run_cpm(X, y, Z, "raw", "residualized")
 
                 records.append(dict(
                     r2_target=r2, kappa=kappa, sim=sim_idx,
@@ -175,7 +201,7 @@ def run_sweep():
                     connectome_raw=raw["connectome"],
                     connectome_partial=partial["connectome"],
                     connectome_residualizedX=residx["connectome"],
-                    residuals_model=raw["connectome_residualized"],
+                    residuals_model=raw_resid["connectome"],
                     increment_full=raw["full"] - raw["covariates"],
                 ))
 
@@ -185,8 +211,9 @@ def run_sweep():
                     "mixed": info["mixed_idx"],
                     "confound_only": info["confound_only_idx"],
                 }
-                for stat, label in (("pearson", "raw"), ("pearson_partial", "partial")):
-                    m = selected_edge_mask(X, y, Z, stat)
+                for selection_input, label in (("raw", "raw"),
+                                               ("residualized", "partial")):
+                    m = selected_edge_mask(X, y, Z, selection_input)
                     edge_records.append(dict(
                         r2_target=r2, kappa=kappa, sim=sim_idx, selection=label,
                         n_pure_signal=int(m[classes["pure_signal"]].sum()),

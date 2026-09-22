@@ -41,3 +41,38 @@ def test_example_script_runs(script_name):
     )
 
     assert result.returncode == 0, f"Script crashed:\n{result.stderr}"
+
+# ---------------------------------------------------------------------------
+# Examples whose full run is too slow for CI, exercised on a minimal config.
+#
+# Importing them is not enough: the breakages these catch -- a tqdm stand-in
+# that no longer matches how the toolbox constructs it, and a scalar extraction
+# that silently became a Series -- only fire once the sweep actually runs. Both
+# had been broken for a while precisely because nothing called them.
+# ---------------------------------------------------------------------------
+
+def test_confound_inflation_demo_sweep_runs():
+    import importlib
+    import sys
+
+    sys.path.insert(0, str(EXAMPLES_DIR))
+    try:
+        demo = importlib.import_module("confound_inflation_demo")
+        demo.R2_TARGETS = (0.36,)
+        demo.KAPPAS = (0.6,)
+        demo.N_SIMS = 1
+        demo.N_SAMPLES = 400
+        df, edges = demo.run_sweep()
+    finally:
+        sys.path.remove(str(EXAMPLES_DIR))
+
+    assert len(df) == 1
+    row = df.iloc[0]
+    # The point of the demo: the naive model is inflated above the true value,
+    # and controlling the connectome recovers it.
+    assert row["connectome_raw"] > row["true_r2"] + 0.1
+    assert abs(row["connectome_residualizedX"] - row["true_r2"]) < 0.06
+
+    # And naive selection keeps the confound-only edges that partial rejects.
+    by_selection = edges.set_index("selection")["n_confound_only"]
+    assert by_selection["raw"] > by_selection["partial"]

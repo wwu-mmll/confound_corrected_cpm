@@ -30,7 +30,7 @@ sim = simulate_data_given_kappa(
 )
 X, y, covariates = sim["X"], sim["y"], sim["Z"]
 
-univariate_edge_selection = UnivariateEdgeSelection(edge_statistic='pearson',
+univariate_edge_selection = UnivariateEdgeSelection(selection_statistic='pearson',
                                                     edge_selection=[PThreshold(threshold=[0.05, 0.01],
                                                                                correction=[None])])
 
@@ -43,5 +43,5 @@ cpm = CPMAnalysis(results_directory='./tmp/example_simulated_data',
                   select_stable_edges=False,
                   device='cuda')
 
-cpm.run(X=X, y=y)
+cpm.run(X=X, y=y, covariates=covariates)
 cpm.generate_html_report()

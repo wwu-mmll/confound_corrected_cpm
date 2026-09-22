@@ -19,7 +19,7 @@ sim = simulate_data_given_kappa(
 X, y, covariates = sim["X"], sim["y"], sim["Z"]
 
 univariate_edge_selection = UnivariateEdgeSelection(
-    edge_statistic='pearson',
+    selection_statistic='pearson',
     edge_selection=[PThreshold(threshold=[0.05, 0.01], correction=['bonferroni'])]
 )
 

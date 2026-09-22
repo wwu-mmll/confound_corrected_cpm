@@ -59,7 +59,7 @@ print(f"True R²(y~X | Z)        : {info['R2_X_y_given_Z']:.2f}  (what we hope t
 # keeping those below a p-value threshold. Use 'pearson_partial' instead of
 # 'pearson' to control for the covariates already *during* edge selection.
 edge_selection = UnivariateEdgeSelection(
-    edge_statistic="pearson",
+    selection_statistic="pearson",
     edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
 )
 
@@ -92,8 +92,10 @@ cpm.run(X=X, y=y, covariates=covariates)
 #   - cv_predictions.csv     : out-of-sample predictions per subject
 #   - report.html            : a full, human-readable HTML report
 #
-# Because the connectome carries genuine confound leakage, compare the 'connectome'
-# model against the 'connectome_residualized' model (confound variance removed from
-# the features first): the gap
-# between them is the confound inflation the SEM simulator built in on purpose.
+# Because the connectome carries genuine confound leakage, run this a second time
+# with model_input='residualized' (which regresses the covariates out of the
+# connectome before summing the selected edges into network strengths) and compare
+# the 'connectome' model across the two runs: the gap between them is the confound
+# inflation the SEM simulator built in on purpose. 'increment' (full - covariates)
+# answers the same question within a single run.
 print("Done. Open ./results/regression_quickstart/report.html to explore the results.")
