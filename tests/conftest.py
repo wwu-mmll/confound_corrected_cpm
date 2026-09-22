@@ -40,7 +40,7 @@ def cpm_instance(tmp_path):
     temporary results directory.
     """
     univariate_edge_selection = UnivariateEdgeSelection(
-        edge_statistic='pearson',
+        selection_statistic='pearson',
         edge_selection=[PThreshold(threshold=[0.01, 0.05], correction=[None])]
     )
 
@@ -61,7 +61,7 @@ def cpm_classification_instance(tmp_path):
     Returns an initialized CPMAnalysis instance configured for classification.
     """
     univariate_edge_selection = UnivariateEdgeSelection(
-        edge_statistic='pearson',
+        selection_statistic='pearson',
         edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
     )
 

@@ -104,9 +104,13 @@ name would mean something different for every backend, and a user could not tell
 connectome produced `full`. Guarded by
 `tests/test_confound_api.py::test_nonlinear_models_are_not_invariant_to_model_input`.
 
-`edge_statistic` (including `*_partial` and `point_biserial`) is deprecated onto
-`selection_statistic`/`selection_input`, and `CPMAnalysis(calculate_residuals=...)` onto
-both knobs at once, for one release.
+`edge_statistic` and `CPMAnalysis(calculate_residuals=...)` were removed in 0.7.0
+rather than deprecated — they changed meaning, and code that runs while silently
+producing different numbers is worse than code that stops. Both raise with the
+replacement named.
+
+`increment` is NaN for metrics whose difference is not a statistic (Pearson r, F1) —
+see `constants.INCREMENTABLE_METRICS`.
 
 ### Package Structure
 

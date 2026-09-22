@@ -303,7 +303,8 @@ def test_classification_pipeline_matches_sklearn(tmp_path):
     cv_sk = KFold(n_splits=5, shuffle=True, random_state=0)
 
     ue = UnivariateEdgeSelection(
-        edge_statistic="point_biserial",
+        # Pearson against a 0/1 target is the point-biserial correlation.
+        selection_statistic="pearson",
         edge_selection=[PThreshold(threshold=P_THRESHOLD, correction=[None])])
     cpm = CPMAnalysis(
         results_directory=str(tmp_path), cv=cv_tb, edge_selection=ue,

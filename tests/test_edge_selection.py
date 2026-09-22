@@ -12,10 +12,9 @@ from cccpm.edge_selection import (
 from cccpm.constants import Networks
 
 
-@pytest.mark.parametrize("statistic", [
-    "pearson", "spearman", "pearson_partial", "spearman_partial",
-])
-def test_batched_edge_statistics_match_per_column(statistic):
+@pytest.mark.parametrize("selection_input", ["raw", "residualized"])
+@pytest.mark.parametrize("statistic", ["pearson", "spearman"])
+def test_batched_edge_statistics_match_per_column(statistic, selection_input):
     """Computing (r, p) for all target columns at once must equal computing
     each column separately (up to float32 rounding).
 
@@ -35,7 +34,8 @@ def test_batched_edge_statistics_match_per_column(statistic):
     Y = rng.randn(n_samples, n_runs).astype(np.float32)
     covariates = rng.randn(n_samples, 2).astype(np.float32)
 
-    stat = EdgeStatistic(edge_statistic=statistic)
+    stat = EdgeStatistic(selection_statistic=statistic,
+                         selection_input=selection_input)
     device = torch.device('cpu')
 
     # Batched: all columns at once.
@@ -49,15 +49,14 @@ def test_batched_edge_statistics_match_per_column(statistic):
         torch.testing.assert_close(p_all[:, [run_id]], p_col, rtol=1e-5, atol=1e-6)
 
 
+@pytest.mark.parametrize("selection_input", ["raw", "residualized"])
 @pytest.mark.parametrize("statistic,binary_target", [
     ("pearson", False),
     ("spearman", False),
-    ("pearson_partial", False),
-    ("spearman_partial", False),
-    ("point_biserial", True),
-    ("point_biserial_partial", True),
+    ("pearson", True),      # a 0/1 target: the point-biserial correlation
 ])
-def test_edge_selection_recovers_signed_edges(statistic, binary_target):
+def test_edge_selection_recovers_signed_edges(statistic, binary_target,
+                                              selection_input):
     """
     End-to-end test of the production edge-selection path
     (UnivariateEdgeSelection -> EdgeStatistic dispatch -> PThreshold.select)
@@ -77,7 +76,8 @@ def test_edge_selection_recovers_signed_edges(statistic, binary_target):
     covariates = rng.randn(n_samples, 1).astype(np.float32)
 
     sel = UnivariateEdgeSelection(
-        edge_statistic=statistic,
+        selection_statistic=statistic,
+        selection_input=selection_input,
         edge_selection=[PThreshold(threshold=[0.01], correction=[None])],
     )
     # Configure as a single selector, exactly as the pipeline does
@@ -133,7 +133,7 @@ def _sparse_presence_data(seed=0):
 def test_presence_filter_drops_sparse_edges(threshold, expected_min_fraction):
     """Only edges nonzero in >= threshold of subjects survive the filter."""
     X, y = _sparse_presence_data()
-    stat = EdgeStatistic(edge_statistic='pearson', presence_filter=threshold)
+    stat = EdgeStatistic(selection_statistic='pearson', presence_filter=threshold)
     r, p = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
 
     presence = (X != 0).mean(axis=0)
@@ -148,7 +148,7 @@ def test_presence_filter_drops_sparse_edges(threshold, expected_min_fraction):
 def test_presence_filter_off_by_default_keeps_all():
     """With the filter off, sparse-but-variable edges are still evaluated."""
     X, y = _sparse_presence_data()
-    stat = EdgeStatistic(edge_statistic='pearson')  # default: no presence filter
+    stat = EdgeStatistic(selection_statistic='pearson')  # default: no presence filter
     r, p = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
     # Every column has variance > 0, so none is dropped by the variance gate.
     assert bool((p[:, 0].numpy() < 1.0).all()), "no edge should be filtered when off"
@@ -163,11 +163,11 @@ def test_presence_filter_adds_to_variance_gate():
     X = np.zeros((n, 1), dtype=np.float32)
     X[:20, 0] = rng.randn(20).astype(np.float32) + 5.0  # nonzero in 20% only
 
-    no_filter = EdgeStatistic(edge_statistic='pearson')
+    no_filter = EdgeStatistic(selection_statistic='pearson')
     _, p_off = no_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
     assert p_off[0, 0].item() < 1.0  # survives the variance gate
 
-    with_filter = EdgeStatistic(edge_statistic='pearson', presence_filter=0.5)
+    with_filter = EdgeStatistic(selection_statistic='pearson', presence_filter=0.5)
     _, p_on = with_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
     assert p_on[0, 0].item() == 1.0  # dropped by the presence filter
 
@@ -202,7 +202,7 @@ def test_filter_connected_components_drops_lone_edges():
 
 def _sel_with_edges(connected_components):
     sel = UnivariateEdgeSelection(
-        edge_statistic='pearson',
+        selection_statistic='pearson',
         connected_components=connected_components,
         edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
     )

@@ -141,7 +141,7 @@ def run_one(name, X, y, covariates, n_perms, n_folds, device, results_dir):
             results_directory=str(results_dir / name),
             cv=KFold(n_splits=n_folds, shuffle=True, random_state=42),
             edge_selection=UnivariateEdgeSelection(
-                edge_statistic='pearson',
+                selection_statistic='pearson',
                 edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
             ),
             inner_cv=None,          # forces the batched outer-fold path

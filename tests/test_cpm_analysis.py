@@ -19,7 +19,7 @@ from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 def _make_cpm(results_directory, **kwargs):
     edge_selection = UnivariateEdgeSelection(
-        edge_statistic="pearson",
+        selection_statistic="pearson",
         edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
     )
     return CPMAnalysis(
@@ -97,7 +97,7 @@ def test_repeated_kfold_averages_individual_outputs(tmp_path, simulated_data):
     n_splits, n_repeats = 5, 3
 
     edge_selection = UnivariateEdgeSelection(
-        edge_statistic="pearson",
+        selection_statistic="pearson",
         edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
     )
     cpm = CPMAnalysis(
@@ -138,7 +138,7 @@ def test_pipeline_is_reproducible(tmp_path, simulated_data):
 
     def run_once(subdir):
         edge_selection = UnivariateEdgeSelection(
-            edge_statistic="pearson",
+            selection_statistic="pearson",
             edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
         )
         cpm = CPMAnalysis(
@@ -275,7 +275,7 @@ def test_permutation_chunking_does_not_change_results(tmp_path, monkeypatch):
             results_directory=str(tmp_path / f"chunk_{chunk_size}"),
             cv=KFold(n_splits=3, shuffle=True, random_state=1),
             edge_selection=UnivariateEdgeSelection(
-                edge_statistic='pearson',
+                selection_statistic='pearson',
                 edge_selection=[PThreshold(threshold=[0.05], correction=[None])]),
             inner_cv=None, n_permutations=0, device='cpu')
         cpm.task_type = TaskType.regression
@@ -289,4 +289,7 @@ def test_permutation_chunking_does_not_change_results(tmp_path, monkeypatch):
         metrics, edges = run(chunk_size)
         assert torch.equal(edges, reference_edges), (
             f"chunk={chunk_size} selected different edges")
-        torch.testing.assert_close(metrics, reference_metrics, rtol=0, atol=1e-5)
+        # equal_nan: the increment of a metric whose difference is not a
+        # statistic is NaN by design (see constants.INCREMENTABLE_METRICS).
+        torch.testing.assert_close(metrics, reference_metrics, rtol=0, atol=1e-5,
+                                   equal_nan=True)

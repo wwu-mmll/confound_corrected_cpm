@@ -42,14 +42,13 @@ class CPMAnalysis:
                  cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = KFold(n_splits=10, shuffle=True, random_state=42),
                  inner_cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
-                     edge_statistic='pearson',
+                     selection_statistic='pearson',
                      edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
                  ),
                  select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
                  model_input: str = 'raw',
-                 calculate_residuals: bool = None,
                  n_permutations: int = 0,
                  edge_significance_method: str = "nbs",
                  nbs_threshold: float = 0.5,
@@ -105,15 +104,6 @@ class CPMAnalysis:
             ``LinearCPM``. A "residualised" *model* would therefore mean something
             different for every backend, and the user could not tell from the
             results which connectome produced `full`.
-        calculate_residuals: bool, default=None
-            .. deprecated::
-                Use ``model_input='residualized'`` together with
-                ``UnivariateEdgeSelection(selection_input='residualized')``,
-                which is what ``True`` now sets. One consequence to be aware of
-                when migrating: edge selection now uses the properly specified
-                coefficient test (``df = N - 2 - C``) rather than an ordinary
-                correlation against the raw target, so the selected edge sets
-                change. This parameter will be removed in a future release.
         n_permutations: int, default=0
             Number of label permutations for significance testing. ``0`` disables
             permutation testing; use 1000+ for publishable p-values.
@@ -178,21 +168,7 @@ class CPMAnalysis:
                 f"model_input must be 'raw' or 'residualized', got {model_input!r}.")
         self.model_input = model_input
 
-        if calculate_residuals is not None:
-            warnings.warn(
-                "calculate_residuals is deprecated and will be removed in a "
-                "future release. Use model_input='residualized' together with "
-                "UnivariateEdgeSelection(selection_input='residualized'), which "
-                "is what True now sets. Note that edge selection now uses the "
-                "coefficient test (df = N - 2 - C) rather than a plain "
-                "correlation against the raw target, so edge sets change.",
-                DeprecationWarning, stacklevel=2,
-            )
-            if calculate_residuals:
-                self.edge_selection.statistic._input = 'residualized'
-                self.edge_selection.selection_input = 'residualized'
-                self.model_input = 'residualized'
-        self.calculate_residuals = calculate_residuals
+
         self.n_permutations = n_permutations
         self.edge_significance_method = edge_significance_method
         self.nbs_threshold = nbs_threshold
@@ -365,7 +341,7 @@ class CPMAnalysis:
             ``full`` and ``increment`` need covariates and are reported as NaN,
             and the models that do exist are listed in ``available_models.json``.
             Options that presuppose covariates (a ``*_partial`` edge statistic,
-            ``calculate_residuals=True``) then raise up front.
+            ``model_input='residualized'``) then raise up front.
 
         """
         self.logger.info("Starting CPM estimation.")

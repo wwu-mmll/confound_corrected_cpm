@@ -169,21 +169,6 @@ class TestCalculateFinalCVResults:
         assert 'pearson_score' not in df_full.columns
         assert 'mean_squared_error' not in df_full.columns
 
-    def test_increment_computed(self, tmp_path):
-        """Test that increment = full - covariates is computed correctly."""
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=1, n_folds=2, n_features=3
-        )
-        for fold in range(2):
-            metrics = torch.randn(len(Metrics), len(Models), len(Networks), 1)
-            mgr.store_metrics(param_idx=0, fold_idx=fold, metrics_tensor=metrics)
-
-        mgr.calculate_final_cv_results()
-
-        expected = mgr.results[:, Models.full] - mgr.results[:, Models.covariates]
-        actual = mgr.results[:, Models.increment]
-        assert torch.allclose(actual, expected)
-
 
 class TestLoadCVResults:
     def test_load_cv_results_filters_mean(self, tmp_path):
@@ -216,3 +201,46 @@ class TestLoadCVResults:
         assert set(loaded.columns) == set(metrics)
         assert loaded.shape[0] == len(agg_index)
 
+
+
+class TestIncrementIsSuppressedWhereMeaningless:
+    """`increment` subtracts one metric from another, which is only a statistic
+    for metrics where differences are standard. See constants.INCREMENTABLE_METRICS."""
+
+    def _manager_with_metrics(self, tmp_path, task_type=TaskType.regression):
+        mgr = ResultsManager(
+            output_dir=str(tmp_path), n_runs=1, n_folds=3, n_features=3
+        )
+        for fold in range(3):
+            metrics = torch.rand(len(Metrics), len(Models), len(Networks), 1) + 0.5
+            mgr.store_metrics(param_idx=0, fold_idx=fold, metrics_tensor=metrics)
+        mgr.calculate_final_cv_results(task_type=task_type)
+        return mgr
+
+    def test_pearson_increment_is_nan(self, tmp_path):
+        """A difference of two correlations is not a comparison of correlations
+        -- that needs Fisher z or Steiger's test, not subtraction."""
+        mgr = self._manager_with_metrics(tmp_path)
+        assert torch.isnan(mgr.results[Metrics.pearson_score, Models.increment]).all()
+
+    def test_f1_increment_is_nan(self, tmp_path):
+        mgr = self._manager_with_metrics(tmp_path, TaskType.classification)
+        assert torch.isnan(mgr.results[Metrics.f1_score, Models.increment]).all()
+
+    @pytest.mark.parametrize("metric", [
+        Metrics.explained_variance_score, Metrics.mean_squared_error,
+        Metrics.mean_absolute_error, Metrics.accuracy,
+        Metrics.balanced_accuracy, Metrics.roc_auc,
+    ])
+    def test_interpretable_increments_survive(self, tmp_path, metric):
+        mgr = self._manager_with_metrics(tmp_path)
+        expected = (mgr.results[metric, Models.full]
+                    - mgr.results[metric, Models.covariates])
+        assert torch.allclose(mgr.results[metric, Models.increment], expected)
+
+    def test_suppression_does_not_touch_the_other_models(self, tmp_path):
+        """Only the increment row is affected -- Pearson r itself is fine."""
+        mgr = self._manager_with_metrics(tmp_path)
+        for model in (Models.connectome, Models.covariates, Models.full):
+            assert torch.isfinite(
+                mgr.results[Metrics.pearson_score, model]).all(), model.name

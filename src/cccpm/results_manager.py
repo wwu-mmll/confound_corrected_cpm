@@ -16,7 +16,8 @@ import numpy as np
 import pandas as pd
 import torch
 
-from cccpm.constants import Networks, Models, Metrics, TaskType, get_metrics_for_task
+from cccpm.constants import (INCREMENTABLE_METRICS, Metrics, Models, Networks,
+                             TaskType, get_metrics_for_task)
 from cccpm.connectome import vector_to_matrix_tensor_version
 
 
@@ -292,6 +293,7 @@ class ResultsManager:
     def calculate_final_cv_results(self, task_type: TaskType = TaskType.regression):
         # Calculate increment: Full - Covariates (added value of the connectome over confounds)
         self.results[:, Models.increment] = self.results[:, Models.full] - self.results[:, Models.covariates]
+        self._suppress_uninterpretable_increments()
 
         # Move to CPU for processing
         # Shape: [Metrics, Models, Networks, Params, Folds, Runs]
@@ -366,6 +368,21 @@ class ResultsManager:
         if self.cv_predictions:
             self.cv_predictions = pd.concat(self.cv_predictions, ignore_index=True)
         return df_agg
+
+    def _suppress_uninterpretable_increments(self):
+        """
+        NaN out the increment for metrics whose difference is not a statistic.
+
+        `increment` subtracts one metric from another, which only means
+        something for metrics where differences are themselves standard --
+        see `constants.INCREMENTABLE_METRICS`. Subtracting two Pearson
+        correlations, in particular, is not a comparison of correlations; that
+        needs Fisher z or Steiger's test. Reporting it anyway produces a number
+        readers will interpret, so it is written as NaN instead.
+        """
+        for metric in Metrics:
+            if metric not in INCREMENTABLE_METRICS:
+                self.results[metric, Models.increment] = float('nan')
 
     def aggregate_inner_folds(self):
         """

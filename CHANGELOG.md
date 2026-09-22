@@ -30,20 +30,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   filter looked for structural zeros in residualised values, where they no longer
   exist. That interaction warning is gone with the cause.
 
-### Deprecated
-- `UnivariateEdgeSelection(edge_statistic=...)`, including the values
-  `'pearson_partial'`, `'spearman_partial'`, `'point_biserial'` and
-  `'point_biserial_partial'`. They map onto the new pair and remain numerically
-  identical for one release (verified exactly, not approximately).
-  `'point_biserial'` was never a separate statistic — Pearson against a 0/1 target
-  *is* the point-biserial correlation.
-- `CPMAnalysis(calculate_residuals=...)`. It controlled both selection and the model
-  input, so `True` now sets `selection_input='residualized'` and
-  `model_input='residualized'` together. **One behaviour change when migrating:** edge
-  selection now uses the coefficient test rather than an ordinary correlation against
-  the raw target, so the selected edge sets change. The old path's effective alpha
-  shrank as confounding grew (measured 5.1% -> 3.3% -> 2.1% at nominal 5%); the new one
-  is nominal at every confound level.
+### Removed
+No deprecation shims: this release changes what some parameters *mean*, and code
+that keeps running while quietly producing different numbers is worse than code that
+stops. Every removal raises with its replacement named.
+
+- `UnivariateEdgeSelection(edge_statistic=...)`. `'pearson'` and `'spearman'` carry
+  over unchanged as `selection_statistic`; the rest map as
+  `'point_biserial'` -> `selection_statistic='pearson'`,
+  `'pearson_partial'`/`'spearman_partial'`/`'point_biserial_partial'` -> the same
+  statistic with `selection_input='residualized'`. `'point_biserial'` was never a
+  separate statistic — Pearson against a 0/1 target *is* the point-biserial
+  correlation.
+- `CPMAnalysis(calculate_residuals=...)`. Use `selection_input='residualized'` with
+  `model_input='residualized'`. **Edge sets change**: the old path selected with a
+  plain correlation on residualised edges, whose effective alpha shrank as
+  confounding grew (measured 5.1% -> 3.3% -> 2.1% at nominal 5%); the new one is
+  nominal at every confound level.
+- `Models.residuals`, as described above.
+
+- **`increment` is no longer reported for metrics whose difference is not a
+  statistic.** It is a difference of two metrics, which only means something where
+  differences of that quantity are standard: explained variance, the error metrics
+  (as error reduction), accuracy, balanced accuracy and ROC AUC. It is now NaN for
+  **Pearson r** — comparing two correlations needs Fisher z or Steiger's test, not
+  subtraction — and for **F1**, a harmonic mean whose difference has no established
+  interpretation. See `constants.INCREMENTABLE_METRICS`.
+- Report tables render a deliberate NaN as an em dash rather than the string `nan`.
 
 ### Added
 - Vanilla CPM without covariates: `covariates` is optional in `CPMAnalysis.run`. Only

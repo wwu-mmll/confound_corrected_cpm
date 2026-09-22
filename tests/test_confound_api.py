@@ -42,12 +42,13 @@ def _stat(**kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Deprecated spellings must be exactly the new ones, not approximately
+# The removed 0.6.x spellings must fail loudly, with the migration in the message
 # ---------------------------------------------------------------------------
 
-LEGACY = [
-    ('pearson',                'pearson',  'raw'),
-    ('spearman',               'spearman', 'raw'),
+# Only the values that no longer mean anything as a `selection_statistic`.
+# 'pearson' and 'spearman' were `edge_statistic` values too and carry over
+# unchanged, so they must keep working rather than raise.
+REMOVED = [
     ('point_biserial',         'pearson',  'raw'),
     ('pearson_partial',        'pearson',  'residualized'),
     ('spearman_partial',       'spearman', 'residualized'),
@@ -55,23 +56,45 @@ LEGACY = [
 ]
 
 
-@pytest.mark.parametrize("legacy,statistic,selection_input", LEGACY)
-def test_deprecated_edge_statistic_is_numerically_identical(
-        legacy, statistic, selection_input):
-    with pytest.deprecated_call():
-        r_old, p_old = _stat(edge_statistic=legacy)
-    r_new, p_new = _stat(selection_statistic=statistic,
-                         selection_input=selection_input)
-    np.testing.assert_array_equal(r_old, r_new)
-    np.testing.assert_array_equal(p_old, p_new)
+@pytest.mark.parametrize("removed,statistic,selection_input", REMOVED)
+def test_removed_edge_statistic_values_name_their_replacement(
+        removed, statistic, selection_input):
+    """`edge_statistic` is gone rather than deprecated: 'pearson' etc. were
+    numerically identical to the new spelling, but `calculate_residuals` and the
+    `*_partial` values changed *meaning*, and code that keeps running while
+    quietly producing different numbers is worse than code that stops."""
+    with pytest.raises(ValueError) as excinfo:
+        EdgeStatistic(selection_statistic=removed)
+    message = str(excinfo.value)
+    assert f"selection_statistic={statistic!r}" in message
+    assert f"selection_input={selection_input!r}" in message
+    if selection_input == 'residualized':
+        assert "coefficient test" in message, (
+            "migrating a *_partial value must warn that edge sets differ")
 
 
-def test_deprecation_warning_names_the_replacement():
-    with pytest.warns(DeprecationWarning) as record:
-        EdgeStatistic(edge_statistic='pearson_partial')
-    message = str(record[0].message)
-    assert "selection_statistic='pearson'" in message
-    assert "selection_input='residualized'" in message
+@pytest.mark.parametrize("carried_over", ["pearson", "spearman"])
+def test_values_that_carry_over_still_work(carried_over):
+    """'pearson'/'spearman' meant the same thing under the old name; they are
+    valid selection_statistic values and must not be mistaken for removals."""
+    EdgeStatistic(selection_statistic=carried_over)
+
+
+def test_removed_keyword_arguments_are_gone():
+    """`edge_statistic` is not accepted at all -- no silent pass-through."""
+    with pytest.raises(TypeError, match="edge_statistic"):
+        EdgeStatistic(edge_statistic='pearson')
+    with pytest.raises(TypeError, match="edge_statistic"):
+        UnivariateEdgeSelection(edge_statistic='pearson')
+
+
+def test_calculate_residuals_is_gone(tmp_path):
+    ue = UnivariateEdgeSelection(
+        selection_statistic="pearson",
+        edge_selection=[PThreshold(threshold=0.05, correction=[None])])
+    with pytest.raises(TypeError):
+        CPMAnalysis(results_directory=str(tmp_path), cv=KFold(n_splits=3),
+                    edge_selection=ue, calculate_residuals=True, n_permutations=0)
 
 
 def test_unknown_values_are_rejected():
@@ -79,21 +102,6 @@ def test_unknown_values_are_rejected():
         EdgeStatistic(selection_statistic='kendall')
     with pytest.raises(ValueError, match="selection_input must be one of"):
         EdgeStatistic(selection_input='deconfounded')
-    with pytest.raises(ValueError, match="Unknown edge_statistic"):
-        EdgeStatistic(edge_statistic='pearson_semipartial')
-
-
-def test_calculate_residuals_is_deprecated_onto_both_knobs(tmp_path):
-    """It controlled selection *and* the model input, so it maps onto both."""
-    ue = UnivariateEdgeSelection(
-        selection_statistic="pearson",
-        edge_selection=[PThreshold(threshold=0.05, correction=[None])])
-    with pytest.warns(DeprecationWarning, match="model_input='residualized'"):
-        cpm = CPMAnalysis(results_directory=str(tmp_path),
-                          cv=KFold(n_splits=3), edge_selection=ue,
-                          calculate_residuals=True, n_permutations=0)
-    assert ue.statistic._input == 'residualized'
-    assert cpm.model_input == 'residualized'
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +187,10 @@ def _run(tmp_path, selection_input, model_input, n=200):
         n_permutations=0, task_type="regression")
     cpm.run(X=X, y=y.ravel(), covariates=Z)
     ag = cpm.results_manager.agg_results
-    return {m: float(np.ravel(ag.loc[(m, "both"), ("pearson_score", "mean")])[0])
+    # explained_variance rather than pearson: `increment` is deliberately NaN
+    # for Pearson r, since a difference of correlations is not a statistic.
+    return {m: float(np.ravel(
+                ag.loc[(m, "both"), ("explained_variance_score", "mean")])[0])
             for m in ("connectome", "covariates", "full", "increment")}
 
 

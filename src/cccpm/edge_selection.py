@@ -7,7 +7,6 @@ structural filters (presence, connected components), and the
 `UnivariateEdgeSelection` facade that expands a user's configuration into the
 parameter grid the inner CV iterates over.
 """
-import warnings
 from typing import Union
 
 import numpy as np
@@ -240,13 +239,9 @@ class PThreshold(BaseEdgeSelector):
 SELECTION_STATISTICS = ('pearson', 'spearman')
 SELECTION_INPUTS = ('raw', 'residualized')
 
-# Legacy ``edge_statistic`` value -> (selection_statistic, selection_input).
-#
-# The six old values were really a 2x2 (plus two aliases): which correlation,
-# and whether the confounds are controlled for. ``point_biserial`` was never a
-# separate statistic -- it is Pearson against a 0/1 target, which the unified
-# OLS path already handles with no special-casing.
-_LEGACY_EDGE_STATISTICS = {
+# How the removed ``edge_statistic`` values map onto the current pair. Used only
+# to write a helpful error; see `resolve_selection_spec`.
+_REMOVED_EDGE_STATISTICS = {
     'pearson': ('pearson', 'raw'),
     'spearman': ('spearman', 'raw'),
     'point_biserial': ('pearson', 'raw'),
@@ -256,30 +251,29 @@ _LEGACY_EDGE_STATISTICS = {
 }
 
 
-def resolve_selection_spec(selection_statistic, selection_input, edge_statistic):
+def resolve_selection_spec(selection_statistic, selection_input):
     """
-    Resolve the edge-selection specification, honouring the deprecated
-    ``edge_statistic`` argument for one release.
+    Validate the edge-selection specification.
 
     Returns ``(selection_statistic, selection_input)``.
     """
-    if edge_statistic is not None:
-        if edge_statistic not in _LEGACY_EDGE_STATISTICS:
-            raise ValueError(
-                f"Unknown edge_statistic {edge_statistic!r}. Valid values were "
-                f"{sorted(_LEGACY_EDGE_STATISTICS)}; this parameter is deprecated, "
-                f"use selection_statistic and selection_input instead."
-            )
-        statistic, selection = _LEGACY_EDGE_STATISTICS[edge_statistic]
-        warnings.warn(
-            f"edge_statistic={edge_statistic!r} is deprecated and will be removed "
-            f"in a future release. Use selection_statistic={statistic!r}, "
-            f"selection_input={selection!r} instead.",
-            DeprecationWarning, stacklevel=3,
-        )
-        return statistic, selection
-
     if selection_statistic not in SELECTION_STATISTICS:
+        # 'pearson' and 'spearman' are valid here and were also `edge_statistic`
+        # values meaning the same thing, so they are not caught above. What lands
+        # here is a value that only ever made sense as `edge_statistic` -- point
+        # the user at the pair that replaced it.
+        if selection_statistic in _REMOVED_EDGE_STATISTICS:
+            statistic, selection = _REMOVED_EDGE_STATISTICS[selection_statistic]
+            raise ValueError(
+                f"{selection_statistic!r} was an `edge_statistic` value, which "
+                f"was removed in 0.7.0. Use selection_statistic={statistic!r} "
+                f"with selection_input={selection!r} instead."
+                + ("" if selection == 'raw' else
+                   " Note that confound-controlled selection now uses the "
+                   "per-edge coefficient test (df = N - 2 - C) rather than a "
+                   "plain correlation against the raw target, so edge sets "
+                   "differ from 0.6.x.")
+            )
         raise ValueError(
             f"selection_statistic must be one of {SELECTION_STATISTICS}, "
             f"got {selection_statistic!r}."
@@ -326,16 +320,12 @@ class EdgeStatistic(BaseEstimator):
 
     def __init__(self, selection_statistic: str = 'spearman',
                  selection_input: str = 'raw',
-                 presence_filter: Union[bool, float] = False,
-                 edge_statistic: str = None):
-        # Stored verbatim for sklearn's get_params contract; the resolved pair
-        # lives in the private attributes below.
+                 presence_filter: Union[bool, float] = False):
         self.selection_statistic = selection_statistic
         self.selection_input = selection_input
         self.presence_filter = presence_filter
-        self.edge_statistic = edge_statistic
         self._statistic, self._input = resolve_selection_spec(
-            selection_statistic, selection_input, edge_statistic)
+            selection_statistic, selection_input)
 
     def fit_transform(self,
                       X,
@@ -411,15 +401,6 @@ class UnivariateEdgeSelection(BaseEstimator):
         coefficient's p-value (``df = N - 2 - C``) -- so a ``p < 0.05``
         threshold means a 5% per-edge false-positive rate whatever the
         confounding. It requires covariates.
-    edge_statistic: str, default=None
-        .. deprecated::
-            Use ``selection_statistic`` and ``selection_input``. The old values
-            map as: ``'pearson'``/``'spearman'`` -> ``selection_input='raw'``;
-            ``'pearson_partial'``/``'spearman_partial'`` ->
-            ``selection_input='residualized'``; ``'point_biserial'`` ->
-            ``'pearson'`` with ``'raw'`` (and ``'point_biserial_partial'`` ->
-            ``'pearson'`` with ``'residualized'``). This parameter will be
-            removed in a future release.
     presence_filter: bool or float, default=False
         Optional pre-filter that keeps only edges which are nonzero in at least a
         given fraction of subjects, dropping structural/near-zero edges before
@@ -447,19 +428,16 @@ class UnivariateEdgeSelection(BaseEstimator):
                  selection_input: str = 'raw',
                  presence_filter: Union[bool, float] = False,
                  connected_components: Union[bool, int] = False,
-                 edge_selection: Union[list, None, PThreshold] = None,
-                 edge_statistic: str = None):
+                 edge_selection: Union[list, None, PThreshold] = None):
         self.r_edges = None
         self.p_edges = None
         self.selection_statistic = selection_statistic
         self.selection_input = selection_input
         self.presence_filter = presence_filter
         self.connected_components = connected_components
-        self.edge_statistic = edge_statistic
         self.statistic = EdgeStatistic(selection_statistic=selection_statistic,
                                        selection_input=selection_input,
-                                       presence_filter=presence_filter,
-                                       edge_statistic=edge_statistic)
+                                       presence_filter=presence_filter)
         self.edge_selection = edge_selection
         if isinstance(edge_selection, (list, tuple)):
             self.edge_selection = edge_selection

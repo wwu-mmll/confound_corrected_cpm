@@ -43,8 +43,19 @@ def format_results_table(df, precision=2):
         std = df[(metric, "std")]
         p = df[(metric, "p")]
 
-        # Format mean [std]
-        summary_col = mean.round(precision).astype(str) + " [" + std.round(precision).astype(str) + "]"
+        # Format mean [std]. NaN means "not applicable", not "missing": the
+        # increment of a metric whose difference is not a statistic (Pearson r,
+        # F1) is deliberately not computed, and a model variant that a run does
+        # not define is NaN-filled. An em dash says that; "nan" does not.
+        def summary_string(row):
+            if pd.isna(row["mean"]):
+                return "\u2014"
+            if pd.isna(row["std"]):
+                return f"{row['mean']:.{precision}f}"
+            return f"{row['mean']:.{precision}f} [{row['std']:.{precision}f}]"
+
+        summary_col = pd.DataFrame({"mean": mean, "std": std}).apply(
+            summary_string, axis=1)
 
         # Annotate p-values with asterisks (we'll apply bold via styling)
         def p_string(val):

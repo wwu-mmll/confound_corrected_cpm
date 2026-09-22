@@ -94,7 +94,7 @@ class TestRegressionGroundTruth:
         X, y, covariates, pos_idx, neg_idx = regression_data
 
         edge_selection = UnivariateEdgeSelection(
-            edge_statistic='pearson',
+            selection_statistic='pearson',
             edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
         )
 
@@ -240,7 +240,7 @@ class TestClassificationGroundTruth:
         X, y, covariates, pos_idx, neg_idx = classification_data
 
         edge_selection = UnivariateEdgeSelection(
-            edge_statistic='pearson',
+            selection_statistic='pearson',
             edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
         )
 
@@ -333,7 +333,7 @@ class TestEdgeSelectionStatistics:
         y = (X[:, 0] * 2.0 + rng.randn(n_samples) * 0.3).astype(np.float32).reshape(-1, 1)
 
         edge_sel = UnivariateEdgeSelection(
-            edge_statistic='pearson',
+            selection_statistic='pearson',
             edge_selection=[PThreshold(threshold=[0.01], correction=[None])]
         )
         # set_params to configure the edge_selection as a single selector (as the pipeline does)
@@ -362,7 +362,7 @@ class TestEdgeSelectionStatistics:
         y = (-X[:, 0] * 2.0 + rng.randn(n_samples) * 0.3).astype(np.float32).reshape(-1, 1)
 
         edge_sel = UnivariateEdgeSelection(
-            edge_statistic='pearson',
+            selection_statistic='pearson',
             edge_selection=[PThreshold(threshold=[0.01], correction=[None])]
         )
         edge_sel.set_params(**list(edge_sel.param_grid)[0])

@@ -113,7 +113,7 @@ class TestNonLinearModelsWithPipeline:
         X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=60, n_features=45)
 
         edge_selection = UnivariateEdgeSelection(
-            edge_statistic='pearson',
+            selection_statistic='pearson',
             edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
         )
 

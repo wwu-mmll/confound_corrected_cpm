@@ -77,6 +77,35 @@ CLASSIFICATION_METRICS = [
     Metrics.roc_auc
 ]
 
+# Metrics for which `increment` (full - covariates) is a meaningful number.
+#
+# `increment` is a *difference of two metrics*, which is only interpretable when
+# differences of that quantity are themselves a standard statistic:
+#
+#   explained variance   difference of R^2 -- the squared semipartial correlation
+#   MSE / MAE            error reduction (negative when the connectome helps)
+#   accuracy             difference of proportions
+#   balanced accuracy    difference of a mean of two proportions
+#   ROC AUC              difference of AUCs (as in a DeLong comparison)
+#
+# Excluded:
+#
+#   Pearson r            a difference of two correlations is not a standard
+#                        statistic; comparing correlations needs Fisher z or
+#                        Steiger's test, not subtraction
+#   F1                   a harmonic mean of precision and recall, whose
+#                        difference has no established interpretation
+#
+# The excluded slots are written as NaN rather than a plausible-looking number.
+INCREMENTABLE_METRICS = [
+    Metrics.explained_variance_score,
+    Metrics.mean_squared_error,
+    Metrics.mean_absolute_error,
+    Metrics.accuracy,
+    Metrics.balanced_accuracy,
+    Metrics.roc_auc,
+]
+
 # Metric names for display
 METRIC_NAMES = {
     Metrics.explained_variance_score: "Explained Variance",

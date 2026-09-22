@@ -89,23 +89,6 @@ def test_residualized_selection_without_covariates_raises(tmp_path):
         cpm.run(X=X, y=y)
 
 
-@pytest.mark.parametrize("statistic", ["pearson_partial", "spearman_partial",
-                                       "point_biserial_partial"])
-def test_deprecated_partial_statistic_without_covariates_raises(tmp_path, statistic):
-    """The deprecated spelling must fail just as clearly as the new one."""
-    X, y, _ = _data()
-    with pytest.warns(DeprecationWarning):
-        ue = UnivariateEdgeSelection(
-            edge_statistic=statistic,
-            edge_selection=[PThreshold(threshold=0.05, correction=[None])])
-    cpm = CPMAnalysis(
-        results_directory=str(tmp_path),
-        cv=KFold(n_splits=3, shuffle=True, random_state=0),
-        edge_selection=ue, n_permutations=0, task_type="regression")
-    with pytest.raises(ValueError, match="require covariates"):
-        cpm.run(X=X, y=y)
-
-
 def test_error_names_the_offending_parameter(tmp_path):
     """A user has to be able to tell which argument to change."""
     X, y, _ = _data()
@@ -198,6 +181,8 @@ def test_run_without_covariates_end_to_end(tmp_path, binary):
     for name in ("covariates", "full", "increment"):
         assert np.isnan(np.ravel(ag.loc[(name, "both"), (metric, "mean")])).all(), name
 
+    # NaN means "not applicable" and must never reach the reader as "nan":
+    # the same formatting path also carries the suppressed Pearson increment.
     # The report renders, and says nothing about models that do not exist.
     report = os.path.join(str(tmp_path), 'report.html')
     assert os.path.exists(report)

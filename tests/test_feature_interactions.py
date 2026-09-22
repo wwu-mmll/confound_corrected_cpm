@@ -31,6 +31,7 @@ import torch
 from sklearn.model_selection import KFold, ShuffleSplit
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
+from cccpm.constants import INCREMENTABLE_METRICS, Metrics
 from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 
@@ -41,7 +42,7 @@ def tiny_data():
     return X, np.asarray(y).ravel(), covariates
 
 
-def _build(results_dir, *, inner_cv, calculate_residuals, connected_components,
+def _build(results_dir, *, inner_cv, model_input, connected_components,
            presence_filter, n_permutations=0):
     thresholds = [0.05, 0.1] if inner_cv else [0.05]
     return CPMAnalysis(
@@ -49,11 +50,11 @@ def _build(results_dir, *, inner_cv, calculate_residuals, connected_components,
         cv=KFold(n_splits=3, shuffle=True, random_state=42),
         inner_cv=ShuffleSplit(n_splits=2, test_size=0.3, random_state=42) if inner_cv else None,
         edge_selection=UnivariateEdgeSelection(
-            edge_statistic='pearson',
+            selection_statistic='pearson',
             presence_filter=presence_filter,
             connected_components=connected_components,
             edge_selection=[PThreshold(threshold=thresholds, correction=[None])]),
-        calculate_residuals=calculate_residuals,
+        model_input=model_input,
         n_permutations=n_permutations,
         impute_missing_values=True,
         device='cpu',
@@ -62,14 +63,15 @@ def _build(results_dir, *, inner_cv, calculate_residuals, connected_components,
 
 # Every combination of the four optional features: 2^4 = 16 runs.
 @pytest.mark.parametrize(
-    "inner_cv,calculate_residuals,connected_components,presence_filter",
-    list(itertools.product([False, True], repeat=4)),
+    "inner_cv,model_input,connected_components,presence_filter",
+    list(itertools.product([False, True], ['raw', 'residualized'],
+                           [False, True], [False, True])),
 )
 def test_feature_combinations_run_and_produce_results(
-        tmp_path, tiny_data, inner_cv, calculate_residuals,
+        tmp_path, tiny_data, inner_cv, model_input,
         connected_components, presence_filter):
     X, y, covariates = tiny_data
-    cpm = _build(tmp_path, inner_cv=inner_cv, calculate_residuals=calculate_residuals,
+    cpm = _build(tmp_path, inner_cv=inner_cv, model_input=model_input,
                  connected_components=connected_components,
                  presence_filter=presence_filter)
     cpm.run(X=X, y=y, covariates=covariates)
@@ -78,9 +80,20 @@ def test_feature_combinations_run_and_produce_results(
     assert results is not None
 
     # Aggregated metrics must be finite -- a silently broken combination tends to
-    # surface as NaN rather than as an exception.
+    # surface as NaN rather than as an exception. The one exception is by design:
+    # `increment` is NaN for metrics whose difference is not a statistic (see
+    # constants.INCREMENTABLE_METRICS), so drop those cells rather than weaken
+    # the guard everywhere else.
     agg = results.agg_results
-    assert agg.notna().all().all(), "aggregated results contain NaN"
+    suppressed = [m.name for m in Metrics if m not in INCREMENTABLE_METRICS]
+    checked = agg.drop(index="increment", level="model")
+    assert checked.notna().all().all(), "aggregated results contain NaN"
+
+    increment = agg.xs("increment", level="model")
+    kept = increment.loc[:, [c for c in increment.columns if c[0] not in suppressed]]
+    assert kept.notna().all().all(), "increment contains unexpected NaN"
+    dropped = increment.loc[:, [c for c in increment.columns if c[0] in suppressed]]
+    assert dropped.isna().all().all(), "increment should be NaN for these metrics"
 
     # Edge stability is a fraction of folds, so it must lie in [0, 1].
     stability = results.calculate_edge_stability(write=False)
@@ -116,7 +129,7 @@ def test_connected_components_survives_stable_edge_selection(tmp_path, tiny_data
             cv=KFold(n_splits=3, shuffle=True, random_state=42),
             inner_cv=ShuffleSplit(n_splits=2, test_size=0.3, random_state=42),
             edge_selection=UnivariateEdgeSelection(
-                edge_statistic='pearson',
+                selection_statistic='pearson',
                 connected_components=connected_components,
                 edge_selection=[PThreshold(threshold=[0.05, 0.1], correction=[None])]),
             select_stable_edges=True, stability_threshold=0.0,
@@ -155,7 +168,7 @@ def test_presence_filter_is_applied_end_to_end(tmp_path):
     y = X[:, n_features // 2:].sum(axis=1) + rng.normal(size=n_samples) * 0.1
     covariates = rng.normal(size=(n_samples, 2)).astype(np.float32)
 
-    cpm = _build(tmp_path, inner_cv=False, calculate_residuals=False,
+    cpm = _build(tmp_path, inner_cv=False, model_input='raw',
                  connected_components=False, presence_filter=0.9)
     cpm.run(X=X, y=y, covariates=covariates)
 
