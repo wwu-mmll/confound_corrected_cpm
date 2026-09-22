@@ -69,7 +69,7 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
 
         # r/p don't depend on the selection threshold, so they are computed once
         # per fold and reused across every parameter group below.
-        r_edges, p_edges = edge_selection.edge_statistic.fit_transform(
+        r_edges, p_edges = edge_selection.statistic.fit_transform(
             X=X_train, y=y_train, covariates=cov_train, device=device)
 
         for group in param_groups:

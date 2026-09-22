@@ -7,8 +7,10 @@ structural filters (presence, connected components), and the
 `UnivariateEdgeSelection` facade that expands a user's configuration into the
 parameter grid the inner CV iterates over.
 """
-import numpy as np
+import warnings
 from typing import Union
+
+import numpy as np
 
 import networkx as nx
 import torch
@@ -235,11 +237,105 @@ class PThreshold(BaseEdgeSelector):
         return torch.stack([pos_mask, neg_mask], dim=1)
 
 
+SELECTION_STATISTICS = ('pearson', 'spearman')
+SELECTION_INPUTS = ('raw', 'residualized')
+
+# Legacy ``edge_statistic`` value -> (selection_statistic, selection_input).
+#
+# The six old values were really a 2x2 (plus two aliases): which correlation,
+# and whether the confounds are controlled for. ``point_biserial`` was never a
+# separate statistic -- it is Pearson against a 0/1 target, which the unified
+# OLS path already handles with no special-casing.
+_LEGACY_EDGE_STATISTICS = {
+    'pearson': ('pearson', 'raw'),
+    'spearman': ('spearman', 'raw'),
+    'point_biserial': ('pearson', 'raw'),
+    'pearson_partial': ('pearson', 'residualized'),
+    'spearman_partial': ('spearman', 'residualized'),
+    'point_biserial_partial': ('pearson', 'residualized'),
+}
+
+
+def resolve_selection_spec(selection_statistic, selection_input, edge_statistic):
+    """
+    Resolve the edge-selection specification, honouring the deprecated
+    ``edge_statistic`` argument for one release.
+
+    Returns ``(selection_statistic, selection_input)``.
+    """
+    if edge_statistic is not None:
+        if edge_statistic not in _LEGACY_EDGE_STATISTICS:
+            raise ValueError(
+                f"Unknown edge_statistic {edge_statistic!r}. Valid values were "
+                f"{sorted(_LEGACY_EDGE_STATISTICS)}; this parameter is deprecated, "
+                f"use selection_statistic and selection_input instead."
+            )
+        statistic, selection = _LEGACY_EDGE_STATISTICS[edge_statistic]
+        warnings.warn(
+            f"edge_statistic={edge_statistic!r} is deprecated and will be removed "
+            f"in a future release. Use selection_statistic={statistic!r}, "
+            f"selection_input={selection!r} instead.",
+            DeprecationWarning, stacklevel=3,
+        )
+        return statistic, selection
+
+    if selection_statistic not in SELECTION_STATISTICS:
+        raise ValueError(
+            f"selection_statistic must be one of {SELECTION_STATISTICS}, "
+            f"got {selection_statistic!r}."
+        )
+    if selection_input not in SELECTION_INPUTS:
+        raise ValueError(
+            f"selection_input must be one of {SELECTION_INPUTS}, "
+            f"got {selection_input!r}."
+        )
+    return selection_statistic, selection_input
+
+
 class EdgeStatistic(BaseEstimator):
-    def __init__(self, edge_statistic: str = 'spearman',
-                 presence_filter: Union[bool, float] = False):
-        self.edge_statistic = edge_statistic
+    """
+    The per-edge statistic used to rank and threshold edges.
+
+    Two independent choices:
+
+    ``selection_statistic``
+        ``'pearson'`` or ``'spearman'``. A binary 0/1 target through the Pearson
+        path *is* the point-biserial correlation, so it needs no separate value.
+
+    ``selection_input``
+        ``'raw'`` ignores the covariates. ``'residualized'`` controls for them:
+        one regression per edge, ``y ~ 1 + Z + edge``, reporting the semipartial
+        correlation as the effect size and the coefficient's p-value with
+        ``df = N - 2 - C``.
+
+    On ``'residualized'``: the effect size is reported as the *semipartial*
+    correlation -- the edge's unique contribution as a share of the total
+    variance of y -- because that denominator stays comparable across analyses.
+    The partial correlation is the same effect on a denominator that shrinks
+    with how confounded y is. They are monotone transforms of each other within
+    a fold (verified: rank correlation exactly 1.0), so the choice affects what
+    is printed, never which edges are selected. Both come from one regression,
+    which is where the p-value comes from too.
+
+    For Spearman the ranking happens *first*, including on the confounds, and
+    the residualisation follows -- the conventional "rank, then partial"
+    definition. The reverse order does not work: ranking is nonlinear, so
+    ranking a residualised edge puts the confound signal back in (measured:
+    11.9 versus 6.5e-13 of residual confound signal).
+    """
+
+    def __init__(self, selection_statistic: str = 'spearman',
+                 selection_input: str = 'raw',
+                 presence_filter: Union[bool, float] = False,
+                 edge_statistic: str = None):
+        # Stored verbatim for sklearn's get_params contract; the resolved pair
+        # lives in the private attributes below.
+        self.selection_statistic = selection_statistic
+        self.selection_input = selection_input
         self.presence_filter = presence_filter
+        self.edge_statistic = edge_statistic
+        self._statistic, self._input = resolve_selection_spec(
+            selection_statistic, selection_input, edge_statistic)
 
     def fit_transform(self,
                       X,
@@ -268,41 +364,30 @@ class EdgeStatistic(BaseEstimator):
         # real signed distribution around a mean of ~0. Uses X only (no target),
         # computed here on the training subjects, so it adds no leakage. This is
         # additive to the variance gate above, which already drops all-zero edges.
+        # It always sees the raw connectome: confound control happens inside the
+        # statistic below, never by residualising X before this point.
         presence_threshold = resolve_presence_threshold(self.presence_filter)
         if presence_threshold is not None:
             presence = (X != 0).float().mean(dim=0)
             valid_edges = valid_edges & (presence >= presence_threshold)
 
-        if self.edge_statistic == 'pearson':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
-                                                                      correlation_type='pearson')
-        elif self.edge_statistic == 'spearman':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
-                                                                      correlation_type='spearman')
-        elif self.edge_statistic == 'pearson_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
-                                                                      confounds=covariates,
-                                                                      correlation_type='pearson')
-        elif self.edge_statistic == 'spearman_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
-                                                                      confounds=covariates,
-                                                                      correlation_type='spearman')
-        elif self.edge_statistic == 'point_biserial':
-            # Point-biserial is Pearson against a binary 0/1 target; the unified
-            # OLS path handles it with no special-casing.
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
-                                                                      correlation_type='pearson')
-        elif self.edge_statistic == 'point_biserial_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X, Y_perms=y,
-                                                                      confounds=covariates,
-                                                                      correlation_type='pearson')
-        else:
-            raise NotImplementedError("Unsupported edge selection method")
+        confounds = covariates if self._input == 'residualized' else None
+        if confounds is None and self._input == 'residualized':
+            raise ValueError(
+                "selection_input='residualized' requires covariates, but none "
+                "were supplied. Use selection_input='raw' for an analysis "
+                "without confound control."
+            )
+        r_edges_masked, p_edges_masked = correlations_and_pvalues(
+            X=X, Y_perms=y, confounds=confounds,
+            correlation_type=self._statistic)
+
         # no dynamic shape change
         mask = valid_edges.to(r_edges_masked.dtype).unsqueeze(1)
         r_edges = r_edges_masked.to(r_edges.dtype) * mask
         p_edges = p_edges_masked.to(p_edges.dtype) * mask + (1.0 - mask)
         return r_edges, p_edges
+
 
 class UnivariateEdgeSelection(BaseEstimator):
     """
@@ -315,12 +400,26 @@ class UnivariateEdgeSelection(BaseEstimator):
 
     Parameters
     ----------
-    edge_statistic: str, default='spearman'
-        Correlation statistic used to relate each edge to the target. One of
-        ``'pearson'``, ``'spearman'``, ``'pearson_partial'``, ``'spearman_partial'``
-        (continuous target), or ``'point_biserial'`` / ``'point_biserial_partial'``
-        (binary target). The ``*_partial`` variants control for the covariates
-        during selection.
+    selection_statistic: str, default='spearman'
+        Correlation used to relate each edge to the target: ``'pearson'`` or
+        ``'spearman'``. A binary 0/1 target through the Pearson path is the
+        point-biserial correlation, so it needs no separate value.
+    selection_input: str, default='raw'
+        Whether edge selection controls for the covariates. ``'raw'`` ignores
+        them. ``'residualized'`` fits one regression per edge,
+        ``y ~ 1 + Z + edge``, reporting the semipartial correlation and the
+        coefficient's p-value (``df = N - 2 - C``) -- so a ``p < 0.05``
+        threshold means a 5% per-edge false-positive rate whatever the
+        confounding. It requires covariates.
+    edge_statistic: str, default=None
+        .. deprecated::
+            Use ``selection_statistic`` and ``selection_input``. The old values
+            map as: ``'pearson'``/``'spearman'`` -> ``selection_input='raw'``;
+            ``'pearson_partial'``/``'spearman_partial'`` ->
+            ``selection_input='residualized'``; ``'point_biserial'`` ->
+            ``'pearson'`` with ``'raw'`` (and ``'point_biserial_partial'`` ->
+            ``'pearson'`` with ``'residualized'``). This parameter will be
+            removed in a future release.
     presence_filter: bool or float, default=False
         Optional pre-filter that keeps only edges which are nonzero in at least a
         given fraction of subjects, dropping structural/near-zero edges before
@@ -329,10 +428,10 @@ class UnivariateEdgeSelection(BaseEstimator):
         structural connectomes (e.g. DTI streamline counts); leave off
         (``False``) for functional data, whose edges have a real signed
         distribution around a mean of ~0. Computed per fold on the training
-        subjects from the connectome only, so it adds no target leakage. Note:
-        with ``CPMAnalysis(calculate_residuals=True)`` the connectome is
-        residualized before selection, so the filter then sees residualized (not
-        raw) values.
+        subjects from the connectome only, so it adds no target leakage. It
+        always sees the raw connectome, including under
+        ``selection_input='residualized'`` -- confound control now happens
+        inside the statistic rather than by residualising X beforehand.
     connected_components: bool or int, default=False
         If set, keep only selected edges that belong to a connected component
         with at least this many edges (per positive/negative network), dropping
@@ -344,16 +443,23 @@ class UnivariateEdgeSelection(BaseEstimator):
         configurations to tune them via an inner CV.
     """
     def __init__(self,
-                 edge_statistic: str = 'spearman',
+                 selection_statistic: str = 'spearman',
+                 selection_input: str = 'raw',
                  presence_filter: Union[bool, float] = False,
                  connected_components: Union[bool, int] = False,
-                 edge_selection: Union[list, None, PThreshold] = None):
+                 edge_selection: Union[list, None, PThreshold] = None,
+                 edge_statistic: str = None):
         self.r_edges = None
         self.p_edges = None
+        self.selection_statistic = selection_statistic
+        self.selection_input = selection_input
         self.presence_filter = presence_filter
         self.connected_components = connected_components
-        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic,
-                                            presence_filter=presence_filter)
+        self.edge_statistic = edge_statistic
+        self.statistic = EdgeStatistic(selection_statistic=selection_statistic,
+                                       selection_input=selection_input,
+                                       presence_filter=presence_filter,
+                                       edge_statistic=edge_statistic)
         self.edge_selection = edge_selection
         if isinstance(edge_selection, (list, tuple)):
             self.edge_selection = edge_selection
@@ -372,7 +478,7 @@ class UnivariateEdgeSelection(BaseEstimator):
         return ParameterGrid(grid_elements)
 
     def fit_transform(self, X, y=None, covariates=None, device=torch.device('cpu')):
-        self.r_edges, self.p_edges = self.edge_statistic.fit_transform(X=X, y=y, covariates=covariates, device=device)
+        self.r_edges, self.p_edges = self.statistic.fit_transform(X=X, y=y, covariates=covariates, device=device)
         return self
 
     def return_selected_edges(self, thresholds=None):

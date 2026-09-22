@@ -52,7 +52,7 @@ mkdocs build
 | `models/linear_model.py` | `LinearCPM` — PyTorch linear/logistic regression with Cholesky solver |
 | `models/nonlinear_models.py` | `DecisionTreeCPM` / `RandomForestCPM` / `GAMCPM` — alternative CPM model backends |
 | `statistics.py` | The edge statistic itself — one vectorised OLS GLM covering Pearson/Spearman/point-biserial and their partial variants, plus ranks, residualisation and Bonferroni |
-| `edge_selection.py` | `UnivariateEdgeSelection` / `PThreshold` — p-value thresholding, presence and connected-component filters, parameter grid |
+| `edge_selection.py` | `UnivariateEdgeSelection` / `PThreshold` / `EdgeStatistic` — the `selection_statistic` x `selection_input` confound choice, p-value thresholding, presence and connected-component filters, parameter grid |
 | `scoring.py` | `FastCPMMetrics` / `FastCPMClassificationMetrics` — GPU-accelerated metrics |
 | `inner_fold.py` | Inner CV for hyperparameter optimization |
 | `results_manager.py` | `ResultsManager` — preallocated accumulation of per-fold results |
@@ -80,7 +80,23 @@ Passing `covariates=None` to `CPMAnalysis.run` is vanilla CPM: only **connectome
 defined, the other variants are NaN-filled (the results tensor keeps its full shape),
 and `available_models.json` in the results directory tells the report which model rows
 carry a real number. Options that presuppose covariates (`*_partial` edge statistics,
-`calculate_residuals=True`) raise up front.
+`selection_input='residualized'`) raise up front.
+
+### Confound control
+
+Two independent choices, not four levers:
+
+- **`selection_input`** (`'raw'` | `'residualized'`, on `UnivariateEdgeSelection`) — does
+  edge selection control for the covariates? `'residualized'` is one regression per edge,
+  `y ~ 1 + Z + edge`: semipartial correlation reported as the effect size, the
+  coefficient's p-value with `df = N - 2 - C`. It is a design decision, deliberately *not*
+  part of the parameter grid.
+- **which model you read** — `connectome` uses raw network strengths,
+  `connectome_residualized` uses deconfounded ones. Both are computed on every run, so
+  this costs nothing and needs no knob.
+
+`edge_statistic` (including `*_partial` and `point_biserial`) and
+`CPMAnalysis(calculate_residuals=...)` are deprecated onto these for one release.
 
 ### Package Structure
 

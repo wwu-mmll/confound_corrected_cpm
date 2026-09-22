@@ -188,35 +188,44 @@ def test_model_variants_match_sklearn():
 # --------------------------------------------------------------------------- #
 # 3. End-to-end cross-validated pipeline: toolbox vs sklearn + inflation story #
 # --------------------------------------------------------------------------- #
-def _toolbox_connectome_ev(X, y, Z, statistic, residualize, cv, tmp_path):
+def _toolbox_connectome_ev(X, y, Z, selection_input, model, cv, tmp_path):
     ue = UnivariateEdgeSelection(
-        edge_statistic=statistic,
+        selection_statistic="pearson", selection_input=selection_input,
         edge_selection=[PThreshold(threshold=P_THRESHOLD, correction=[None])])
     cpm = CPMAnalysis(
         results_directory=str(tmp_path), cv=cv, edge_selection=ue,
-        calculate_residuals=residualize, n_permutations=0, task_type="regression")
+        n_permutations=0, task_type="regression")
     cpm._single_run(X=X, y=y.reshape(-1, 1), covariates=Z, perm_run=False)
     ag = cpm.results_manager.agg_results
-    val = ag.loc[("connectome", "both"), ("explained_variance_score", "mean")]
+    val = ag.loc[(model, "both"), ("explained_variance_score", "mean")]
     return float(np.ravel(val)[0])
 
 
-def _sklearn_connectome_ev(X, y, Z, partial, residualize, cv):
+def _sklearn_connectome_ev(X, y, Z, selection_input, model_input, cv):
+    """The same recipe in sklearn, with the two confound choices independent.
+
+    `selection_input` decides whether edge selection controls for Z; per-edge
+    that is the regression y ~ 1 + Z + edge, which is what ref_semipartial
+    computes. `model_input` decides whether the covariate variance is taken out
+    of the features the model consumes -- the connectome_residualized model.
+    """
     evs = []
     for tr, te in cv.split(X, y):
-        Xtr, Xte = X[tr].copy(), X[te].copy()
+        Xtr, Xte = X[tr], X[te]
         ytr, yte = y[tr], y[te]
         Ztr, Zte = Z[tr], Z[te]
-        if residualize:
-            m = LinearRegression().fit(Ztr, Xtr)
-            Xtr = Xtr - m.predict(Ztr)
-            Xte = Xte - m.predict(Zte)
-        if partial:
+
+        if selection_input == "residualized":
             r, p = ref_semipartial(Xtr, ytr, Ztr)
         else:
             r, p = ref_pearson(Xtr, ytr)
         pos = (p < P_THRESHOLD) & (r > 0)
         neg = (p < P_THRESHOLD) & (r < 0)
+
+        if model_input == "residualized":
+            m = LinearRegression().fit(Ztr, Xtr)
+            Xtr, Xte = Xtr - m.predict(Ztr), Xte - m.predict(Zte)
+
         ftr = np.column_stack([Xtr[:, pos].sum(1), Xtr[:, neg].sum(1)])
         fte = np.column_stack([Xte[:, pos].sum(1), Xte[:, neg].sum(1)])
         pred = LinearRegression().fit(ftr, ytr).predict(fte)
@@ -224,10 +233,13 @@ def _sklearn_connectome_ev(X, y, Z, partial, residualize, cv):
     return float(np.mean(evs))
 
 
+# The confound 2x2, as the new API expresses it: selection_input is a run-level
+# choice; the feature choice is just which model you read, because
+# connectome_residualized is computed on every run.
 CONFIGS = [
-    ("pearson", False, False),          # raw
-    ("pearson_partial", True, False),   # partial selection
-    ("pearson", False, True),           # residualised X
+    ("raw",     "raw",          "connectome"),
+    ("partial", "residualized", "connectome"),
+    ("resid",   "residualized", "connectome_residualized"),
 ]
 
 
@@ -240,9 +252,10 @@ def test_pipeline_matches_sklearn_and_shows_inflation(tmp_path):
     cv_sk = KFold(n_splits=5, shuffle=True, random_state=0)
 
     ev = {}
-    for (stat, partial, resid), name in zip(CONFIGS, ("raw", "partial", "resid")):
-        tb = _toolbox_connectome_ev(X, y, Z, stat, resid, cv_tb, tmp_path)
-        sk = _sklearn_connectome_ev(X, y, Z, partial, resid, cv_sk)
+    for name, selection_input, model in CONFIGS:
+        model_input = "residualized" if model.endswith("_residualized") else "raw"
+        tb = _toolbox_connectome_ev(X, y, Z, selection_input, model, cv_tb, tmp_path)
+        sk = _sklearn_connectome_ev(X, y, Z, selection_input, model_input, cv_sk)
         # Toolbox and independent sklearn pipeline agree (small tolerance absorbs
         # boundary-of-threshold noise edges that carry ~no signal).
         assert abs(tb - sk) < 0.02, f"{name}: toolbox {tb:.3f} vs sklearn {sk:.3f}"

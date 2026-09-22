@@ -51,9 +51,9 @@ def _data(seed=0, n=120, n_nodes=10, binary=False):
     return X, y, Z
 
 
-def _analysis(tmp_path, statistic="pearson", **kwargs):
+def _analysis(tmp_path, selection_input="raw", **kwargs):
     ue = UnivariateEdgeSelection(
-        edge_statistic=statistic,
+        selection_statistic="pearson", selection_input=selection_input,
         edge_selection=[PThreshold(threshold=0.05, correction=[None])])
     return CPMAnalysis(
         results_directory=str(tmp_path),
@@ -83,18 +83,26 @@ def test_get_variable_names_without_covariates():
 # Options that presuppose covariates must fail up front, not degrade silently
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("statistic", ["pearson_partial", "spearman_partial",
-                                       "point_biserial_partial"])
-def test_partial_statistic_without_covariates_raises(tmp_path, statistic):
+def test_residualized_selection_without_covariates_raises(tmp_path):
     X, y, _ = _data()
-    cpm = _analysis(tmp_path, statistic=statistic, task_type="regression")
+    cpm = _analysis(tmp_path, selection_input="residualized", task_type="regression")
     with pytest.raises(ValueError, match="require covariates"):
         cpm.run(X=X, y=y)
 
 
-def test_calculate_residuals_without_covariates_raises(tmp_path):
+@pytest.mark.parametrize("statistic", ["pearson_partial", "spearman_partial",
+                                       "point_biserial_partial"])
+def test_deprecated_partial_statistic_without_covariates_raises(tmp_path, statistic):
+    """The deprecated spelling must fail just as clearly as the new one."""
     X, y, _ = _data()
-    cpm = _analysis(tmp_path, task_type="regression", calculate_residuals=True)
+    with pytest.warns(DeprecationWarning):
+        ue = UnivariateEdgeSelection(
+            edge_statistic=statistic,
+            edge_selection=[PThreshold(threshold=0.05, correction=[None])])
+    cpm = CPMAnalysis(
+        results_directory=str(tmp_path),
+        cv=KFold(n_splits=3, shuffle=True, random_state=0),
+        edge_selection=ue, n_permutations=0, task_type="regression")
     with pytest.raises(ValueError, match="require covariates"):
         cpm.run(X=X, y=y)
 
@@ -102,13 +110,10 @@ def test_calculate_residuals_without_covariates_raises(tmp_path):
 def test_error_names_the_offending_parameter(tmp_path):
     """A user has to be able to tell which argument to change."""
     X, y, _ = _data()
-    cpm = _analysis(tmp_path, statistic="pearson_partial",
-                    task_type="regression", calculate_residuals=True)
+    cpm = _analysis(tmp_path, selection_input="residualized", task_type="regression")
     with pytest.raises(ValueError) as excinfo:
         cpm.run(X=X, y=y)
-    message = str(excinfo.value)
-    assert "edge_statistic='pearson_partial'" in message
-    assert "calculate_residuals=True" in message
+    assert "selection_input='residualized'" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
@@ -179,9 +184,8 @@ def test_classification_metrics_are_nan_not_a_plausible_score():
 def test_run_without_covariates_end_to_end(tmp_path, binary):
     X, y, _ = _data(binary=binary)
     task = "classification" if binary else "regression"
-    statistic = "point_biserial" if binary else "pearson"
 
-    cpm = _analysis(tmp_path, statistic=statistic, task_type=task)
+    cpm = _analysis(tmp_path, task_type=task)
     cpm.run(X=X, y=y)
 
     with open(os.path.join(str(tmp_path), 'available_models.json')) as f:
@@ -216,7 +220,7 @@ def test_permutation_p_values_are_nan_for_undefined_models(tmp_path):
 
     X, y, _ = _data()
     ue = UnivariateEdgeSelection(
-        edge_statistic="pearson",
+        selection_statistic="pearson",
         edge_selection=[PThreshold(threshold=0.05, correction=[None])])
     cpm = CPMAnalysis(
         results_directory=str(tmp_path),

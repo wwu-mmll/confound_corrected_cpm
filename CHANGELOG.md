@@ -4,6 +4,56 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Confound control is now two choices instead of four levers.**
+  `UnivariateEdgeSelection` gains `selection_statistic` (`'pearson'` | `'spearman'`)
+  and `selection_input` (`'raw'` | `'residualized'`). `selection_input='residualized'`
+  is the per-edge regression `y ~ 1 + Z + edge` — the semipartial correlation as the
+  reported effect size, the coefficient's p-value with `df = N - 2 - C` — so a
+  `p < 0.05` threshold means a 5% per-edge false-positive rate whatever the
+  confounding. The second choice is simply which model you read, and costs nothing:
+  `connectome_residualized` is computed on every run.
+- **`Models.residuals` renamed to `Models.connectome_residualized`.** The old name
+  described a mechanism rather than the model, which is the connectome model with the
+  covariate variance removed from the features. Numerically unchanged. This renames a
+  value in the `model` column of `cv_results_full.csv`, `cv_results_summary.csv`,
+  `cv_predictions.csv` and `cv_network_strengths.csv`.
+- The `presence_filter` now always sees the raw connectome. Previously
+  `calculate_residuals=True` residualised the connectome before selection, so the
+  filter looked for structural zeros in residualised values, where they no longer
+  exist. That interaction warning is gone with the cause.
+
+### Deprecated
+- `UnivariateEdgeSelection(edge_statistic=...)`, including the values
+  `'pearson_partial'`, `'spearman_partial'`, `'point_biserial'` and
+  `'point_biserial_partial'`. They map onto the new pair and remain numerically
+  identical for one release (verified exactly, not approximately).
+  `'point_biserial'` was never a separate statistic — Pearson against a 0/1 target
+  *is* the point-biserial correlation.
+- `CPMAnalysis(calculate_residuals=...)`. Use `selection_input='residualized'` and read
+  `connectome_residualized`. **Two behaviour changes when migrating:** the number you
+  read from `connectome` now lives in `connectome_residualized`, and edge selection now
+  uses the coefficient test rather than an ordinary correlation against the raw target,
+  so the selected edge sets change. The old path's effective alpha shrank as
+  confounding grew (measured 5.1% -> 3.3% -> 2.1% at nominal 5%); the new one is
+  nominal at every confound level.
+
+### Added
+- Vanilla CPM without covariates: `covariates` is optional in `CPMAnalysis.run`. Only
+  the `connectome` model is defined; the rest are NaN and `available_models.json`
+  records which rows are real. Options requiring covariates raise up front.
+- `pyflakes` runs in CI.
+
+### Fixed
+- Permutation p-values for undefined models were reported at the permutation floor
+  (`1/(n_perms+1)`, i.e. maximally significant) instead of NaN.
+- Classification metrics turned NaN predictions into a plausible-looking score near the
+  base rate, because every comparison against NaN is silently False.
+- `simulate_confounded_data_chyzhyk` raised `UnboundLocalError` for an invalid
+  `link_type` instead of a `ValueError` naming the valid options.
+
 ## [0.5.0] — 2026-08-26
 
 ### Added

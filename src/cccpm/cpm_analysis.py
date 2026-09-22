@@ -14,11 +14,11 @@ from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold,
 from cccpm.inner_fold import run_inner_folds
 from cccpm.logging import setup_logging
 from cccpm.models.linear_model import LinearCPM
-from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold, resolve_presence_threshold
+from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager
 from cccpm.inference import PermutationManager
 from cccpm.preprocessing import (torch_train_test_split, torch_impute_missing_values,
-                                 residualize_train_test, select_stable_edges)
+                                 select_stable_edges)
 from cccpm.validation import (check_data, detect_task_type, validate_task_type,
                               infer_n_nodes)
 from cccpm.memory import plan_permutation_chunk
@@ -48,7 +48,7 @@ class CPMAnalysis:
                  select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
-                 calculate_residuals: bool = False,
+                 calculate_residuals: bool = None,
                  n_permutations: int = 0,
                  edge_significance_method: str = "nbs",
                  nbs_threshold: float = 0.5,
@@ -88,9 +88,21 @@ class CPMAnalysis:
         impute_missing_values: bool, default=True
             Whether to impute missing values in ``X`` and the covariates (NaNs in
             the target ``y`` always raise an error).
-        calculate_residuals: bool, default=False
-            If ``True``, regress the covariates out of the connectome before
-            modeling (residualization), in addition to the model variants.
+        calculate_residuals: bool, default=None
+            .. deprecated::
+                Use ``UnivariateEdgeSelection(selection_input='residualized')``
+                and read the ``connectome_residualized`` model. ``True`` now
+                sets ``selection_input='residualized'`` on the edge selection
+                and no longer residualises the connectome before *fitting* --
+                the deconfounded-feature model is reported as
+                ``connectome_residualized`` on every run, so residualising the
+                model input would only duplicate it. Two consequences to be
+                aware of when migrating: the number you used to read from
+                ``connectome`` is now in ``connectome_residualized``, and edge
+                selection now uses the properly specified coefficient test
+                (``df = N - 2 - C``) rather than an ordinary correlation
+                against the raw target, so the selected edge sets change.
+                This parameter will be removed in a future release.
         n_permutations: int, default=0
             Number of label permutations for significance testing. ``0`` disables
             permutation testing; use 1000+ for publishable p-values.
@@ -150,17 +162,22 @@ class CPMAnalysis:
         self.select_stable_edges = select_stable_edges
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
-        self.calculate_residuals = calculate_residuals
-
-        # The presence filter is meant to drop structural zeros from the raw
-        # connectome; with global residualization the connectome is mean-centred
-        # before selection, so the filter would see residualized values instead.
-        if calculate_residuals and resolve_presence_threshold(
-                getattr(self.edge_selection, 'presence_filter', False)) is not None:
-            self.logger.warning(
-                "Both calculate_residuals=True and a presence_filter are set: the "
-                "presence filter will see residualized (not raw) connectome values."
+        if calculate_residuals is not None:
+            warnings.warn(
+                "calculate_residuals is deprecated and will be removed in a "
+                "future release. Use UnivariateEdgeSelection("
+                "selection_input='residualized') and read the "
+                "'connectome_residualized' model instead. Note that the value "
+                "you previously read from 'connectome' is now reported as "
+                "'connectome_residualized', and that edge selection now uses "
+                "the coefficient test (df = N - 2 - C) rather than a plain "
+                "correlation against the raw target, so edge sets change.",
+                DeprecationWarning, stacklevel=2,
             )
+            if calculate_residuals:
+                self.edge_selection.statistic._input = 'residualized'
+                self.edge_selection.selection_input = 'residualized'
+        self.calculate_residuals = calculate_residuals
         self.n_permutations = n_permutations
         self.edge_significance_method = edge_significance_method
         self.nbs_threshold = nbs_threshold
@@ -211,7 +228,7 @@ class CPMAnalysis:
         if self.select_stable_edges:
             self.logger.info(f"Stability threshold:     {self.stability_threshold}")
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
-        self.logger.info(f"Calculate residuals:     {'Yes' if self.calculate_residuals else 'No'}")
+        self.logger.info(f"Selection input:         {self.edge_selection.statistic._input}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info(f"Device:                  {self.device}")
         self.logger.info("="*50)
@@ -291,23 +308,19 @@ class CPMAnalysis:
 
         Without this the run would not crash -- it would quietly degrade. A
         ``*_partial`` statistic with an empty confound design is just the plain
-        statistic, and ``calculate_residuals`` would subtract a fit on nothing.
-        Both would produce a full set of plausible numbers that silently answer
-        a different question, which is the failure mode this package has been
+        statistic with an empty confound design is just the plain statistic, so
+        the run would produce a full set of plausible numbers that silently
+        answer a different question -- the failure mode this package has been
         bitten by before.
         """
         if covariates is not None:
             return
 
         offenders = []
-        statistic = self.edge_selection.edge_statistic.edge_statistic
-        if statistic.endswith('_partial'):
+        if self.edge_selection.statistic._input == 'residualized':
             offenders.append(
-                f"edge_statistic='{statistic}' (partial statistics control for "
-                f"covariates; use '{statistic[:-len('_partial')]}' instead)")
-        if self.calculate_residuals:
-            offenders.append(
-                "calculate_residuals=True (there is nothing to residualise against)")
+                "selection_input='residualized' (confound-controlled edge "
+                "selection needs confounds; use selection_input='raw')")
 
         if offenders:
             raise ValueError(
@@ -495,9 +508,6 @@ class CPMAnalysis:
             X_train, X_test, cov_train, cov_test = torch_impute_missing_values(
                 X_train, X_test, cov_train, cov_test)
 
-        if self.calculate_residuals:
-            X_train, X_test = residualize_train_test(X_train, X_test, cov_train, cov_test)
-
         # edges: [Features, 2, Runs] -- one winning configuration per run.
         edges = self._select_edges(X_train, y_train, cov_train, results_manager, outer_fold)
         results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges,
@@ -550,7 +560,7 @@ class CPMAnalysis:
         else:
             best_params = [self.edge_selection.param_grid[0]] * y_train.shape[1]
 
-        r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
+        r_edges, p_edges = self.edge_selection.statistic.fit_transform(
             X=X_train, y=y_train, covariates=cov_train, device=self.device)
         self.edge_selection.r_edges = r_edges
         self.edge_selection.p_edges = p_edges
