@@ -24,12 +24,26 @@ the connectome actually adds on top of your covariates:
 | `connectome` | connectome network strength only | How well does brain connectivity alone predict? |
 | `covariates` | the covariates only (e.g. age, sex, motion) | What's the baseline from nuisance variables? |
 | `full` | connectome **+** covariates | Best combined prediction |
-| `residuals` | connectome, after removing covariate effects from the target | Connectome contribution with confounds removed |
 | `increment` | the *added* value of the connectome over covariates alone (`full` − `covariates`) | Does the connectome explain anything **beyond** confounds? |
 
 The `increment` model is usually the most important for a confound-aware claim: a
 significant increment means the connectome carries predictive information that the
 covariates do not.
+
+Two things to know when reading these rows:
+
+- **`increment` is NaN for Pearson *r* and F1**, by design. A difference of two
+  correlations is not a correlation — comparing them needs Fisher *z* /
+  Steiger's test — and a difference of two F1 scores is not an F1. Read the
+  increment on explained variance, MSE, MAE, accuracy, balanced accuracy or
+  ROC AUC. An em dash in those cells means "not a statistic", not "failed".
+- **There is no `residuals` model.** Whether the connectome behind `connectome`
+  and `full` has been deconfounded is a property of the run (`model_input`), not
+  a separate row — so one report is one cell of the confound 2×2. The report's
+  headline says which cell it is; see
+  [Confound control](methods.md#2-confound-control).
+- **Running without covariates** leaves `covariates`, `full` and `increment`
+  undefined. They are NaN-filled rather than omitted, and the report hides them.
 
 ### Networks — which edges are used
 
@@ -54,7 +68,7 @@ from the headline result to the supporting detail:
 | Section | What it shows |
 |---------|---------------|
 | **Summary** | The headline cross-validated result as a one-sentence verdict, key-stat chips (samples, nodes, edges, covariates, permutations, edge p-threshold), and predicted-vs-observed scatter plots for the positive, negative, and both networks plus the covariates-only baseline. Each scatter is annotated with its cross-validated effect size (Pearson *r* / AUC) and permutation *p*. **Start here.** |
-| **Model Comparison** | One faceted figure comparing every model (`connectome`, `covariates`, `full`, `residuals`, `increment`) across metrics and networks, plus the APA results table (mean [SD] with permutation *p*-values). Foregrounds the `increment` model — your confound-control evidence. |
+| **Model Comparison** | One faceted figure comparing every model (`connectome`, `covariates`, `full`, `increment`) across metrics and networks, plus the APA results table (mean [SD] with permutation *p*-values). Foregrounds the `increment` model — your confound-control evidence. |
 | **Network Strengths** | How the summed positive/negative network strength relates to the target, and the distribution of strength across participants. |
 | **Brain & Edges** | The predictive edges in the brain: a connectivity matrix, a hub (node-degree) plot, and — when an atlas with a `network` column is supplied — a network-summary matrix and a chord diagram. With node coordinates (`x, y, z`) it also renders a glass-brain view. A button group switches the matrix/hub/chord views between the **significantly** stable edges (default, when permutations were run), the **top 5%** and the **top 10%** most stable edges; the glass brain shows the default subset. These figures come from the [atlas](atlases.md) you pass to `CPMAnalysis`. |
 | **Stable Edges** | All significant edges (region A — region B) per network, the significance method and its diagnostics (e.g. largest NBS component), the permutation null-distribution plots, and a downloadable CSV of every selected edge with its stability and significance. |

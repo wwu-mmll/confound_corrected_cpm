@@ -27,9 +27,17 @@ amount of confounding so confound control actually matters — see
 [Simulating Data](../simulation.md) for how it works and how to tune it.
 
 **2. Edge selection.** `UnivariateEdgeSelection` correlates each edge with the target
-and keeps edges below a p-value threshold. For regression, use `pearson` or
-`spearman`; switch to the `*_partial` variants (e.g. `pearson_partial`) to control for
-covariates *during* edge selection.
+and keeps edges below a p-value threshold. Pick the correlation with
+`selection_statistic=` (`"pearson"` or `"spearman"`), and control for covariates
+*during* selection with `selection_input="residualized"`, which tests each edge
+by the regression `y ~ 1 + Z + edge` instead.
+
+**2b. Confound control has a second, independent switch.** `selection_input`
+decides how edges are *chosen*; `model_input` on `CPMAnalysis` decides whether
+the connectome the models *consume* has been deconfounded. Set both to
+`"residualized"` for the leak-free configuration. See
+[Confound control](../methods.md#2-confound-control) for why this is two run-level
+choices rather than an extra model.
 
 **3. Run.** `CPMAnalysis` performs the cross-validated fit, and — because
 `n_permutations > 0` — permutation testing for significance. For a real analysis,

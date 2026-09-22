@@ -56,7 +56,9 @@ nav:
 - API:
     - CPM Analysis: api/cpm_regression.md
     - Edge Selection: api/edge_selection.md
+    - Edge Statistics: api/statistics.md
     - Models: api/models.md
+    - Permutation Inference: api/inference.md
     - Inner Fold: api/fold.md
     - Results Manager: api/results_manager.md
     - Simulation: api/simulation.md

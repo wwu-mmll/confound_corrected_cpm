@@ -58,17 +58,21 @@ Here's a quick overview of how to run a CPM analysis:
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
 from sklearn.model_selection import KFold
 
-# Configure edge selection
+# Configure edge selection. `selection_input="residualized"` controls for the
+# covariates while *selecting* edges.
 univariate_edge_selection = UnivariateEdgeSelection(
-    edge_statistic="pearson",
+    selection_statistic="pearson",
+    selection_input="residualized",
     edge_selection=[PThreshold(threshold=[0.05], correction=["fdr_by"])]
 )
 
-# Create the CPM analysis object
+# Create the CPM analysis object. `model_input` is the second, independent
+# confound-control choice: deconfound the connectome the models consume.
 cpm = CPMAnalysis(
     results_directory="results/",
     cv=KFold(n_splits=10, shuffle=True, random_state=42),
     edge_selection=univariate_edge_selection,
+    model_input="residualized",
     n_permutations=100
 )
 
@@ -76,7 +80,7 @@ cpm = CPMAnalysis(
 X = ...           # Connectome data, shape (n_samples, n_features)
 y = ...           # Target variable, shape (n_samples,)
 covariates = ...  # Covariates to control for, shape (n_samples, n_covariates)
-cpm.run(X=X, y=y, covariates=covariates)
+cpm.run(X=X, y=y, covariates=covariates)   # covariates are optional
 ```
 
 ## Contributing

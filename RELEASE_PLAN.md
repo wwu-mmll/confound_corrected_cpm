@@ -18,11 +18,12 @@ Status legend: `[ ]` todo · `[~]` in progress
 
 In order:
 
-1. **CI is red** — see §1. A release cut from a red pipeline is a release nobody
-   can verify.
-2. **The mkdocs documentation still teaches the 0.6.x API** — see §3.
-3. **Cut the release** — `CHANGELOG.md`'s `[Unreleased]` heading becomes
+1. **Cut the release** — `CHANGELOG.md`'s `[Unreleased]` heading becomes
    `[0.7.0]` with a date (`pyproject.toml` already says 0.7.0), then §4.
+
+   CI is green and the docs now teach the 0.7.0 API, so the two things that were
+   blocking are done. What remains before tagging is §4: the packaging
+   decisions, and a TestPyPI dry-run with a clean install on all three OSes.
 
 ---
 
@@ -47,62 +48,46 @@ failure split cleanly by operating system rather than by Python version.
       in a target name raises on write. The tests now all pass `encoding=`;
       the package should too.
 
-## 2. Test suite: 359 tests, 5m40s local (~13 min on the Windows runner)
+## 2. Test suite: 283 tests, 4m55s local
 
-Audited test by test on 2026-09-22 — the findings, with per-group reasoning, are
-in `TEST_AUDIT.md`. **Awaiting Nils' decision on what goes; nothing cut yet.**
+Down from 359 / 5m40s. The source-file parametrisations are collapsed (two AST
+checks that were 79 collected tests are now 3, each verified to still name the
+offending file and line) and the repeated pipeline runs are shared behind
+module-scoped fixtures: `test_confound_api.py` 34.7s → 19.8s,
+`test_report_states_its_configuration.py` 63.5s → 25.1s. Full findings and the
+per-group reasoning are in `TEST_AUDIT.md`.
 
-The headline number measures the wrong thing. 237 of the 359 tests cost about
-five seconds *combined*; the 336s of runtime lives in 122 tests in nine files,
-almost all of it repeated `CPMAnalysis.run()` calls. Count and runtime are two
-separate problems and the fixes barely overlap.
+**Awaiting Nils' decision** on the judgement calls:
 
-- [ ] **Stop parametrizing over the package's own source files (−76, 22% of the
-      suite, zero coverage change).** `test_module_structure.py` is 2 AST checks
-      × 21 modules; `test_device_portability.py` is 1 × 37 files. The assertion
-      messages already name the offender.
-- [ ] **Delete the 15 genuinely redundant tests** listed in `TEST_AUDIT.md` §2 —
-      each is covered in full by a test that does strictly more.
-- [ ] **Merge 27 collected tests into 9** where one behaviour is spread over many
-      test functions (`TEST_AUDIT.md` §3). Every assertion is retained.
-- [ ] **Share the repeated pipeline runs (−50s, ~15% of runtime, no test
-      deleted).** `test_confound_api.py` runs eight analyses where four distinct
-      configurations exist; `test_report_states_its_configuration.py` runs
-      fourteen where four do. Module-scoped fixtures keyed on the configuration.
-- [ ] **Leave the three expensive files alone.** `test_integration.py` (68s, the
-      only guard against example rot), `test_reporting.py`'s atlas test (23s, the
-      only netplotbrain cover), and `test_feature_interactions.py`'s 2^4 grid
-      (62s — it exists because two features were silently inert *in combination*,
-      which is what a full factorial catches and per-feature tests do not).
-      Cutting the grid to a pairwise covering array would save 40s and is the one
-      honest place left to take time, but it is a real reduction in coverage.
-- [ ] **Delete the migration guards in 0.8.0**, not now (`TEST_AUDIT.md` §6):
-      ~8 tests pinning the removed-0.6.x-spelling error messages, worth having
-      through this release and pointless after it.
+- [ ] **Delete the 15 genuinely redundant tests** (`TEST_AUDIT.md` §2) — each
+      covered in full by a test that does strictly more.
+- [ ] **Merge 27 collected tests into 9** (`TEST_AUDIT.md` §3) where one
+      behaviour is spread over many test functions. Every assertion retained.
+- [ ] **Delete the migration guards in 0.8.0**, not now (`TEST_AUDIT.md` §6).
+      This now includes the two `test_renamed_parameters_*` cases added for
+      `stability_significance_method` / `nbs_stability_threshold`.
 - [ ] `test_scoring.py::test_metrics_ordering` asserts shapes, not ordering.
-      Give it a real assertion or rename it (`TEST_AUDIT.md`, last section).
+      Give it a real assertion or rename it.
 
-Projected: **359 → 241 tests, 5m40s → ~4m45s**, with nothing that carries unique
-coverage removed.
+Leave the three expensive files alone: `test_integration.py` (the only guard
+against example rot), `test_reporting.py`'s atlas test (the only netplotbrain
+cover) and `test_feature_interactions.py`'s 2^4 grid (it exists because two
+features were silently inert *in combination*).
 
 ## 3. Docs & report
 
-- [ ] **The mkdocs documentation still describes the 0.6.x API** (found
-      2026-09-22). `documentation/docs/methods.md` (8 references) and
-      `getting_started.md` (3) use `edge_statistic=`, `calculate_residuals=`
-      and the `residuals` model, all removed in 0.7.0 — anyone following them
-      gets a `TypeError` or a `ValueError`. Replace with `selection_statistic`
-      / `selection_input` / `model_input`, and rewrite the model list
-      (`connectome` / `covariates` / `full` / `increment`, with `increment`
-      NaN for Pearson r and F1). **Blocks the release.**
-- [ ] Show key variations in both quickstarts: confound control
-      (`selection_input` vs `model_input`), nested CV with p-threshold tuning,
-      stable-edge selection, permutation testing, and passing `atlas` for brain
-      plots.
+The 0.6.x API references are gone: `methods.md`, `getting_started.md`,
+`interpreting_results.md`, both example pages, the package `README.md`, the
+quickstarts and the embedded showcase report were all rewritten against 0.7.0,
+and `mkdocs build --strict` is clean. `api/statistics.md` and `api/inference.md`
+were added — the two modules split out in 0.7.0 had no API reference at all.
+
 - [ ] Add in-report captions; finish the accessibility/print audit.
 - [ ] Optional: a real-data (or realistic simulated) end-to-end tutorial.
-- [~] `examples/` curation: `example_simulated_classification.py` overlaps the
-      quickstarts — which author-written examples to keep is a call for Nils.
+- [ ] Regenerate `documentation/docs/assets/simulated_data_report.html` whenever
+      the report layout changes — it is a committed 2.2 MB artifact and will go
+      stale silently. Generated by a snippet kept with the release notes;
+      consider a `scripts/` entry point so it is reproducible.
 
 ## 4. Packaging & cross-platform install
 
@@ -121,6 +106,10 @@ coverage removed.
       `installation.md`: `MPLBACKEND=Agg`).
 - [ ] **Release:** `vX.Y.Z-test` → TestPyPI dry-run, clean-install on all 3
       OSes, then tag for PyPI. (Nils triggers deployment.)
+- [ ] **`poetry install --with docs` takes >10 minutes.** The docs group is not
+      in the local lock, so it forces a full re-resolution of a dependency set
+      that includes torch, nilearn and netplotbrain. Sharpens the `poetry.lock`
+      decision above: CI's `build_docs.yml` pays this on every push to `main`.
 
 ## 5. Correctness & statistical validity
 
@@ -147,7 +136,10 @@ coverage removed.
 
 ## 6. Code health
 
-No open items.
+- [ ] `src/cccpm/reporting/plots/cpm_chord_plot.py` had a `__main__` block
+      hardcoded to a `/spm-data` server path, shipped in the wheel — removed.
+      Worth a sweep for others like it: development entry points inside the
+      package are invisible to pyflakes and to the tests.
 
 ---
 

@@ -7,6 +7,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **`edge_significance_method` is renamed to `stability_significance_method`, and
+  `nbs_threshold` to `nbs_stability_threshold`.** The old names conflated two
+  different significances: the p-value that decides whether an edge is *selected*
+  (set on `PThreshold`) and whether an edge is selected across folds *more
+  consistently than chance*. These parameters only ever meant the second — which
+  is what the outputs have always been called (`stability_edges_significance.npy`).
+  `nbs_threshold` had the same problem one level down: it is a fraction of folds,
+  not a p-value, and it sat in the same constructor call as
+  `PThreshold(threshold=...)` with nothing to tell them apart. Both old spellings
+  raise a `TypeError` naming the replacement.
 - **Confound control is now two independent run-level choices instead of four levers.**
   `UnivariateEdgeSelection` gains `selection_statistic` (`'pearson'` | `'spearman'`)
   and `selection_input` (`'raw'` | `'residualized'`); `CPMAnalysis` gains `model_input`
@@ -86,6 +96,13 @@ stops. Every removal raises with its replacement named.
   base rate, because every comparison against NaN is silently False.
 - `simulate_confounded_data_chyzhyk` raised `UnboundLocalError` for an invalid
   `link_type` instead of a `ValueError` naming the valid options.
+
+### Moved
+- `examples/confound_inflation_demo.py` → `scripts/confound_inflation_demo.py`.
+  It is the package's demonstration that partial-correlation selection does not
+  fully deconfound, on data with an analytically known answer — evidence, not a
+  template to copy, and 340 lines of parameter sweep sitting beside the
+  quickstarts implied otherwise.
 
 ## [0.5.0] — 2026-08-26
 
@@ -212,6 +229,14 @@ Documentation and examples: SEM-based simulated data.
   older `simulate_simple` generator.
 
 ### Removed
+- `examples/profile_run.py` and `scripts/benchmark_batching.py`. The first was a
+  timing scratch file (hardcoded `device='cuda'`, writing into another example's
+  output directory); the second could no longer run at all — it imports
+  `cccpm.batch_planning`, removed when the batched/unbatched split went away.
+  Pyflakes covers `scripts/` but cannot resolve imports, so nothing caught it.
+- `examples/example_simulated_data.py`. Its one distinctive feature over the
+  quickstarts was nested CV for the p-threshold, which `regression_quickstart.py`
+  now shows directly.
 - Redundant example scripts (`example_simulated_classification.py`, the two
   `mediator_*` examples) and the unused `simulation/mediator_simulation.py` module.
 
