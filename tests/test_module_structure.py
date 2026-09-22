@@ -10,9 +10,6 @@ keeps it fixed.
 import ast
 from pathlib import Path
 
-import pytest
-
-
 SRC = Path(__file__).resolve().parents[1] / "src" / "cccpm"
 
 # The numeric core: everything except the reporting layer itself. `cpm_analysis`
@@ -34,22 +31,38 @@ def _imported_modules(path):
                 yield node.module
 
 
-@pytest.mark.parametrize("module", CORE_MODULES, ids=lambda p: str(p.name))
-def test_numeric_core_does_not_import_reporting(module):
+def _offenders(predicate):
+    """Report every core module whose imports match ``predicate``.
+
+    One test, not one per file: a per-module parametrisation turned two checks
+    into 42 collected tests without telling a failure anything the message below
+    does not already say.
+    """
+    # Collapsing the old per-file parametrisation means an empty CORE_MODULES
+    # would now pass silently instead of collecting zero tests.
+    assert CORE_MODULES, f"no core modules found under {SRC}"
+
+    found = {}
+    for module in CORE_MODULES:
+        hits = [m for m in _imported_modules(module) if predicate(m)]
+        if hits:
+            found[module.name] = hits
+    return found
+
+
+def test_numeric_core_does_not_import_reporting():
     """The dependency arrow points core -> reporting, never the other way."""
-    offenders = [m for m in _imported_modules(module)
-                 if m == "cccpm.reporting" or m.startswith("cccpm.reporting.")]
+    offenders = _offenders(
+        lambda m: m == "cccpm.reporting" or m.startswith("cccpm.reporting."))
     assert not offenders, (
-        f"{module.name} imports the reporting layer ({offenders}). Move the "
+        f"these modules import the reporting layer: {offenders}. Move the "
         f"plotting code into cccpm/reporting/ instead -- see "
         f"cccpm/reporting/data_insights.py for the pattern."
     )
 
 
-@pytest.mark.parametrize("module", CORE_MODULES, ids=lambda p: str(p.name))
-def test_numeric_core_does_not_import_plotting_stack(module):
+def test_numeric_core_does_not_import_plotting_stack():
     """Nor may it import matplotlib/seaborn directly."""
-    offenders = [m for m in _imported_modules(module)
-                 if m.split(".")[0] in {"matplotlib", "seaborn", "netplotbrain",
-                                        "pycirclize", "plotly"}]
-    assert not offenders, f"{module.name} imports the plotting stack ({offenders})."
+    stack = {"matplotlib", "seaborn", "netplotbrain", "pycirclize", "plotly"}
+    offenders = _offenders(lambda m: m.split(".")[0] in stack)
+    assert not offenders, f"these modules import the plotting stack: {offenders}."

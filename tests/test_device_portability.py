@@ -18,7 +18,6 @@ Only calls that are genuinely safe without a GPU are allowed; see
 import ast
 from pathlib import Path
 
-import pytest
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "cccpm"
@@ -75,29 +74,32 @@ def _package_python_files():
     return files
 
 
-@pytest.mark.parametrize(
-    "path", _package_python_files(), ids=lambda p: str(p.relative_to(PACKAGE_ROOT))
-)
-def test_no_gpu_only_cuda_calls(path):
-    """No ``torch.cuda.*`` call in the package may require an available GPU."""
-    source = path.read_text(encoding="utf-8")
-    if "torch.cuda" not in source:
-        return
+def test_no_gpu_only_cuda_calls():
+    """No ``torch.cuda.*`` call in the package may require an available GPU.
 
-    uses = list(_cuda_attribute_uses(source, str(path)))
-    # Longest-chain wins: drop any use that is a strict prefix of another use
-    # reported on the same line (torch.cuda.nvtx vs torch.cuda.nvtx.range).
-    by_line = {}
-    for lineno, name in uses:
-        current = by_line.get(lineno)
-        if current is None or len(name) > len(current):
-            by_line[lineno] = name
+    One test over every module rather than one test per module: the report below
+    already names the file and line, so a per-file parametrisation only inflated
+    the collected count (37 tests for one check).
+    """
+    violations = []
+    for path in _package_python_files():
+        source = path.read_text(encoding="utf-8")
+        if "torch.cuda" not in source:
+            continue
 
-    violations = [
-        f"{path.relative_to(PACKAGE_ROOT)}:{lineno}: {name}"
-        for lineno, name in sorted(by_line.items())
-        if name not in CPU_SAFE_CUDA_CALLS
-    ]
+        # ast.walk visits every prefix of a chain, so torch.cuda.nvtx.range also
+        # yields torch.cuda.nvtx. Keep the longest spelling per line.
+        by_line = {}
+        for lineno, name in _cuda_attribute_uses(source, str(path)):
+            current = by_line.get(lineno)
+            if current is None or len(name) > len(current):
+                by_line[lineno] = name
+
+        violations += [
+            f"{path.relative_to(PACKAGE_ROOT)}:{lineno}: {name}"
+            for lineno, name in sorted(by_line.items())
+            if name not in CPU_SAFE_CUDA_CALLS
+        ]
 
     assert not violations, (
         "GPU-only torch.cuda call(s) found -- these raise on CPU-only machines "

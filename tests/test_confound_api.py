@@ -194,23 +194,43 @@ def _run(tmp_path, selection_input, model_input, n=200):
             for m in ("connectome", "covariates", "full", "increment")}
 
 
+@pytest.fixture(scope="module")
+def cell(tmp_path_factory):
+    """Run each 2x2 cell at most once, and share it.
+
+    The three tests below need results from four distinct configurations and
+    between them used to ask for eight runs. Nothing but the configuration
+    varies, so the run belongs to the configuration rather than to the test.
+    """
+    cache = {}
+
+    def get(selection_input, model_input):
+        key = (selection_input, model_input)
+        if key not in cache:
+            directory = tmp_path_factory.mktemp(f"{selection_input}_{model_input}")
+            cache[key] = _run(directory, selection_input, model_input)
+        return cache[key]
+
+    return get
+
+
 @pytest.mark.parametrize("selection_input", ["raw", "residualized"])
 @pytest.mark.parametrize("model_input", ["raw", "residualized"])
-def test_every_cell_of_the_2x2_runs(tmp_path, selection_input, model_input):
+def test_every_cell_of_the_2x2_runs(cell, selection_input, model_input):
     """Each cell is one run reporting one of each model -- no ambiguity about
     which connectome produced `full`."""
-    out = _run(tmp_path, selection_input, model_input)
+    out = cell(selection_input, model_input)
     for model, value in out.items():
         assert np.isfinite(value), f"{model} should be defined"
 
 
-def test_model_input_changes_the_connectome_model(tmp_path):
-    raw = _run(tmp_path, "residualized", "raw")
-    res = _run(tmp_path, "residualized", "residualized")
+def test_model_input_changes_the_connectome_model(cell):
+    raw = cell("residualized", "raw")
+    res = cell("residualized", "residualized")
     assert raw["connectome"] != pytest.approx(res["connectome"], abs=1e-6)
 
 
-def test_model_input_leaves_full_and_covariates_alone_for_the_linear_model(tmp_path):
+def test_model_input_leaves_full_and_covariates_alone_for_the_linear_model(cell):
     """OLS is invariant once the covariates are in the design: residualising the
     connectome moves variance from the strength column into the Z columns, which
     are already there, so the span -- and the fit -- is unchanged.
@@ -219,8 +239,8 @@ def test_model_input_leaves_full_and_covariates_alone_for_the_linear_model(tmp_p
     are not invariant to it, which is exactly why model_input is a run-level
     choice rather than a model name.
     """
-    raw = _run(tmp_path, "residualized", "raw")
-    res = _run(tmp_path, "residualized", "residualized")
+    raw = cell("residualized", "raw")
+    res = cell("residualized", "residualized")
     assert raw["full"] == pytest.approx(res["full"], abs=1e-4)
     assert raw["covariates"] == pytest.approx(res["covariates"], abs=1e-4)
     assert raw["increment"] == pytest.approx(res["increment"], abs=1e-4)
@@ -282,3 +302,4 @@ def test_nonlinear_models_are_not_invariant_to_model_input():
         assert gap > 0.05, (
             f"{cls.__name__} looks invariant to model_input (gap {gap:.1%} of "
             f"sd(y)); if that is real, this design decision should be revisited")
+

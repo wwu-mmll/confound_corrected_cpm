@@ -52,6 +52,29 @@ def _run(results_dir, selection_input, model_input, covariates=True, n_permutati
     return str(results_dir)
 
 
+@pytest.fixture(scope="module")
+def run_dir(tmp_path_factory):
+    """Run each configuration at most once, and share its results directory.
+
+    The tests in this file need five distinct configurations and between them
+    used to ask for seventeen analyses -- the four 2x2 cells alone were run
+    three times over. Every test here only ever *reads* from the directory
+    (run_config.json, report.html, cpm_log.txt), so one run per configuration
+    is enough.
+    """
+    cache = {}
+
+    def get(selection_input, model_input, covariates=True):
+        key = (selection_input, model_input, covariates)
+        if key not in cache:
+            name = f"{selection_input}_{model_input}" + ("" if covariates else "_nocov")
+            cache[key] = _run(tmp_path_factory.mktemp(name),
+                              selection_input, model_input, covariates=covariates)
+        return cache[key]
+
+    return get
+
+
 def _rendered_text(results_dir):
     """Report text with markup and embedded figures stripped.
 
@@ -80,10 +103,10 @@ def _headline(results_dir):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("selection_input,model_input", CELLS)
-def test_run_config_is_persisted(tmp_path, selection_input, model_input):
+def test_run_config_is_persisted(run_dir, selection_input, model_input):
     """Written as a file, not parsed back out of cpm_log.txt: a run with logging
     turned down must still produce a report that knows its own configuration."""
-    d = _run(tmp_path, selection_input, model_input)
+    d = run_dir(selection_input, model_input)
     with open(os.path.join(d, 'run_config.json'), encoding='utf-8') as f:
         cfg = json.load(f)
     assert cfg['selection_input'] == selection_input
@@ -102,12 +125,10 @@ def test_unknown_configuration_says_nothing_rather_than_guessing():
 # ...and it reaches the reader
 # ---------------------------------------------------------------------------
 
-def test_the_four_cells_produce_four_distinguishable_headlines(tmp_path):
+def test_the_four_cells_produce_four_distinguishable_headlines(run_dir):
     headlines = {}
     for selection_input, model_input in CELLS:
-        d = _run(tmp_path / f"{selection_input}_{model_input}",
-                 selection_input, model_input)
-        headline = _headline(d)
+        headline = _headline(run_dir(selection_input, model_input))
         assert "The connectome model predicted" in headline
         match = re.search(r"Confound control: ([a-z][a-z ]+)\.", headline)
         assert match, f"the headline does not name the configuration: {headline}"
@@ -120,9 +141,8 @@ def test_the_four_cells_produce_four_distinguishable_headlines(tmp_path):
 
 
 @pytest.mark.parametrize("selection_input,model_input", CELLS)
-def test_confound_control_is_explained_in_the_body(tmp_path, selection_input, model_input):
-    d = _run(tmp_path, selection_input, model_input)
-    text = _rendered_text(d)
+def test_confound_control_is_explained_in_the_body(run_dir, selection_input, model_input):
+    text = _rendered_text(run_dir(selection_input, model_input))
     label, explanation = describe_confound_control(
         {'selection_input': selection_input, 'model_input': model_input,
          'has_covariates': True})
@@ -131,25 +151,24 @@ def test_confound_control_is_explained_in_the_body(tmp_path, selection_input, mo
     assert explanation.split(" -- ")[0][:45] in text
 
 
-def test_glossary_describes_the_connectome_model_this_run_produced(tmp_path):
+def test_glossary_describes_the_connectome_model_this_run_produced(run_dir):
     """`connectome` means different things under the two model_input settings,
     and carries the same row label either way."""
-    raw = _rendered_text(_run(tmp_path / "raw", "residualized", "raw"))
-    residualized = _rendered_text(
-        _run(tmp_path / "res", "residualized", "residualized"))
+    raw = _rendered_text(run_dir("residualized", "raw"))
+    residualized = _rendered_text(run_dir("residualized", "residualized"))
     assert "deconfounded network strengths" in residualized
     assert "deconfounded network strengths" not in raw
 
 
-def test_suppressed_increment_is_explained(tmp_path):
+def test_suppressed_increment_is_explained(run_dir):
     """The em dash in the Pearson column is deliberate; say so, or it reads as a
     failed computation."""
-    text = _rendered_text(_run(tmp_path, "residualized", "residualized"))
+    text = _rendered_text(run_dir("residualized", "residualized"))
     assert "Fisher" in text and "Steiger" in text
 
 
-def test_report_without_covariates_says_so(tmp_path):
-    d = _run(tmp_path, "raw", "raw", covariates=False)
+def test_report_without_covariates_says_so(run_dir):
+    d = run_dir("raw", "raw", covariates=False)
     with open(os.path.join(d, 'run_config.json'), encoding='utf-8') as f:
         assert json.load(f)['has_covariates'] is False
     assert "no covariates" in _rendered_text(d)
@@ -159,11 +178,11 @@ def test_report_without_covariates_says_so(tmp_path):
 # The configuration table
 # ---------------------------------------------------------------------------
 
-def test_wrapped_config_values_do_not_become_their_own_rows(tmp_path):
+def test_wrapped_config_values_do_not_become_their_own_rows(run_dir):
     """An estimator repr is logged over several indented lines. Treating the
     continuations as new keys produced rows like "threshold=[0.05])]," with an
     empty value."""
-    d = _run(tmp_path, "residualized", "residualized")
+    d = run_dir("residualized", "residualized")
     pairs = parse_config_block(os.path.join(d, 'cpm_log.txt'))
 
     keys = [k for k, _ in pairs]
