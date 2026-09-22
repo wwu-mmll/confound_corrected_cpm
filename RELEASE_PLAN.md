@@ -101,9 +101,19 @@ live in `connectome.py`.)
       5% / Top 10% (`masked_signed_stability_matrix` + self-contained JS/CSS).
       Glass brain renders the default subset. *Follow-up: make the glass brain
       switch too if netplotbrain render cost is addressed.*
-- [ ] Show key variations in both quickstarts: confound control (partial vs
-      residuals), nested CV with p-threshold tuning, stable-edge selection,
+- [ ] **The mkdocs documentation still describes the 0.6.x API** (found 2026-09-22).
+      `documentation/docs/methods.md` (8 references) and `getting_started.md` (3)
+      use `edge_statistic=`, `calculate_residuals=` and the `residuals` model, all
+      removed in 0.7.0 — anyone following them gets a `TypeError` or a `ValueError`.
+      Replace with `selection_statistic` / `selection_input` / `model_input`, and
+      rewrite the model list (`connectome` / `covariates` / `full` / `increment`,
+      with `increment` NaN for Pearson r and F1). Blocks the release.
+- [ ] Show key variations in both quickstarts: confound control (selection_input vs
+      model_input), nested CV with p-threshold tuning, stable-edge selection,
       permutation testing, and passing `atlas` for brain plots.
+- [ ] **Cut the 0.7.0 release**: the CHANGELOG's `[Unreleased]` heading needs to
+      become `[0.7.0]` with a date (`pyproject.toml` already says 0.7.0), then the
+      packaging items below.
 - [ ] Add in-report captions; finish the accessibility/print audit.
 - [ ] Optional: a real-data (or realistic simulated) end-to-end tutorial.
 - [ ] **Cross-run comparison report** (feature idea, 2026-09-22). Confound control is
