@@ -28,7 +28,8 @@ In order:
 
 ## 1. CI
 
-Fixed 2026-09-22, **not yet confirmed green on the runners**. The two failures
+Green as of 2026-09-22 — all 13 jobs on `c5bd54b`, plus the package smoke
+test. The two failures
 were, for the record: `package_smoke.yml` still passing `edge_statistic=`
 (removed in `4c1ffb4` along with the deprecation shims), and a base64 lottery
 in `tests/test_no_covariates.py` — its `_rendered_text` stripped only
@@ -38,7 +39,6 @@ SVG payloads, which write a newline after the comma. ~57 KB of base64 reached a
 The bytes differ per OS because the rendered figures do, which is why the
 failure split cleanly by operating system rather than by Python version.
 
-- [ ] **Confirm green on all 13 jobs** after pushing, before tagging.
 - [ ] **Production code still reads and writes files with the locale codec.**
       `reporting/reporting_utils.py:129`, `reporting/data_loader.py:83,98,220,250`,
       `results_manager.py:363`, `cpm_analysis.py:379,387`, `inference.py:144`.
