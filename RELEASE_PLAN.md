@@ -5,7 +5,7 @@ connectome-based predictive modeling (CPM) across macOS / Linux / Windows and
 Python 3.10–3.14, with trustworthy results, modern docs, and a polished HTML
 report.
 
-**Last audited: 2026-09-22** against `0.7.0` (358 tests green locally, CI red).
+**Last audited: 2026-09-28** against `0.7.0` (251 tests green locally).
 This file lists **only open work**. Finished work is not recorded here — the
 record lives in git history and `CHANGELOG.md`. Items are ordered
 most-important-first, both between and within sections.
@@ -21,9 +21,11 @@ In order:
 1. **Cut the release** — `CHANGELOG.md`'s `[Unreleased]` heading becomes
    `[0.7.0]` with a date (`pyproject.toml` already says 0.7.0), then §4.
 
-   CI is green and the docs now teach the 0.7.0 API, so the two things that were
-   blocking are done. What remains before tagging is §4: the packaging
-   decisions, and a TestPyPI dry-run with a clean install on all three OSes.
+   The packaging decisions are made and applied (PEP 621, committed lock,
+   default torch). What remains before tagging is §4: CI green against the
+   committed lock, then a TestPyPI dry-run with a clean install on all three OSes.
+   The exact edge-selection p-values change edge sets, so the paper numbers
+   must be regenerated against this release (`../PAPER_PLAN.md`).
 
 ---
 
@@ -40,15 +42,7 @@ SVG payloads, which write a newline after the comma. ~57 KB of base64 reached a
 The bytes differ per OS because the rendered figures do, which is why the
 failure split cleanly by operating system rather than by Python version.
 
-- [ ] **Production code still reads and writes files with the locale codec.**
-      `reporting/reporting_utils.py:129`, `reporting/data_loader.py:83,98,220,250`,
-      `results_manager.py:363`, `cpm_analysis.py:379,387`, `inference.py:144`.
-      Symmetric on one machine, so it passes CI, but a report written on a
-      cp1252 Windows box is not readable elsewhere and a non-cp1252 character
-      in a target name raises on write. The tests now all pass `encoding=`;
-      the package should too.
-
-## 2. Test suite: 249 tests
+## 2. Test suite: 251 tests
 
 Down from 359. Everything in the audit has now been applied:
 
@@ -106,13 +100,9 @@ were added — the two modules split out in 0.7.0 had no API reference at all.
 
 ## 4. Packaging & cross-platform install
 
-- [ ] **torch install strategy** (decision #1): keep default torch + document
-      GPU, or CPU-default + a `cccpm[gpu]` extra.
-- [ ] Set version floors for numpy (1.x vs 2.x), pandas, scikit-learn, nilearn;
-      verify under numpy 2.x.
-- [ ] Decide whether to commit `poetry.lock` (CI reproducibility) and whether
-      to migrate pyproject to PEP 621 (decision #4). Poetry 2.x now warns on
-      every `[tool.poetry]` metadata key, so this is no longer cosmetic.
+- [ ] Set version floors for numpy, pandas, scikit-learn, nilearn. numpy 2.x
+      and pandas 3.x are verified (the local suite runs on numpy 2.5.3 / pandas
+      3.0.5); numpy 1.x is untested, so either test it or floor at `numpy>=2`.
 - [ ] Sanity-check heavy report deps (`netplotbrain`, `scikit-image`,
       `pycirclize`) on Windows; consider an optional `cccpm[plots]` extra.
 - [ ] **matplotlib backend (Windows):** rewrite report plotting to the OO
@@ -121,22 +111,15 @@ were added — the two modules split out in 0.7.0 had no API reference at all.
       `installation.md`: `MPLBACKEND=Agg`).
 - [ ] **Release:** `vX.Y.Z-test` → TestPyPI dry-run, clean-install on all 3
       OSes, then tag for PyPI. (Nils triggers deployment.)
-- [ ] **`poetry install --with docs` takes >10 minutes.** The docs group is not
-      in the local lock, so it forces a full re-resolution of a dependency set
-      that includes torch, nilearn and netplotbrain. Sharpens the `poetry.lock`
-      decision above: CI's `build_docs.yml` pays this on every push to `main`.
+- [ ] **Check CI against the committed `poetry.lock`.** It is a universal lock
+      (py3.10 resolves numpy 2.2 / pandas 2.3, py3.12+ numpy 2.5 / pandas 3.0),
+      verified locally on 3.12/Linux only. Confirm all 13 jobs install from it,
+      and that `build_docs.yml` no longer spends >10 minutes re-resolving (the
+      docs group is in the lock now). `package_smoke.yml` still pip-installs the
+      wheel unlocked, so fresh upstream breakage is still caught there.
 
 ## 5. Correctness & statistical validity
 
-- [~] **Edge-selection p-value approximation** (decision #6). The normal
-      approximation to the t-tail in `correlations_and_pvalues` is
-      anti-conservative at small N. Now measured, not estimated:
-      `test_sklearn_equivalence.py::test_edge_pvalues_vs_exact_t_distribution`
-      pins max |p_exact − p_approx| at 0.018 (n=30), 0.0089 (n=60), 0.0044
-      (n=120), 0.0010 (n=500), and asserts the error is never conservative.
-      Pick (a) keep, (b) on-GPU exact t-tail, or (c) scipy `t.sf` on CPU for
-      the threshold step only. Needs sign-off; whichever is chosen, that test
-      says what changes.
 - [ ] **External reference validation** vs Shen MATLAB / GenCPM on ≥1 dataset,
       so paper numbers are defensible. This is what the `cccpm_paper` benchmark
       is for — feed the result back here once numbers agree. See
@@ -145,38 +128,21 @@ were added — the two modules split out in 0.7.0 had no API reference at all.
       imbalance, StratifiedKFold edge cases). Coordinate with §2 — this adds
       tests while §2 removes them; both are about coverage, not count.
 - [ ] **Verify MPS (Apple) / CUDA** run end-to-end on real hardware.
-- [ ] `cpm_analysis.py:474` — `torch.as_tensor` on a read-only,
-      DataFrame-derived array shares memory instead of copying. Safe today,
-      latent hazard, still emits a `UserWarning`. Deserves its own commit.
-
-## 6. Code health
-
-- [ ] `src/cccpm/reporting/plots/cpm_chord_plot.py` had a `__main__` block
-      hardcoded to a `/spm-data` server path, shipped in the wheel — removed.
-      Worth a sweep for others like it: development entry points inside the
-      package are invisible to pyflakes and to the tests.
 
 ---
 
 ## Open decisions (need Nils' input)
 
-1. **torch/GPU packaging**: default torch + doc GPU, or CPU-default + `[gpu]`
-   extra?
-4. **PEP 621 migration** for pyproject, or stay on Poetry's `[tool.poetry]`
-   table? (Poetry 2.2 warns on every key now.)
-6. **Edge-selection p-value computation**: keep the GPU normal approximation
-   (a), a hand-rolled on-GPU exact t-tail (b; `torch.special.betainc` is
-   missing in torch 2.x), or scipy `t.sf` on CPU for the p-value step only (c).
-   Recommend (b) to stay GPU-pure, else (c).
 7. **Multiple-comparison / FDR in edge selection**: `PThreshold` supports
    statsmodels corrections (default `None`, no bug). Should CPM correct across
    the ~tens-of-thousands of edges by default, and with which method? CPM is
    traditionally run uncorrected at a liberal threshold because the model +
    permutation test provide the real inferential control — decide deliberately.
    (Distinct from edge-*stability* significance, resolved via NBS/TFCE.)
-8. **`balanced_accuracy` in `INCREMENTABLE_METRICS`** — kept because it is a
-   mean of two proportions; the written plan listed only `accuracy`/`roc_auc`.
-   Confirm or revert.
+   Related: Bonferroni/Sidak count **every** feature as a test, including the
+   edges the variance gate and `presence_filter` excluded (they were p = 1
+   before, and are t = 0 now). With a presence filter dropping half the edges,
+   Bonferroni is twice as strict as it needs to be. Left as-is for 0.7.0.
 9. **Should one run emit all four 2×2 cells?** Both axes are run-level now, so
    this needs axes over both — not free. Currently four runs.
 
