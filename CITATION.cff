@@ -14,7 +14,8 @@ authors:
   - family-names: Howe
     given-names: Juraj
     affiliation: "Machine Learning in Mental Health Lab, University of Münster"
-version: 0.3.0
+version: 0.7.0
+date-released: 2026-09-28
 license: MIT
 repository-code: "https://github.com/wwu-mmll/confound_corrected_cpm"
 url: "https://wwu-mmll.github.io/confound_corrected_cpm/"

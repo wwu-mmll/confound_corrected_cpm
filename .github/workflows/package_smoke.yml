@@ -14,8 +14,17 @@ on:
 
 jobs:
   clean-install:
-    name: Clean install from built wheel
-    runs-on: ubuntu-latest
+    # All three OSes: this is the release checklist's "clean install on macOS,
+    # Linux and Windows", run on every push instead of by hand before a tag.
+    name: Clean install from built wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -33,15 +42,22 @@ jobs:
 
       - name: Install the wheel into a clean virtual environment
         run: |
-          python -m venv /tmp/clean
-          /tmp/clean/bin/pip install --upgrade pip
-          /tmp/clean/bin/pip install dist/*.whl
+          python -m venv "$RUNNER_TEMP/clean"
+          # Scripts/ on Windows, bin/ elsewhere.
+          if [ -d "$RUNNER_TEMP/clean/Scripts" ]; then
+            CLEAN_PY="$RUNNER_TEMP/clean/Scripts/python"
+          else
+            CLEAN_PY="$RUNNER_TEMP/clean/bin/python"
+          fi
+          echo "CLEAN_PY=$CLEAN_PY" >> "$GITHUB_ENV"
+          "$CLEAN_PY" -m pip install --upgrade pip
+          "$CLEAN_PY" -m pip install dist/*.whl
 
       - name: Import and run a tiny analysis (no dev deps available)
         env:
           MPLBACKEND: Agg
         run: |
-          /tmp/clean/bin/python - <<'PY'
+          "$CLEAN_PY" - <<'PY'
           import numpy as np
           import cccpm
           from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold

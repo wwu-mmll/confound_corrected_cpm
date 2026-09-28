@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-28
+
 ### Changed
 - **`edge_significance_method` is renamed to `stability_significance_method`, and
   `nbs_threshold` to `nbs_stability_threshold`.** The old names conflated two

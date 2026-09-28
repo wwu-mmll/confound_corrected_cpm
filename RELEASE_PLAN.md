@@ -18,12 +18,11 @@ Status legend: `[ ]` todo · `[~]` in progress
 
 In order:
 
-1. **Cut the release** — `CHANGELOG.md`'s `[Unreleased]` heading becomes
-   `[0.7.0]` with a date (`pyproject.toml` already says 0.7.0), then §4.
-
-   The packaging decisions are made and applied (PEP 621, committed lock,
-   default torch). What remains before tagging is §4: CI green against the
-   committed lock, then a TestPyPI dry-run with a clean install on all three OSes.
+1. **Publish 0.7.0** — `CHANGELOG.md` and `CITATION.cff` say 0.7.0 /
+   2026-09-28, CI is green on all 13 jobs against the committed lock, and the
+   package smoke test now clean-installs the wheel on Linux, macOS and Windows.
+   Left: merge `develop` → `main`, tag `v0.7.0` (→ PyPI via `publish.yml`),
+   GitHub release, merge `main` back into `develop`.
    The exact edge-selection p-values change edge sets, so the paper numbers
    must be regenerated against this release (`../PAPER_PLAN.md`).
 
@@ -109,14 +108,9 @@ were added — the two modules split out in 0.7.0 had no API reference at all.
       `Figure()` API so it renders via Agg regardless of the user's backend,
       without a global `matplotlib.use("Agg")` (workaround documented in
       `installation.md`: `MPLBACKEND=Agg`).
-- [ ] **Release:** `vX.Y.Z-test` → TestPyPI dry-run, clean-install on all 3
-      OSes, then tag for PyPI. (Nils triggers deployment.)
-- [ ] **Check CI against the committed `poetry.lock`.** It is a universal lock
-      (py3.10 resolves numpy 2.2 / pandas 2.3, py3.12+ numpy 2.5 / pandas 3.0),
-      verified locally on 3.12/Linux only. Confirm all 13 jobs install from it,
-      and that `build_docs.yml` no longer spends >10 minutes re-resolving (the
-      docs group is in the lock now). `package_smoke.yml` still pip-installs the
-      wheel unlocked, so fresh upstream breakage is still caught there.
+- [ ] **`build_docs.yml` timing with the committed lock.** The docs group is
+      locked now, so the >10-minute re-resolution should be gone; confirm on
+      the first push to `main`.
 
 ## 5. Correctness & statistical validity
 
