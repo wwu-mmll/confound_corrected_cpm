@@ -39,6 +39,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `calculate_residuals=True` residualised the connectome before selection, so the
   filter looked for structural zeros in residualised values, where they no longer
   exist. That interaction warning is gone with the cause.
+- **`increment` is no longer reported for metrics whose difference is not a
+  statistic.** It is a difference of two metrics, which only means something where
+  differences of that quantity are standard: explained variance, the error metrics
+  (as error reduction), accuracy, balanced accuracy and ROC AUC. It is now NaN for
+  **Pearson r** — comparing two correlations needs Fisher z or Steiger's test, not
+  subtraction — and for **F1**, a harmonic mean whose difference has no established
+  interpretation. See `constants.INCREMENTABLE_METRICS`.
+- Report tables render a deliberate NaN as an em dash rather than the string `nan`,
+  and the Model Comparison section explains why `increment` shows one for Pearson r
+  and F1, so it does not read as a failed computation.
+- The Analysis Configuration table no longer turns the wrapped lines of a
+  multi-line estimator repr into their own empty rows.
+- Package metadata is standard PEP 621 (`[project]`) rather than `[tool.poetry]`, with
+  a PEP 639 license expression; Poetry remains the build backend and dev tool.
+  `poetry.lock` is committed, so CI installs a reproducible environment.
+- The installation guide gives the exact commands for a CUDA build on Windows (whose
+  default torch wheel is CPU-only) and a CPU-only build on Linux.
 
 ### Removed
 No deprecation shims: this release changes what some parameters *mean*, and code
@@ -60,19 +77,6 @@ stops. Every removal raises with its replacement named.
 - `Models.residuals`, as described above.
 - `cccpm.statistics.torch_bonferroni`. Bonferroni is now a critical value inside
   `PThreshold.select`, applied per run.
-
-- **`increment` is no longer reported for metrics whose difference is not a
-  statistic.** It is a difference of two metrics, which only means something where
-  differences of that quantity are standard: explained variance, the error metrics
-  (as error reduction), accuracy, balanced accuracy and ROC AUC. It is now NaN for
-  **Pearson r** — comparing two correlations needs Fisher z or Steiger's test, not
-  subtraction — and for **F1**, a harmonic mean whose difference has no established
-  interpretation. See `constants.INCREMENTABLE_METRICS`.
-- Report tables render a deliberate NaN as an em dash rather than the string `nan`,
-  and the Model Comparison section explains why `increment` shows one for Pearson r
-  and F1, so it does not read as a failed computation.
-- The Analysis Configuration table no longer turns the wrapped lines of a
-  multi-line estimator repr into their own empty rows.
 
 ### Added
 - **The report states which confound configuration produced it.** `run_config.json`
