@@ -18,9 +18,10 @@ below is the runnable file `examples/classification_quickstart.py`.
 |--------|------------|----------------|
 | Target `y` | continuous | binary (0/1) |
 | `task_type` | `"regression"` | `"classification"` (or `None` to auto-detect) |
-| Edge statistic | `pearson` / `spearman` | `point_biserial` (use `point_biserial_partial` to control for covariates) |
+| `selection_statistic` | `pearson` / `spearman` | `pearson` — point-biserial correlation *is* Pearson against a 0/1 target, so there is nothing extra to select |
 | Cross-validation | `KFold` | `StratifiedKFold` (keeps class balance across folds) |
 | Metrics | explained variance, Pearson r, MSE, MAE | accuracy, balanced accuracy, F1, ROC AUC |
+| `increment` reported for | explained variance, MSE, MAE (not Pearson r) | accuracy, balanced accuracy, ROC AUC (not F1) |
 
 !!! tip
     For imbalanced classes, prefer **balanced accuracy** and **ROC AUC** over plain
@@ -30,8 +31,10 @@ below is the runnable file `examples/classification_quickstart.py`.
 
 The steps are the same as in the [regression example](regression.md): prepare your
 `X` / `y` / `covariates`, configure `UnivariateEdgeSelection`, construct `CPMAnalysis`,
-and call `run`. The target here is binary, so we pick `point_biserial` edge selection
-and a `StratifiedKFold` splitter, and set `task_type="classification"`.
+and call `run`. The target here is binary, so we use a `StratifiedKFold` splitter and
+set `task_type="classification"`. Confound control works exactly as in regression —
+`selection_input` for edge selection, `model_input` for the connectome the models
+consume.
 
 ## Results
 

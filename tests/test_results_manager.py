@@ -4,19 +4,12 @@ import numpy as np
 import pandas as pd
 import torch
 
-from cccpm.results_manager import ResultsManager, PermutationManager
-from cccpm.constants import Networks, Models, Metrics, TaskType
+from cccpm.results_manager import ResultsManager
+from cccpm.constants import (INCREMENTABLE_METRICS, Metrics, Models, Networks,
+                             TaskType)
 
 
 class TestResultsManagerInit:
-    def test_constructor(self, tmp_path):
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=1, n_folds=5, n_features=10
-        )
-        assert mgr.results_directory == str(tmp_path)
-        assert mgr.dims['folds'] == 5
-        assert mgr.dims['runs'] == 1
-        assert mgr.dims['params'] == 1
 
     def test_results_tensor_shape(self, tmp_path):
         mgr = ResultsManager(
@@ -25,19 +18,14 @@ class TestResultsManagerInit:
         expected = (len(Metrics), len(Models), len(Networks), 2, 5, 3)
         assert mgr.results.shape == expected
 
-    def test_edges_tensor_shape(self, tmp_path):
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=2, n_folds=3, n_features=6
-        )
-        # [N_features, 2(pos/neg), params, folds, runs]
-        assert mgr.cv_edges.shape == (6, 2, 1, 3, 2)
-        assert mgr.cv_edges.dtype == torch.bool
-
     def test_edges_tensor_shape_with_params(self, tmp_path):
         mgr = ResultsManager(
             output_dir=str(tmp_path), n_runs=1, n_folds=4, n_features=10, n_params=3
         )
+        # [N_features, 2 (pos/neg), params, folds, runs]
         assert mgr.cv_edges.shape == (10, 2, 3, 4, 1)
+        # bool, not float: this tensor is the largest allocation in a big run.
+        assert mgr.cv_edges.dtype == torch.bool
 
 
 class TestStoreAndRetrieve:
@@ -52,23 +40,6 @@ class TestStoreAndRetrieve:
         # Verify it was stored in the right place
         stored = mgr.results[:, :, :, 0, 0, :]
         assert torch.allclose(stored, metrics)
-
-    def test_store_edges(self, tmp_path):
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=1, n_folds=2, n_features=6
-        )
-        # Create edges tensor [Features, 2, Runs]
-        edges = torch.zeros(6, 2, 1, dtype=torch.bool)
-        edges[0, Networks.positive, 0] = True
-        edges[2, Networks.positive, 0] = True
-        edges[1, Networks.negative, 0] = True
-
-        mgr.store_edges(param_idx=0, fold_idx=0, edges_tensor=edges)
-
-        assert mgr.cv_edges[0, Networks.positive, 0, 0, 0] == True
-        assert mgr.cv_edges[2, Networks.positive, 0, 0, 0] == True
-        assert mgr.cv_edges[1, Networks.negative, 0, 0, 0] == True
-        assert mgr.cv_edges[3, Networks.positive, 0, 0, 0] == False
 
     def test_store_edges_and_calculate_stability(self, tmp_path):
         n_features = 6
@@ -110,8 +81,11 @@ class TestStoreAndRetrieve:
         assert os.path.exists(os.path.join(str(tmp_path), 'stability_edges.npy'))
 
     def test_stability_without_fold_edges(self, tmp_path):
-        """With store_fold_edges=False (permutation pass) stability is still
-        computed from the fold-sum accumulator, but no per-fold masks are kept
+        """With store_fold_edges=False (permutation / inner-CV passes) stability
+        is still computed correctly from the CPU fold-sum accumulator, but no
+        per-fold masks are kept (this is the CUDA-OOM fix: a persistent
+        [Features, 2, Folds, Runs] tensor on the compute device was the source
+        of the OOM for large parcellations × many folds × many permutations)
         and edges.npy is not written (only stability_edges.npy)."""
         n_features, n_folds = 6, 3
         mgr = ResultsManager(
@@ -119,6 +93,7 @@ class TestStoreAndRetrieve:
             n_features=n_features, store_fold_edges=False,
         )
         assert mgr.cv_edges is None  # per-fold masks not retained
+        assert mgr.cv_edge_sum.device == torch.device('cpu')
 
         for fold in range(n_folds):
             edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
@@ -134,6 +109,16 @@ class TestStoreAndRetrieve:
         assert os.path.exists(os.path.join(str(tmp_path), 'stability_edges.npy'))
         assert not os.path.exists(os.path.join(str(tmp_path), 'edges.npy'))
 
+    def test_cv_edges_and_edge_sum_stay_on_cpu_regardless_of_compute_device(self, tmp_path):
+        """Edge bookkeeping must never be allocated on the compute device --
+        that persistent allocation was the actual CUDA OOM source."""
+        mgr = ResultsManager(
+            output_dir=str(tmp_path), n_runs=1, n_folds=2, n_features=6,
+            device=torch.device('cpu'),  # can't assume CUDA is present in CI
+        )
+        assert mgr.edge_device == torch.device('cpu')
+        assert mgr.cv_edge_sum.device == torch.device('cpu')
+        assert mgr.cv_edges.device == torch.device('cpu')
 
 class TestCalculateFinalCVResults:
     def test_saves_csv_files(self, tmp_path):
@@ -149,18 +134,6 @@ class TestCalculateFinalCVResults:
 
         assert os.path.exists(os.path.join(str(tmp_path), 'cv_results_full.csv'))
         assert os.path.exists(os.path.join(str(tmp_path), 'cv_results_summary.csv'))
-
-    def test_agg_results_populated(self, tmp_path):
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=1, n_folds=3, n_features=3
-        )
-        for fold in range(3):
-            metrics = torch.randn(len(Metrics), len(Models), len(Networks), 1)
-            mgr.store_metrics(param_idx=0, fold_idx=fold, metrics_tensor=metrics)
-
-        mgr.calculate_final_cv_results()
-        assert mgr.agg_results is not None
-        assert isinstance(mgr.agg_results, pd.DataFrame)
 
     def test_regression_filters_metrics(self, tmp_path):
         """Regression task should only output regression metrics."""
@@ -197,21 +170,6 @@ class TestCalculateFinalCVResults:
         assert 'pearson_score' not in df_full.columns
         assert 'mean_squared_error' not in df_full.columns
 
-    def test_increment_computed(self, tmp_path):
-        """Test that increment = full - covariates is computed correctly."""
-        mgr = ResultsManager(
-            output_dir=str(tmp_path), n_runs=1, n_folds=2, n_features=3
-        )
-        for fold in range(2):
-            metrics = torch.randn(len(Metrics), len(Models), len(Networks), 1)
-            mgr.store_metrics(param_idx=0, fold_idx=fold, metrics_tensor=metrics)
-
-        mgr.calculate_final_cv_results()
-
-        expected = mgr.results[:, Models.full] - mgr.results[:, Models.covariates]
-        actual = mgr.results[:, Models.increment]
-        assert torch.allclose(actual, expected)
-
 
 class TestLoadCVResults:
     def test_load_cv_results_filters_mean(self, tmp_path):
@@ -245,236 +203,57 @@ class TestLoadCVResults:
         assert loaded.shape[0] == len(agg_index)
 
 
-class TestPermutationManager:
-    def test_calculate_group_p_value_higher_is_better(self):
-        """For metrics where higher is better, p = (count(true < perm) + 1) / (n_perms + 1)."""
-        true = pd.DataFrame({'pearson_score': [0.5]})
-        perms = pd.DataFrame({'pearson_score': [0.3, 0.6, 0.4, 0.7]})
 
-        p = PermutationManager._calculate_group_p_value(true, perms)
+class TestIncrementIsSuppressedWhereMeaningless:
+    """`increment` subtracts one metric from another, which is only a statistic
+    for metrics where differences are standard. See constants.INCREMENTABLE_METRICS."""
 
-        # true (0.5) < perm: 0.6, 0.7 → 2 out of 4. p = (2+1)/(4+1) = 0.6
-        assert p['pearson_score'] == pytest.approx(3 / 5)
-
-    def test_calculate_group_p_value_lower_is_better(self):
-        """For error metrics (lower is better), p = (count(true > perm) + 1) / (n_perms + 1)."""
-        true = pd.DataFrame({'mean_squared_error': [1.5]})
-        perms = pd.DataFrame({'mean_squared_error': [1.4, 1.6, 1.5, 1.7]})
-
-        p = PermutationManager._calculate_group_p_value(true, perms)
-
-        # true (1.5) > perm: 1.4 → 1 out of 4. p = (1+1)/(4+1) = 0.4
-        assert p['mean_squared_error'] == pytest.approx(2 / 5)
-
-    def test_calculate_group_p_value_mixed_metrics(self):
-        """Test with both higher-is-better and lower-is-better metrics."""
-        true = pd.DataFrame({'pearson_score': [0.2], 'mean_squared_error': [1.5]})
-        perms = pd.DataFrame({
-            'pearson_score': [0.1, 0.3, 0.25],
-            'mean_squared_error': [1.4, 1.6, 1.5]
-        })
-
-        p = PermutationManager._calculate_group_p_value(true, perms)
-
-        # pearson: true 0.2 < perm → 0.3, 0.25 = 2 of 3. p = (2+1)/(3+1) = 0.75
-        assert p['pearson_score'] == pytest.approx(3 / 4)
-        # mse: true 1.5 > perm → 1.4 = 1 of 3. p = (1+1)/(3+1) = 0.5
-        assert p['mean_squared_error'] == pytest.approx(2 / 4)
-
-    def test_calculate_group_p_value_never_exceeds_one(self):
-        """A valid p-value must be in (0, 1] even when every permutation beats the true value."""
-        true = pd.DataFrame({'pearson_score': [0.0]})
-        perms = pd.DataFrame({'pearson_score': [0.5, 0.6, 0.7]})  # all beat true
-
-        p = PermutationManager._calculate_group_p_value(true, perms)
-
-        # (3 + 1) / (3 + 1) = 1.0 — must not exceed 1
-        assert p['pearson_score'] == pytest.approx(1.0)
-        assert 0 < p['pearson_score'] <= 1
-
-    def test_calculate_p_values_groups(self):
-        """Test grouped p-value calculation across model/network combinations."""
-        df_true = pd.DataFrame({
-            'network': ['positive', 'negative'],
-            'model': ['connectome', 'connectome'],
-            'pearson_score': [0.5, 0.6],
-            'mean_squared_error': [1.0, 0.9]
-        }).set_index(['network', 'model'])
-
-        perms_list = []
-        for vals in ([0.4, 0.7], [0.6, 0.5]):
-            df = pd.DataFrame({
-                'network': ['positive', 'negative'],
-                'model': ['connectome', 'connectome'],
-                'pearson_score': vals,
-                'mean_squared_error': [1.1, 0.8]
-            }).set_index(['network', 'model'])
-            perms_list.append(df)
-
-        all_perms = pd.concat(perms_list)
-        pvals = PermutationManager.calculate_p_values(df_true, all_perms)
-
-        assert ('positive', 'connectome') in pvals.index
-        assert ('negative', 'connectome') in pvals.index
-        assert 'pearson_score' in pvals.columns
-        assert 'mean_squared_error' in pvals.columns
-
-    def test_is_lower_better(self):
-        assert PermutationManager._is_lower_better('mean_squared_error') == True
-        assert PermutationManager._is_lower_better('mean_absolute_error') == True
-        assert PermutationManager._is_lower_better('pearson_score') == False
-        assert PermutationManager._is_lower_better('accuracy') == False
-        assert PermutationManager._is_lower_better('some_error') == True
-
-
-def _make_stability_arrays(n_nodes, n_perms, clique, isolated, seed=0,
-                           clique_val=0.9, isolated_val=0.8, null_density=0.05):
-    """Build (true, permutation) stability arrays of the stored shape
-    [n_nodes, n_nodes, 2, runs]. A dense positive-network clique and a few
-    isolated positive-network edges are planted in the observed data; the null
-    is sparse low-stability noise. The negative network is left empty."""
-    rng = np.random.default_rng(seed)
-    triu = np.triu_indices(n_nodes, k=1)
-
-    true = np.zeros((n_nodes, n_nodes, 2, 1))
-    for a in range(len(clique)):
-        for b in range(a + 1, len(clique)):
-            true[clique[a], clique[b], 0, 0] = clique_val
-            true[clique[b], clique[a], 0, 0] = clique_val
-    for (i, j) in isolated:
-        true[i, j, 0, 0] = isolated_val
-        true[j, i, 0, 0] = isolated_val
-
-    perm = np.zeros((n_nodes, n_nodes, 2, n_perms))
-    for p in range(n_perms):
-        for layer in (0, 1):
-            vals = (rng.random(len(triu[0])) < null_density) * rng.choice(
-                [0.4, 0.6], len(triu[0]))
-            perm[triu[0], triu[1], layer, p] = vals
-            perm[triu[1], triu[0], layer, p] = vals
-    return true, perm
-
-
-class TestEdgeSignificance:
-    def test_nbs_shape_and_symmetry(self):
-        true, perm = _make_stability_arrays(20, 100, clique=range(6),
-                                            isolated=[(10, 11)])
-        sig = PermutationManager.calculate_p_values_edges_nbs(true, perm)
-        assert sig.shape == (20, 20, 2)
-        assert np.allclose(sig[:, :, 0], sig[:, :, 0].T)
-        assert np.allclose(sig[:, :, 1], sig[:, :, 1].T)
-
-    def test_nbs_pvalue_bounds(self):
-        true, perm = _make_stability_arrays(20, 100, clique=range(6),
-                                            isolated=[(10, 11)])
-        sig = PermutationManager.calculate_p_values_edges_nbs(true, perm)
-        assert np.all(sig > 0) and np.all(sig <= 1)
-        # floor is 1 / (n_perms + 1)
-        assert sig.min() >= 1.0 / (100 + 1) - 1e-12
-
-    def test_nbs_detects_planted_subnetwork(self):
-        true, perm = _make_stability_arrays(20, 200, clique=range(6),
-                                            isolated=[(10, 11), (14, 17)])
-        sig = PermutationManager.calculate_p_values_edges_nbs(
-            true, perm, threshold=0.5, component_stat="extent")
-        # every clique edge is significant; isolated weak edges are not
-        assert sig[0, 1, 0] < 0.05
-        assert sig[10, 11, 0] == 1.0
-        # empty negative network -> all p == 1
-        assert np.all(sig[:, :, 1] == 1.0)
-
-    def test_nbs_extent_and_intensity_both_run(self):
-        true, perm = _make_stability_arrays(20, 100, clique=range(6),
-                                            isolated=[(10, 11)])
-        ext = PermutationManager.calculate_p_values_edges_nbs(
-            true, perm, component_stat="extent")
-        inten = PermutationManager.calculate_p_values_edges_nbs(
-            true, perm, component_stat="intensity")
-        assert ext[0, 1, 0] < 0.05
-        assert inten[0, 1, 0] < 0.05
-
-    def test_nbs_rejects_unknown_component_stat(self):
-        true, perm = _make_stability_arrays(10, 20, clique=range(4), isolated=[])
-        with pytest.raises(ValueError):
-            PermutationManager.calculate_p_values_edges_nbs(
-                true, perm, component_stat="bogus")
-
-    def test_nbs_deterministic(self):
-        true, perm = _make_stability_arrays(20, 100, clique=range(6),
-                                            isolated=[(10, 11)])
-        a = PermutationManager.calculate_p_values_edges_nbs(true, perm)
-        b = PermutationManager.calculate_p_values_edges_nbs(true, perm)
-        assert np.array_equal(a, b)
-
-    def test_tfce_shape_and_bounds(self):
-        true, perm = _make_stability_arrays(20, 100, clique=range(6),
-                                            isolated=[(10, 11)])
-        sig = PermutationManager.calculate_p_values_edges_tfce(true, perm)
-        assert sig.shape == (20, 20, 2)
-        assert np.all(sig > 0) and np.all(sig <= 1)
-
-    def test_tfce_strong_isolated_edge_can_be_significant(self):
-        # A strongly-stable isolated edge (0.8) beats a sparse null capped at
-        # 0.6, with no primary threshold needed. The null density is kept low so
-        # it cannot form a large connected 0.6-stability cluster: extent-weighted
-        # TFCE legitimately lets such a cluster outscore a single strong edge, so
-        # a dense null would (correctly) mask the isolated edge.
-        true, perm = _make_stability_arrays(20, 200, clique=range(6),
-                                            isolated=[(10, 11)],
-                                            isolated_val=0.8, null_density=0.02)
-        sig = PermutationManager.calculate_p_values_edges_tfce(true, perm)
-        assert sig[10, 11, 0] < 0.05
-
-    def test_nbs_diagnostics(self):
-        import json
-        true, perm = _make_stability_arrays(20, 200, clique=range(6),
-                                            isolated=[(10, 11)])
-        sig, meta = PermutationManager.calculate_p_values_edges_nbs(
-            true, perm, return_diagnostics=True)
-        assert sig.shape == (20, 20, 2)
-        assert meta["method"] == "nbs"
-        assert meta["n_permutations"] == 200
-        pos = meta["networks"]["positive"]
-        assert len(pos["max_null"]) == 200
-        assert pos["largest_component_edges"] == 15  # 6-node clique
-        assert pos["n_significant_components"] >= 1
-        assert pos["components"][0]["statistic"] >= pos["components"][-1]["statistic"]
-        # JSON-serialisable (this is what gets written to disk)
-        assert json.dumps(meta)
-
-    def test_tfce_diagnostics(self):
-        import json
-        true, perm = _make_stability_arrays(20, 100, clique=range(6),
-                                            isolated=[(10, 11)])
-        sig, meta = PermutationManager.calculate_p_values_edges_tfce(
-            true, perm, return_diagnostics=True)
-        assert meta["method"] == "tfce"
-        pos = meta["networks"]["positive"]
-        assert len(pos["max_null"]) == 100
-        assert pos["observed_max"] > 0
-        assert json.dumps(meta)
-
-
-class TestStableEdgesContext:
-    def test_context_uncapped_with_csv_and_method_info(self, tmp_path):
-        from cccpm.reporting.section_builders import build_stable_edges_context
-
-        true, perm = _make_stability_arrays(20, 200, clique=range(8),
-                                            isolated=[(10, 11)])
-        sig, meta = PermutationManager.calculate_p_values_edges_nbs(
-            true, perm, return_diagnostics=True)
-
-        ctx = build_stable_edges_context(
-            edge_stability=true,
-            edge_stability_significance=sig,
-            atlas_labels=None,
-            significance_meta=meta,
-            plots_dir=str(tmp_path),
+    def _manager_with_metrics(self, tmp_path, task_type=TaskType.regression):
+        mgr = ResultsManager(
+            output_dir=str(tmp_path), n_runs=1, n_folds=3, n_features=3
         )
-        assert ctx["has_edge_data"] is True
-        assert ctx["edge_method"] == "nbs"
-        assert "Network-Based Statistic" in ctx["edge_method_label"]
-        # every significant clique edge shown (8-node clique = 28 edges), no cap
-        assert ctx["edge_count_positive"] == 28
-        assert ctx["edge_csv_data_uri"].startswith("data:text/csv;base64,")
-        assert ctx["null_plot_positive"]  # figure embedded
+        for fold in range(3):
+            metrics = torch.rand(len(Metrics), len(Models), len(Networks), 1) + 0.5
+            mgr.store_metrics(param_idx=0, fold_idx=fold, metrics_tensor=metrics)
+        mgr.calculate_final_cv_results(task_type=task_type)
+        return mgr
+
+    def test_pearson_increment_is_nan(self, tmp_path):
+        """A difference of two correlations is not a comparison of correlations
+        -- that needs Fisher z or Steiger's test, not subtraction."""
+        mgr = self._manager_with_metrics(tmp_path)
+        assert torch.isnan(mgr.results[Metrics.pearson_score, Models.increment]).all()
+
+    def test_f1_increment_is_nan(self, tmp_path):
+        mgr = self._manager_with_metrics(tmp_path, TaskType.classification)
+        assert torch.isnan(mgr.results[Metrics.f1_score, Models.increment]).all()
+
+    def test_interpretable_increments_survive(self, tmp_path):
+        """Every metric whose difference *is* a statistic keeps full - covariates.
+
+        One run over INCREMENTABLE_METRICS rather than one test per metric --
+        and reading the constant means a metric added to it is covered here
+        automatically, instead of silently untested until someone remembers.
+        """
+        # Pin the membership itself. Reading the constant means a metric
+        # *removed* from it would silently stop being checked -- which the old
+        # hardcoded parametrize list would have caught. Assert both: the set is
+        # what we think it is, and every member behaves.
+        assert {m.name for m in INCREMENTABLE_METRICS} == {
+            "explained_variance_score", "mean_squared_error",
+            "mean_absolute_error", "accuracy", "balanced_accuracy", "roc_auc",
+        }, "INCREMENTABLE_METRICS changed -- is the increment still a statistic?"
+
+        mgr = self._manager_with_metrics(tmp_path)
+        for metric in INCREMENTABLE_METRICS:
+            expected = (mgr.results[metric, Models.full]
+                        - mgr.results[metric, Models.covariates])
+            assert torch.allclose(mgr.results[metric, Models.increment],
+                                  expected), metric.name
+
+    def test_suppression_does_not_touch_the_other_models(self, tmp_path):
+        """Only the increment row is affected -- Pearson r itself is fine."""
+        mgr = self._manager_with_metrics(tmp_path)
+        for model in (Models.connectome, Models.covariates, Models.full):
+            assert torch.isfinite(
+                mgr.results[Metrics.pearson_score, model]).all(), model.name

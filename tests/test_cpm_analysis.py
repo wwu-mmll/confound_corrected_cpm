@@ -1,7 +1,10 @@
 """
-Tests for the CPMAnalysis pipeline: input handling, data validation, and permutation generation.
+Tests for the CPMAnalysis pipeline: input handling, repeated k-fold, and
+permutation generation.
 
-Full pipeline correctness (regression + classification) is tested in test_ground_truth.py.
+Full pipeline correctness (regression + classification) is tested in
+test_ground_truth.py; `check_data` itself, including missing-value handling, in
+test_validation.py.
 """
 
 import numpy as np
@@ -12,13 +15,14 @@ import torch
 from sklearn.model_selection import KFold, RepeatedKFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
-from cccpm.utils import check_data
+from cccpm.preprocessing import to_device
 from cccpm.reporting.reporting_utils import average_over_repeats
+from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 
 def _make_cpm(results_directory, **kwargs):
     edge_selection = UnivariateEdgeSelection(
-        edge_statistic="pearson",
+        selection_statistic="pearson",
         edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
     )
     return CPMAnalysis(
@@ -39,33 +43,20 @@ def test_input_is_dataframe(cpm_instance, simulated_data):
     )
 
 
-# --- Missing value handling ---
+def test_device_copy_never_aliases_the_callers_array():
+    """The run's working tensor is a copy, even of float32 CPU input.
 
-def test_nan_in_X(simulated_data):
-    X, y, covariates = simulated_data
-    X_nan = X.copy()
-    X_nan[0, 0] = np.nan
-
-    with pytest.raises(ValueError):
-        check_data(X_nan, y, covariates, impute_missings=False)
-
-    # Should not raise
-    check_data(X_nan, y, covariates, impute_missings=True)
-
-
-def test_nan_in_y(simulated_data):
-    X, y, covariates = simulated_data
-    y_nan = y.copy()
-    y_nan[0] = np.nan
-
-    # raise error if y contains nan and impute_missings is False
-    with pytest.raises(ValueError):
-        check_data(X, y_nan, covariates, impute_missings=False)
-
-    # but also raise an error if y contains nan and impute_missings is True
-    # values in y should never be missing
-    with pytest.raises(ValueError):
-        check_data(X, y_nan, covariates, impute_missings=True)
+    ``torch.as_tensor`` returned a view there, so the pipeline's tensor shared
+    memory with the user's array -- or with a read-only pandas copy-on-write
+    view, which torch flags as undefined behaviour on write. Checked directly
+    rather than through the warning: torch emits that one once per process, so
+    whichever test ran first would have swallowed it.
+    """
+    X = np.arange(12, dtype=np.float32).reshape(3, 4)
+    X.setflags(write=False)
+    X_dev = to_device(X, "cpu")
+    assert X_dev.dtype == torch.float32
+    assert not np.shares_memory(X_dev.numpy(), X)
 
 
 # --- Repeated k-fold ---
@@ -96,7 +87,7 @@ def test_repeated_kfold_averages_individual_outputs(tmp_path, simulated_data):
     n_splits, n_repeats = 5, 3
 
     edge_selection = UnivariateEdgeSelection(
-        edge_statistic="pearson",
+        selection_statistic="pearson",
         edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
     )
     cpm = CPMAnalysis(
@@ -137,7 +128,7 @@ def test_pipeline_is_reproducible(tmp_path, simulated_data):
 
     def run_once(subdir):
         edge_selection = UnivariateEdgeSelection(
-            edge_statistic="pearson",
+            selection_statistic="pearson",
             edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
         )
         cpm = CPMAnalysis(
@@ -231,3 +222,64 @@ def test_permutations_are_shuffled(cpm_instance):
     # Ensure the first permutation is not identical to the original input
     assert not np.array_equal(permuted_y[:, 0], y), \
         "The permuted vector is identical to the input! (No shuffle occurred)"
+
+
+# --- Permutation chunking (memory valve) --------------------------------------
+
+def test_permutation_chunking_does_not_change_results(tmp_path, monkeypatch):
+    """
+    Chunking permutations is a memory valve, not a change of method: splitting
+    the runs axis must not alter any result.
+
+    Permutations are always vectorised (y is [N_samples, N_runs] and the edge
+    statistic is one matmul over all columns). The chunk size only caps how many
+    columns are in flight so a large parcellation crossed with many permutations
+    degrades in speed rather than running out of memory -- so results computed in
+    chunks must match results computed in one pass.
+
+    Edge selection must agree exactly. Metrics are compared with a tolerance
+    because reducing over a differently-shaped tensor changes float32
+    accumulation order; the observed drift is ~6e-7 on values of order 1.
+    """
+    import cccpm.cpm_analysis as cpm_analysis_module
+    from cccpm.results_manager import ResultsManager
+    from cccpm.constants import TaskType
+
+    X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=120, n_features=45)
+    rng = np.random.default_rng(0)
+    y_perms = np.stack([rng.permutation(np.asarray(y).ravel()) for _ in range(17)], axis=1)
+
+    def run(chunk_size):
+        captured = {}
+        original_init = ResultsManager.__init__
+
+        def remember(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            captured['manager'] = self
+
+        monkeypatch.setattr(ResultsManager, '__init__', remember)
+        if chunk_size is not None:
+            monkeypatch.setattr(cpm_analysis_module, 'plan_permutation_chunk',
+                                lambda **kwargs: chunk_size)
+        cpm = CPMAnalysis(
+            results_directory=str(tmp_path / f"chunk_{chunk_size}"),
+            cv=KFold(n_splits=3, shuffle=True, random_state=1),
+            edge_selection=UnivariateEdgeSelection(
+                selection_statistic='pearson',
+                edge_selection=[PThreshold(threshold=[0.05], correction=[None])]),
+            inner_cv=None, n_permutations=0, device='cpu')
+        cpm.task_type = TaskType.regression
+        cpm._single_run(X=X, y=y_perms, covariates=covariates, perm_run=True)
+        monkeypatch.undo()
+        manager = captured['manager']
+        return manager.results.clone(), manager.cv_edge_sum.clone()
+
+    reference_metrics, reference_edges = run(None)          # single pass, 17 runs
+    for chunk_size in (1, 3, 5, 16):
+        metrics, edges = run(chunk_size)
+        assert torch.equal(edges, reference_edges), (
+            f"chunk={chunk_size} selected different edges")
+        # equal_nan: the increment of a metric whose difference is not a
+        # statistic is NaN by design (see constants.INCREMENTABLE_METRICS).
+        torch.testing.assert_close(metrics, reference_metrics, rtol=0, atol=1e-5,
+                                   equal_nan=True)

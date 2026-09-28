@@ -4,20 +4,18 @@ import pandas as pd
 import seaborn as sns
 
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 
 from pandas.api.types import is_numeric_dtype
 
 from cccpm.reporting.plots.figure_style import (
     COLOR_MAP,
-    PANEL,
     SQUARE,
     apply_nature_style,
     save_figure,
 )
 
-MODEL_ORDER = ["covariates", "connectome", "full", "residuals", "increment"]
+MODEL_ORDER = ["covariates", "connectome", "full", "increment"]
 
 
 def scatter_plot_main(
@@ -101,7 +99,6 @@ def scatter_plot_main(
 def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     apply_nature_style()
 
-    #df = df[df['model'].isin(['connectome', 'residuals', 'full'])]
     df = df[df['model'].isin(['connectome'])]
 
     def regplot_colored(data, **kwargs):
@@ -161,19 +158,13 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name)
 def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 grid of histograms showing the distribution of network_strength
-    for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
+    for the connectome model and two networks ('positive', 'negative').
     """
     apply_nature_style()
 
     # Filter relevant data
-    df = df[df["model"].isin(["connectome", "residuals"])]
+    df = df[df["model"] == "connectome"]
     df = df[df["network"].isin(["positive", "negative"])]
-
-    # Color mapping
-    color_map = {
-        "positive": "#FF5768",  # red
-        "negative": "#6C88C4"   # blue
-    }
 
     def histplot_colored(data, color=None, **kwargs):
         # Override color based on 'network' value
@@ -210,7 +201,7 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) 
 def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Create a 2x2 scatter plot of y_true vs network_strength
-    for two models ('connectome', 'residuals') and two networks ('positive', 'negative').
+    for the connectome model and two networks ('positive', 'negative').
     """
     apply_nature_style()
 

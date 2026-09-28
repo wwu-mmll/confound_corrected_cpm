@@ -6,7 +6,6 @@ This mirrors ``regression_quickstart.py`` but predicts a 0/1 class label instead
 of a continuous score. The only real differences are:
 
   * the target ``y`` is binary,
-  * an edge statistic suited to a binary target ('point_biserial'),
   * a stratified cross-validation splitter, and
   * classification metrics in the report (accuracy, balanced accuracy, F1, AUC).
 
@@ -51,11 +50,13 @@ y = (sim["y"].ravel() > np.median(sim["y"])).astype(float)   # median split → 
 # ---------------------------------------------------------------------------
 # 2. Configure edge selection
 # ---------------------------------------------------------------------------
-# 'point_biserial' is the correlation between each (continuous) edge and the
-# binary target. Use 'point_biserial_partial' to control for covariates during
-# edge selection.
+# A binary 0/1 target through the Pearson path *is* the point-biserial
+# correlation, so there is no separate statistic to pick. Confound control works
+# exactly as in the regression quickstart: `selection_input` here, `model_input`
+# on CPMAnalysis.
 edge_selection = UnivariateEdgeSelection(
-    edge_statistic="point_biserial",
+    selection_statistic="pearson",
+    selection_input="residualized",
     edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
 )
 
@@ -67,7 +68,7 @@ cpm = CPMAnalysis(
     task_type="classification",                   # or leave as None to auto-detect
     cv=StratifiedKFold(n_splits=10, shuffle=True, random_state=42),
     edge_selection=edge_selection,
-    n_permutations=100,                           # use 1000+ for a real analysis
+    n_permutations=1000,                           # use 1000+ for a real analysis
     atlas="Schaefer100-17",                       # built-in atlas → brain plots in the
                                                   # report; or pass a path to a custom
                                                   # CSV (region,x,y,z[,network]).

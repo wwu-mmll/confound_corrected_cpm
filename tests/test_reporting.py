@@ -6,11 +6,14 @@ assert the report is generated, self-contained, and contains the expected
 sections — with and without an atlas.
 """
 
+import re
 import shutil
 from pathlib import Path
 
 import numpy as np
 import pytest
+
+from conftest import report_text
 
 from cccpm.reporting.html_report import HTMLReporter
 from cccpm.reporting.plots.connectome_utils import masked_signed_stability_matrix
@@ -123,3 +126,24 @@ def test_masked_signed_stability_matrix_modes():
     # significant without significance data falls back to all stable edges
     nosig = masked_signed_stability_matrix(stab, None, mode="significant")
     assert nosig[0, 2] == 0.6
+
+
+def test_report_text_leaves_no_base64_for_a_word_search_to_trip_over(results_dir):
+    """`conftest.report_text` must return prose, not image bytes.
+
+    Tests that ask "does the report say X?" search this text. A report inlines
+    ~100-180 KB of base64 per figure; if any of it survives, whether the letters
+    of X occur in it is a coin flip decided by the rendered pixels -- which
+    differ per operating system. That is not hypothetical: the earlier helper
+    stripped only `data:image/...;base64,` immediately followed by base64, and
+    missed matplotlib's SVG output, which writes a newline after the comma. The
+    macOS and Windows CI jobs went red while Linux stayed green.
+    """
+    _generate(results_dir)
+    text = report_text(results_dir)
+
+    assert "base64" not in text
+    # Long unbroken alphanumeric runs are the signature of an embedded payload;
+    # no word in the report's prose comes close.
+    longest = max((len(run) for run in re.findall(r"[A-Za-z0-9+/=]+", text)), default=0)
+    assert longest < 60, f"a {longest}-character run survived -- something is still embedded"

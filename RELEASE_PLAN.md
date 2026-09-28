@@ -1,123 +1,162 @@
-# CCCPM Release Readiness Plan
+# CCCPM Release Plan — what is left to do
 
-Goal: make `cccpm` easy and reliable for researchers to install and use for
+Goal: ship `cccpm` 0.7.0 — easy and reliable to install and use for
 connectome-based predictive modeling (CPM) across macOS / Linux / Windows and
-Python 3.10–3.14, with trustworthy results, modern docs, and a polished HTML report.
+Python 3.10–3.14, with trustworthy results, modern docs, and a polished HTML
+report.
 
-Status legend: [ ] todo · [~] in progress · [x] done
+**Last audited: 2026-09-28** against `0.7.0` (251 tests green locally).
+This file lists **only open work**. Finished work is not recorded here — the
+record lives in git history and `CHANGELOG.md`. Items are ordered
+most-important-first, both between and within sections.
 
-**Last audited: 2026-07-22** against `0.4.2` (suite green). Completed work is
-pruned from this plan — the record lives in git history and `CHANGELOG.md`.
-Open items are grouped by category and ordered most-important-first, both between
-and within sections.
+Status legend: `[ ]` todo · `[~]` in progress
 
 ---
 
-## Correctness & statistical validity
+## 0. Blocking the 0.7.0 release
 
-- [ ] **Clear error when no confound is provided.** A missing/`None` `covariates`
-      argument currently crashes deep in `check_data`/`get_residuals` instead of
-      failing fast. Catch it early in `check_data`/`CPMAnalysis.run` and raise a
-      clear message that a confound is currently required (the covariates/full/
-      residuals variants and the `*_partial` statistics all assume one). Add a
-      test. (Longer term: consider a real no-confound mode.)
-- [~] **Edge-selection p-value approximation** (decision #6). The normal
-      approximation to the t-tail in `correlations_and_pvalues` is
-      anti-conservative at small N (~13% too low at N=20, negligible at N≥100).
-      Pick (a) keep, (b) on-GPU exact t-tail, or (c) scipy `t.sf` on CPU for the
-      threshold step only. Needs sign-off.
-- [x] **Connected-component edge selection** (2026-07-22).
-      `UnivariateEdgeSelection(connected_components=True|int)` drops selected edges
-      not in a connected component with ≥ N edges (N=2 by default), per network,
-      per fold and permutation (`filter_connected_components`, networkx). Tested.
-- [ ] **External reference validation** vs Shen MATLAB / GenCPM on ≥1 dataset, so
-      paper numbers are defensible (this is what the `cccpm_paper` benchmark is
-      for — feed the result back here once numbers agree).
-- [ ] **Classification path:** expand tests (probabilities, AUC, class imbalance,
-      StratifiedKFold edge cases).
-- [ ] **Verify MPS (Apple) / CUDA** run end-to-end on real hardware.
+In order:
 
-## Performance
+1. **Publish 0.7.0** — `CHANGELOG.md` and `CITATION.cff` say 0.7.0 /
+   2026-09-28, CI is green on all 13 jobs against the committed lock, and the
+   package smoke test now clean-installs the wheel on Linux, macOS and Windows.
+   Left: merge `develop` → `main`, tag `v0.7.0` (→ PyPI via `publish.yml`),
+   GitHub release, merge `main` back into `develop`.
+   The exact edge-selection p-values change edge sets, so the paper numbers
+   must be regenerated against this release (`../PAPER_PLAN.md`).
 
-- [x] **VRAM blow-up in edge-stability aggregation (GPU OOM)** (2026-07-22).
-      Edge bookkeeping moved to CPU and reduced to a running fold-sum
-      (`cv_edge_sum`); node×node densification built on CPU; per-fold `edges.npy`
-      written for the real run only (permutations keep just the fold-averaged
-      `stability_edges.npy`). Verified on a real GPU: 100 nodes × 10 folds × 200
-      perms now peaks at ~69 MB VRAM for this step. Small-GPU guidance added to
-      `installation.md`.
-- [x] **GPU-vs-CPU speed test + investigation** (2026-07-22).
-      `scripts/benchmark_cpu_gpu.py` times edge selection + model fit on CPU vs
-      CUDA across sizes/permutations. **Finding:** CPU≈GPU is expected at
-      `perms=1` (a plain run) — the matmuls are tiny and GPU launch/transfer
-      overhead cancels the win; the GPU only pulls ahead with a large permutation
-      batch and/or big connectomes (e.g. ~23× at 200 nodes × 1000 perms on an
-      RTX 3090, but ~0.95× at 100 nodes × 1 perm). A full `run()` also has fixed
-      CPU-bound overhead (IO, report, networkx) that dilutes the kernel speedup.
+---
 
-## Code health & cleanup
-*Done 2026-07-22 (no behavior change, suite green): removed the dead/broken
-`utils.py` converters + duplicate import; `ResultsManager.collect_results` and
-`_save_inner_cv_to_csv`; the `SelectPercentile`/`SelectKBest` stubs; the duplicated
-`PThreshold` docstring; the unused `simulation/simulate_multivariate` module; the
-AI-narration comments in `linear_model.py`; and the double `cv_predictions.csv`
-write. The 3 remaining test-only matrix/vector converters were kept — they are the
-reference implementations that validate the production `vector_to_matrix_tensor_version`.*
+## 1. CI
 
-No open code-health items. (Future: consolidate the duplicate
-`vector_to_upper_triangular_matrix` defined locally in `plots/cpm_chord_plot.py`.)
+Green as of 2026-09-22 — all 13 jobs on `c5bd54b`, plus the package smoke
+test. The two failures
+were, for the record: `package_smoke.yml` still passing `edge_statistic=`
+(removed in `4c1ffb4` along with the deprecation shims), and a base64 lottery
+in `tests/test_no_covariates.py` — its `_rendered_text` stripped only
+`data:image/...;base64,` followed *immediately* by base64, missing matplotlib's
+SVG payloads, which write a newline after the comma. ~57 KB of base64 reached a
+`"nan" not in ...` substring assertion; expected hits by chance 1.75 per report.
+The bytes differ per OS because the rendered figures do, which is why the
+failure split cleanly by operating system rather than by Python version.
 
-## Packaging & cross-platform install
+## 2. Test suite: 251 tests
 
-- [ ] **torch install strategy** (decision #1): keep default torch + document GPU,
-      or CPU-default + a `cccpm[gpu]` extra.
-- [ ] Set version floors for numpy (1.x vs 2.x), pandas, scikit-learn, nilearn;
-      verify under numpy 2.x.
-- [ ] Decide whether to commit `poetry.lock` (CI reproducibility) and whether to
-      migrate pyproject to PEP 621 (decision #4).
+Down from 359. Everything in the audit has now been applied:
+
+- The two AST checks that were 79 collected tests over the package's own source
+  files are 3, each verified to still name the offending file and line.
+- The repeated pipeline runs are shared behind module-scoped fixtures
+  (`test_confound_api.py` 34.7s → 19.8s,
+  `test_report_states_its_configuration.py` 63.5s → 25.1s).
+- 15 redundant tests deleted, each covered in full by one that does strictly
+  more.
+- The one-behaviour-many-functions families merged, retaining every assertion:
+  covariate coercion, `get_variable_names`, task-type detection, the p-value
+  definition, the bundled-atlas tables, `resolve_atlas`, the simulator's
+  argument validation and the incrementable metrics.
+
+Two things got *stronger* rather than smaller in the process:
+
+- `test_simulate_sem.py`'s argument validation asserted only that *some*
+  `ValueError` came out, which an unrelated typo would also satisfy. Each case
+  now pins its message.
+- `test_scoring.py::test_metrics_ordering` did not test ordering — it asserted
+  shapes, true for any in-range index. It now compares each row against an
+  independent reference, with predictions chosen so the four metrics take
+  distinct values; any swap fails all 12 cross-pairs.
+- `test_interpretable_increments_survive` reads `INCREMENTABLE_METRICS` instead
+  of a hardcoded list, so a metric added to the constant is covered
+  automatically — and pins the set's membership, so one *removed* from it
+  cannot silently stop being checked.
+
+Still deliberately untouched: `test_integration.py` (the only guard against
+example rot), `test_reporting.py`'s atlas test (the only netplotbrain cover),
+and `test_feature_interactions.py`'s 2^4 grid (it exists because two features
+were silently inert *in combination*).
+
+- [ ] **Delete the migration guards in 0.8.0**, not now: the ~8 tests in
+      `test_confound_api.py` pinning the removed-0.6.x-spelling errors, plus the
+      `test_renamed_parameters_*` cases for `stability_significance_method` /
+      `nbs_stability_threshold`. Worth having through this release, pointless
+      after it.
+
+## 3. Docs & report
+
+The 0.6.x API references are gone: `methods.md`, `getting_started.md`,
+`interpreting_results.md`, both example pages, the package `README.md`, the
+quickstarts and the embedded showcase report were all rewritten against 0.7.0,
+and `mkdocs build --strict` is clean. `api/statistics.md` and `api/inference.md`
+were added — the two modules split out in 0.7.0 had no API reference at all.
+
+- [ ] Add in-report captions; finish the accessibility/print audit.
+- [ ] Optional: a real-data (or realistic simulated) end-to-end tutorial.
+- [ ] Regenerate `documentation/docs/assets/simulated_data_report.html` whenever
+      the report layout changes — it is a committed 2.2 MB artifact and will go
+      stale silently. Generated by a snippet kept with the release notes;
+      consider a `scripts/` entry point so it is reproducible.
+
+## 4. Packaging & cross-platform install
+
+- [ ] Set version floors for numpy, pandas, scikit-learn, nilearn. numpy 2.x
+      and pandas 3.x are verified (the local suite runs on numpy 2.5.3 / pandas
+      3.0.5); numpy 1.x is untested, so either test it or floor at `numpy>=2`.
 - [ ] Sanity-check heavy report deps (`netplotbrain`, `scikit-image`,
       `pycirclize`) on Windows; consider an optional `cccpm[plots]` extra.
 - [ ] **matplotlib backend (Windows):** rewrite report plotting to the OO
       `Figure()` API so it renders via Agg regardless of the user's backend,
       without a global `matplotlib.use("Agg")` (workaround documented in
       `installation.md`: `MPLBACKEND=Agg`).
-- [ ] **Release:** do a `vX.Y.Z-test` → TestPyPI dry-run, clean-install on all 3
-      OSes, then tag for PyPI. (Nils triggers deployment.)
+- [ ] **`build_docs.yml` timing with the committed lock.** The docs group is
+      locked now, so the >10-minute re-resolution should be gone; confirm on
+      the first push to `main`.
 
-## Docs & report
+## 5. Correctness & statistical validity
 
-- [x] **Brain-plot edge thresholding + in-report selector** (2026-07-22). Brain &
-      Edges defaults to significant edges (NBS/TFCE p<alpha) with an in-report
-      button group to switch the matrix/hub/chord views between Significant / Top
-      5% / Top 10% (`masked_signed_stability_matrix` + self-contained JS/CSS).
-      Glass brain renders the default subset. *Follow-up: make the glass brain
-      switch too if netplotbrain render cost is addressed.*
-- [ ] Show key variations in both quickstarts: confound control (partial vs
-      residuals), nested CV with p-threshold tuning, stable-edge selection,
-      permutation testing, and passing `atlas` for brain plots.
-- [ ] Add in-report captions; finish the accessibility/print audit.
-- [ ] Optional: a real-data (or realistic simulated) end-to-end tutorial.
-- [ ] Optional: extract the brain figures into `wwu-mmll/brainplots`, publish it,
-      and depend on it via `cccpm[plots]` (code currently lives in CCCPM).
-- [~] `examples/` curation: `example_simulated_classification.py` overlaps the
-      quickstarts — which author-written examples to keep is a call for Nils.
+- [ ] **External reference validation** vs Shen MATLAB / GenCPM on ≥1 dataset,
+      so paper numbers are defensible. This is what the `cccpm_paper` benchmark
+      is for — feed the result back here once numbers agree. See
+      `../PAPER_PLAN.md` §3.
+- [ ] **Classification path:** expand tests (probabilities, AUC, class
+      imbalance, StratifiedKFold edge cases). Coordinate with §2 — this adds
+      tests while §2 removes them; both are about coverage, not count.
+- [ ] **Verify MPS (Apple) / CUDA** run end-to-end on real hardware.
 
 ---
 
 ## Open decisions (need Nils' input)
-1. **torch/GPU packaging**: default torch + doc GPU, or CPU-default + `[gpu]` extra?
-4. **PEP 621 migration** for pyproject, or stay on Poetry's `[tool.poetry]` table?
-6. **Edge-selection p-value computation**: keep the GPU normal approximation (a),
-   a hand-rolled on-GPU exact t-tail (b; `torch.special.betainc` is missing in
-   torch 2.x), or scipy `t.sf` on CPU for the p-value step only (c). Recommend
-   (b) to stay GPU-pure, else (c).
+
 7. **Multiple-comparison / FDR in edge selection**: `PThreshold` supports
-   statsmodels corrections (default `None`, no bug). Should CPM correct across the
-   ~tens-of-thousands of edges by default, and with which method? CPM is
+   statsmodels corrections (default `None`, no bug). Should CPM correct across
+   the ~tens-of-thousands of edges by default, and with which method? CPM is
    traditionally run uncorrected at a liberal threshold because the model +
    permutation test provide the real inferential control — decide deliberately.
    (Distinct from edge-*stability* significance, resolved via NBS/TFCE.)
+   Related: Bonferroni/Sidak count **every** feature as a test, including the
+   edges the variance gate and `presence_filter` excluded (they were p = 1
+   before, and are t = 0 now). With a presence filter dropping half the edges,
+   Bonferroni is twice as strict as it needs to be. Left as-is for 0.7.0.
+9. **Should one run emit all four 2×2 cells?** Both axes are run-level now, so
+   this needs axes over both — not free. Currently four runs.
+
+## Logged, deliberately not being built now
+
+- **Cross-run comparison report.** Confound control is two run-level choices,
+  so the 2×2 is four separate analyses and no single report can show the
+  raw-vs-deconfounded comparison that is the scientifically interesting output.
+  A report that reads several results directories and puts them side by side
+  would. `cccpm_paper`'s `figures/fig_empirical.py` does this by hand today.
+  Agreed with Nils to log it rather than build it — it is a new feature, not
+  reporting follow-through.
+- **Extract the brain figures into `wwu-mmll/brainplots`**, publish it, and
+  depend on it via `cccpm[plots]` (code currently lives in CCCPM).
+- **Make the glass brain honour the Significant / Top 5% / Top 10% selector**
+  (the matrix/hub/chord views already do). Needs netplotbrain render cost
+  addressed first.
+
+---
 
 *Released: 0.3.0 (install reliability), 0.3.1 (HTML report redesign), 0.4.0
-(NBS/TFCE edge-stability significance), 0.4.1 (increment baseline + TFCE fixes),
-0.4.2 (built-in atlas registry).*
+(NBS/TFCE edge-stability significance), 0.4.1 (increment baseline + TFCE
+fixes), 0.4.2 (built-in atlas registry), 0.5.0.*

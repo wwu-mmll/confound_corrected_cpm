@@ -9,7 +9,6 @@ plain values, output = SVG path) to match the other report-figure modules.
 
 from __future__ import annotations
 
-import os
 from typing import Sequence
 
 import matplotlib.pyplot as plt

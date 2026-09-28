@@ -1,74 +1,112 @@
+"""
+Vectorised CPM metrics.
+
+One implementation per task type, shape-generic over whatever batch axes sit
+between the samples axis and the runs axis. `y_pred` is
+``[N_samples, *batch, N_runs]`` -- in practice ``[N, Models, Networks, N_runs]``
+or, when an inner CV evaluates several hyperparameter configurations at once,
+``[N, Models, Networks, N_params, N_runs]``. `y_true` is always
+``[N_samples, N_runs]`` and is broadcast across the batch axes.
+
+There used to be a second, `*_batched` copy of every function here, carrying an
+extra folds axis and a per-fold validity mask for zero-padded ragged fold
+batches. Fold batching was measured (scripts/benchmark_batching.py) to buy 1.09x
+on GPU at 7.2x the VRAM and to be 1.85x *slower* on CPU, so it was removed along
+with the padding it required -- and with it the need for two implementations.
+"""
 import torch
-import numpy as np
-from cccpm.constants import Networks, Models, Metrics, TaskType
+
+from cccpm.constants import Metrics, TaskType
+
+
+def _broadcast_truth(y_true, y_pred):
+    """Reshape ``y_true`` ``[N, R]`` to broadcast against ``y_pred`` ``[N, *batch, R]``."""
+    n_batch_axes = y_pred.dim() - 2
+    return y_true.view(y_true.shape[0], *([1] * n_batch_axes), y_true.shape[-1])
+
+
+def _average_ranks(x, dim=0):
+    """
+    1-based ranks along ``dim``, with tied values sharing their mean rank
+    (scipy.stats.rankdata's 'average' method), computed without materialising
+    any pairwise tensor.
+
+    Tie groups are located by comparing each sorted element with its
+    neighbours and running a cummax/cummin over the positions, which gives the
+    first and last index of the run each element belongs to; their midpoint is
+    the average rank.
+    """
+    n = x.shape[dim]
+    sorted_x, sort_idx = torch.sort(x, dim=dim)
+
+    shape = [1] * x.dim()
+    shape[dim] = n
+    pos = torch.arange(n, device=x.device, dtype=x.dtype).view(shape).expand_as(x)
+
+    # First index of each tie run: mark run starts, then carry forward.
+    starts_run = torch.ones_like(sorted_x, dtype=torch.bool)
+    starts_run.narrow(dim, 1, n - 1).copy_(
+        sorted_x.narrow(dim, 1, n - 1) != sorted_x.narrow(dim, 0, n - 1))
+    first_src = torch.where(starts_run, pos, torch.full_like(pos, -1.0))
+    first = torch.cummax(first_src, dim=dim)[0]
+
+    # Last index of each tie run: same idea scanning backwards.
+    ends_run = torch.ones_like(sorted_x, dtype=torch.bool)
+    ends_run.narrow(dim, 0, n - 1).copy_(
+        sorted_x.narrow(dim, 0, n - 1) != sorted_x.narrow(dim, 1, n - 1))
+    last_src = torch.where(ends_run, pos, torch.full_like(pos, float(n + 1)))
+    last = torch.flip(torch.cummin(torch.flip(last_src, [dim]), dim=dim)[0], [dim])
+
+    avg = (first + last) / 2.0 + 1.0
+    ranks = torch.empty_like(avg)
+    ranks.scatter_(dim, sort_idx, avg)
+    return ranks
 
 
 class FastCPMMetrics:
+    """Regression metrics: explained variance, Pearson r, MSE, MAE."""
 
     def __init__(self, device='cpu'):
         self.device = device
 
     def score(self, y_true, y_pred):
         """
-        Calculates all metrics efficiently and returns a 4D Tensor.
-
         Args:
             y_true: [N_samples, N_runs]
-            y_pred: Tensor of predictions with shape [N_samples, N_models, N_networks, N_runs]
+            y_pred: [N_samples, *batch, N_runs]
 
         Returns:
-            scores: Tensor of shape [N_metrics, N_models, N_networks, N_runs]
+            scores: [N_metrics, *batch, N_runs]
         """
-        # 1. Setup Data
         y_true = torch.as_tensor(y_true, device=self.device, dtype=torch.float32)
         y_pred = torch.as_tensor(y_pred, device=self.device, dtype=torch.float32)
+        truth = _broadcast_truth(y_true, y_pred)
 
-        # Reshape Truth: [N_samples, 1, 1, N_Runs] for broadcasting against Models/Networks/Runs
-        truth_expanded = y_true.unsqueeze(1).unsqueeze(1)
+        # Each reduction is over the samples axis (dim 0).
+        mse = torch.mean((truth - y_pred) ** 2, dim=0)
+        mae = torch.mean(torch.abs(truth - y_pred), dim=0)
 
-        # 2. Vectorized Calculations
-        # Result of each calc is shape: [N_models, N_networks, N_runs] (Reduced over Samples dim=0)
-
-        # MSE
-        mse = torch.mean((truth_expanded - y_pred) ** 2, dim=0)
-
-        # MAE
-        mae = torch.mean(torch.abs(truth_expanded - y_pred), dim=0)
-
-        # Explained Variance
-        y_diff = truth_expanded - y_pred
-        var_true = torch.var(truth_expanded, dim=0, unbiased=False)
+        y_diff = truth - y_pred
+        var_true = torch.var(truth, dim=0, unbiased=False)
         var_diff = torch.var(y_diff, dim=0, unbiased=False)
         expl_var = 1 - (var_diff / (var_true + 1e-8))
 
-        # Pearson
-        pearson = self._pearson_vectorized(truth_expanded, y_pred)
+        pearson = self._pearson_vectorized(truth, y_pred)
 
-        # 3. Stack Metrics into a single Tensor
-        # CRITICAL: The order here MUST match the integer values in constants.Metrics
-        # Metrics.explained_variance_score = 0
-        # Metrics.pearson_score = 1
-        # Metrics.mean_squared_error = 2
-        # Metrics.mean_absolute_error = 3
-
-        # We create a list of length len(Metrics), filling unused slots with zeros
-        zero_placeholder = torch.zeros_like(mse)
-        metrics_list = [zero_placeholder] * len(Metrics)
+        # Order must match the integer values in constants.Metrics; slots
+        # belonging to the other task type stay zero.
+        zero = torch.zeros_like(mse)
+        metrics_list = [zero] * len(Metrics)
         metrics_list[Metrics.explained_variance_score] = expl_var
         metrics_list[Metrics.pearson_score] = pearson
         metrics_list[Metrics.mean_squared_error] = mse
         metrics_list[Metrics.mean_absolute_error] = mae
 
-        # Stack dim=0 -> Shape: [N_metrics, N_models, N_networks, N_runs]
-        stacked_metrics = torch.stack(metrics_list, dim=0)
-
-        return stacked_metrics
+        return torch.stack(metrics_list, dim=0)
 
     def _pearson_vectorized(self, x, y):
-        # Center
         x_c = x - x.mean(dim=0, keepdim=True)
         y_c = y - y.mean(dim=0, keepdim=True)
-        # Correlation
         cov = torch.sum(x_c * y_c, dim=0)
         std_x = torch.sqrt(torch.sum(x_c ** 2, dim=0))
         std_y = torch.sqrt(torch.sum(y_c ** 2, dim=0))
@@ -76,172 +114,114 @@ class FastCPMMetrics:
 
 
 class FastCPMClassificationMetrics:
-    """
-    Fast GPU-accelerated computation of classification metrics for CPM.
-
-    Computes accuracy, balanced accuracy, F1 score, and ROC AUC
-    efficiently across all models, networks, and runs simultaneously.
-    """
+    """Binary-classification metrics: accuracy, balanced accuracy, F1, ROC AUC."""
 
     def __init__(self, device='cpu'):
         self.device = device
 
     def score(self, y_true, y_pred_proba):
         """
-        Calculates all classification metrics efficiently and returns a 4D Tensor.
-
         Args:
-            y_true: [N_samples, N_runs] - Binary labels (0 or 1)
-            y_pred_proba: Tensor of predicted probabilities with shape [N_samples, N_models, N_networks, N_runs]
+            y_true: [N_samples, N_runs] -- binary labels (0 or 1)
+            y_pred_proba: [N_samples, *batch, N_runs] -- predicted probabilities
 
         Returns:
-            scores: Tensor of shape [N_metrics, N_models, N_networks, N_runs]
+            scores: [N_metrics, *batch, N_runs]
         """
-        # 1. Setup Data
         y_true = torch.as_tensor(y_true, device=self.device, dtype=torch.float32)
         y_pred_proba = torch.as_tensor(y_pred_proba, device=self.device, dtype=torch.float32)
+        truth = _broadcast_truth(y_true, y_pred_proba)
 
-        # Reshape Truth: [N_samples, 1, 1, N_Runs] for broadcasting
-        truth_expanded = y_true.unsqueeze(1).unsqueeze(1)
-
-        # 2. Convert probabilities to binary predictions (threshold = 0.5)
         y_pred_binary = (y_pred_proba > 0.5).float()
 
-        # 3. Calculate confusion matrix components
-        # All shapes: [N_samples, N_models, N_networks, N_runs] after broadcasting
-        tp = ((truth_expanded == 1) & (y_pred_binary == 1)).float()
-        tn = ((truth_expanded == 0) & (y_pred_binary == 0)).float()
-        fp = ((truth_expanded == 0) & (y_pred_binary == 1)).float()
-        fn = ((truth_expanded == 1) & (y_pred_binary == 0)).float()
+        tp = ((truth == 1) & (y_pred_binary == 1)).float().sum(dim=0)
+        tn = ((truth == 0) & (y_pred_binary == 0)).float().sum(dim=0)
+        fp = ((truth == 0) & (y_pred_binary == 1)).float().sum(dim=0)
+        fn = ((truth == 1) & (y_pred_binary == 0)).float().sum(dim=0)
 
-        # Sum over samples (dim=0) to get counts
-        # Result shape: [N_models, N_networks, N_runs]
-        tp_sum = tp.sum(dim=0)
-        tn_sum = tn.sum(dim=0)
-        fp_sum = fp.sum(dim=0)
-        fn_sum = fn.sum(dim=0)
-
-        # 4. Calculate metrics
-        # Accuracy: (TP + TN) / (TP + TN + FP + FN)
-        accuracy = (tp_sum + tn_sum) / (tp_sum + tn_sum + fp_sum + fn_sum + 1e-8)
-
-        # Balanced Accuracy: (TPR + TNR) / 2
-        tpr = tp_sum / (tp_sum + fn_sum + 1e-8)  # Sensitivity/Recall
-        tnr = tn_sum / (tn_sum + fp_sum + 1e-8)  # Specificity
+        accuracy = (tp + tn) / (tp + tn + fp + fn + 1e-8)
+        tpr = tp / (tp + fn + 1e-8)          # sensitivity / recall
+        tnr = tn / (tn + fp + 1e-8)          # specificity
         balanced_accuracy = (tpr + tnr) / 2
+        precision = tp / (tp + fp + 1e-8)
+        f1_score = 2 * (precision * tpr) / (precision + tpr + 1e-8)
+        roc_auc = self._fast_roc_auc(truth, y_pred_proba)
 
-        # F1 Score: 2 * (Precision * Recall) / (Precision + Recall)
-        precision = tp_sum / (tp_sum + fp_sum + 1e-8)
-        recall = tpr  # Same as TPR
-        f1_score = 2 * (precision * recall) / (precision + recall + 1e-8)
+        # Every classification metric above is built from comparisons, and a
+        # comparison against NaN is silently False: an undefined prediction
+        # column would score as "predicted class 0 for everyone" -- a real
+        # number, around the base rate, with nothing marking it as meaningless.
+        # (The regression metrics need no such guard; means and variances
+        # propagate NaN on their own.) Undefined in, undefined out.
+        undefined = torch.isnan(y_pred_proba).any(dim=0)
+        nan = torch.full_like(accuracy, float('nan'))
+        accuracy = torch.where(undefined, nan, accuracy)
+        balanced_accuracy = torch.where(undefined, nan, balanced_accuracy)
+        f1_score = torch.where(undefined, nan, f1_score)
+        roc_auc = torch.where(undefined, nan, roc_auc)
 
-        # ROC AUC: Approximation using trapezoidal rule
-        # For exact AUC, we'd need to sort by predicted probabilities
-        # Here we use a fast approximation based on the Mann-Whitney U statistic
-        roc_auc = self._fast_roc_auc(truth_expanded, y_pred_proba)
-
-        # 5. Stack Metrics into a single Tensor
-        # Order must match constants.Metrics indices for classification metrics
-        # Metrics.accuracy = 4
-        # Metrics.balanced_accuracy = 5
-        # Metrics.f1_score = 6
-        # Metrics.roc_auc = 7
-
-        # Fill unused regression metric slots with zeros
-        zero_placeholder = torch.zeros_like(accuracy)
-        metrics_list = [zero_placeholder] * len(Metrics)
+        zero = torch.zeros_like(accuracy)
+        metrics_list = [zero] * len(Metrics)
         metrics_list[Metrics.accuracy] = accuracy
         metrics_list[Metrics.balanced_accuracy] = balanced_accuracy
         metrics_list[Metrics.f1_score] = f1_score
         metrics_list[Metrics.roc_auc] = roc_auc
 
-        # Stack dim=0 -> Shape: [N_metrics, N_models, N_networks, N_runs]
-        stacked_metrics = torch.stack(metrics_list, dim=0)
+        return torch.stack(metrics_list, dim=0)
 
-        return stacked_metrics
-
-    def _fast_roc_auc(self, y_true, y_pred_proba):
+    def _fast_roc_auc(self, truth, y_pred_proba):
         """
-        Fast approximation of ROC AUC using Mann-Whitney U statistic.
+        ROC AUC via the Mann-Whitney U statistic, computed from rank sums:
+
+            AUC = (sum of ranks of positives - n_pos(n_pos+1)/2) / (n_pos * n_neg)
+
+        Average ranks make ties contribute exactly 0.5 each, matching
+        sklearn.metrics.roc_auc_score.
+
+        This replaces an earlier pairwise formulation that built an
+        [N, N, *batch] comparison tensor -- quadratic in the test-set size, and
+        measured at 9.7 GB for 200 test samples x 1000 permutations, which is
+        what made classification runs OOM on large folds. Ranking is O(N log N)
+        in time and linear in memory, so scoring now scales like the regression
+        path.
 
         Args:
-            y_true: [N_samples, 1, 1, N_runs]
-            y_pred_proba: [N_samples, N_models, N_networks, N_runs]
+            truth: [N, *ones, N_runs] -- broadcastable against y_pred_proba.
+            y_pred_proba: [N, *batch, N_runs]
 
         Returns:
-            ROC AUC scores [N_models, N_networks, N_runs]
+            [*batch, N_runs]
         """
-        # Mask for positive and negative samples
-        # Shape after broadcasting: [N_samples, N_models, N_networks, N_runs]
-        pos_mask = (y_true == 1)
-        neg_mask = (y_true == 0)
+        ranks = _average_ranks(y_pred_proba, dim=0)          # [N, *batch, R]
 
-        # Count positives and negatives per run
-        n_pos = pos_mask.sum(dim=0)  # [N_models, N_networks, N_runs]
-        n_neg = neg_mask.sum(dim=0)  # [N_models, N_networks, N_runs]
+        is_pos = (truth == 1).to(y_pred_proba.dtype)
+        is_neg = (truth == 0).to(y_pred_proba.dtype)
+        n_pos = is_pos.sum(dim=0)
+        n_neg = is_neg.sum(dim=0)
 
-        # For each negative sample, count how many positive samples have higher scores
-        # This is the Mann-Whitney U statistic
-        # Expand dimensions for broadcasting
-        y_pred_expanded_pos = y_pred_proba.unsqueeze(1)  # [N_samples, 1, N_models, N_networks, N_runs]
-        y_pred_expanded_neg = y_pred_proba.unsqueeze(0)  # [1, N_samples, N_models, N_networks, N_runs]
-
-        pos_mask_expanded = pos_mask.unsqueeze(1)  # [N_samples, 1, N_models, N_networks, N_runs]
-        neg_mask_expanded = neg_mask.unsqueeze(0)  # [1, N_samples, N_models, N_networks, N_runs]
-
-        # Count pairs where positive > negative
-        comparisons = (y_pred_expanded_pos > y_pred_expanded_neg).float()
-        # Add 0.5 for ties
-        ties = (y_pred_expanded_pos == y_pred_expanded_neg).float() * 0.5
-
-        # Only count valid pairs (pos vs neg)
-        valid_pairs = pos_mask_expanded & neg_mask_expanded
-        weighted_sum = ((comparisons + ties) * valid_pairs).sum(dim=(0, 1))  # [N_models, N_networks, N_runs]
-
-        # AUC = sum of ranks / (n_pos * n_neg)
-        auc = weighted_sum / (n_pos * n_neg + 1e-8)
-
-        return auc
-
-
-def score_regression_models(y_true, y_pred, device='cpu', **kwargs):
-    evaluator = FastCPMMetrics(device=device)
-    return evaluator.score(y_true, y_pred)
-
-
-def score_classification_models(y_true, y_pred_proba, device='cpu', **kwargs):
-    """
-    Score classification models using predicted probabilities.
-
-    Args:
-        y_true: True binary labels [N_samples, N_runs]
-        y_pred_proba: Predicted probabilities [N_samples, N_models, N_networks, N_runs]
-        device: Device for computation
-
-    Returns:
-        Tensor of metrics [N_metrics, N_models, N_networks, N_runs]
-    """
-    evaluator = FastCPMClassificationMetrics(device=device)
-    return evaluator.score(y_true, y_pred_proba)
+        sum_ranks_pos = (ranks * is_pos).sum(dim=0)
+        u_statistic = sum_ranks_pos - n_pos * (n_pos + 1) / 2
+        return u_statistic / (n_pos * n_neg + 1e-8)
 
 
 def score_models(y_true, y_pred, task_type, device='cpu', **kwargs):
     """
-    Score models based on task type (regression or classification).
+    Score every CPM model variant at once.
 
     Args:
-        y_true: True labels [N_samples, N_runs]
-        y_pred: Predictions [N_samples, N_models, N_networks, N_runs]
-                For classification, should be probabilities
+        y_true: [N_samples, N_runs]
+        y_pred: [N_samples, *batch, N_runs]. For classification these must be
+                probabilities, not class labels.
         task_type: TaskType.regression or TaskType.classification
-        device: Device for computation
+        device: device for the computation
 
     Returns:
-        Tensor of metrics [N_metrics, N_models, N_networks, N_runs]
+        [N_metrics, *batch, N_runs]
     """
     if task_type == TaskType.regression:
-        return score_regression_models(y_true, y_pred, device=device, **kwargs)
+        evaluator = FastCPMMetrics(device=device)
     elif task_type == TaskType.classification:
-        return score_classification_models(y_true, y_pred, device=device, **kwargs)
+        evaluator = FastCPMClassificationMetrics(device=device)
     else:
         raise ValueError(f"Unknown task_type: {task_type}")
+    return evaluator.score(y_true, y_pred)

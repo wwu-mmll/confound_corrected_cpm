@@ -4,6 +4,139 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.7.0] — 2026-09-28
+
+### Changed
+- **`edge_significance_method` is renamed to `stability_significance_method`, and
+  `nbs_threshold` to `nbs_stability_threshold`.** The old names conflated two
+  different significances: the p-value that decides whether an edge is *selected*
+  (set on `PThreshold`) and whether an edge is selected across folds *more
+  consistently than chance*. These parameters only ever meant the second — which
+  is what the outputs have always been called (`stability_edges_significance.npy`).
+  `nbs_threshold` had the same problem one level down: it is a fraction of folds,
+  not a p-value, and it sat in the same constructor call as
+  `PThreshold(threshold=...)` with nothing to tell them apart. Both old spellings
+  raise a `TypeError` naming the replacement.
+- **Confound control is now two independent run-level choices instead of four levers.**
+  `UnivariateEdgeSelection` gains `selection_statistic` (`'pearson'` | `'spearman'`)
+  and `selection_input` (`'raw'` | `'residualized'`); `CPMAnalysis` gains `model_input`
+  (`'raw'` | `'residualized'`). `selection_input='residualized'` is the per-edge
+  regression `y ~ 1 + Z + edge` — the semipartial correlation as the reported effect
+  size, the coefficient's p-value with `df = N - 2 - C` — so a `p < 0.05` threshold
+  means a 5% per-edge false-positive rate whatever the confounding.
+  `model_input='residualized'` regresses the covariates out of the connectome the
+  models consume, fitted on train and applied to test, after edge selection.
+- **`Models.residuals` is removed.** Deconfounding the features is a property of the
+  run (`model_input`), not a model variant. It cannot be a model name: OLS is invariant
+  to it once the covariates are in the design, but the non-linear backends are not — on
+  identical edges `full` moves by 391% of sd(y) for `DecisionTreeCPM`, 65% for
+  `RandomForestCPM` and 19% for `GAMCPM` — so the name would mean something different
+  for every backend, and users could not tell which connectome produced `full`. The
+  `model` column of `cv_results_*.csv`, `cv_predictions.csv` and
+  `cv_network_strengths.csv` loses the `residuals` value; run with
+  `model_input='residualized'` and read `connectome` instead.
+- The `presence_filter` now always sees the raw connectome. Previously
+  `calculate_residuals=True` residualised the connectome before selection, so the
+  filter looked for structural zeros in residualised values, where they no longer
+  exist. That interaction warning is gone with the cause.
+- **`increment` is no longer reported for metrics whose difference is not a
+  statistic.** It is a difference of two metrics, which only means something where
+  differences of that quantity are standard: explained variance, the error metrics
+  (as error reduction), accuracy, balanced accuracy and ROC AUC. It is now NaN for
+  **Pearson r** — comparing two correlations needs Fisher z or Steiger's test, not
+  subtraction — and for **F1**, a harmonic mean whose difference has no established
+  interpretation. See `constants.INCREMENTABLE_METRICS`.
+- Report tables render a deliberate NaN as an em dash rather than the string `nan`,
+  and the Model Comparison section explains why `increment` shows one for Pearson r
+  and F1, so it does not read as a failed computation.
+- The Analysis Configuration table no longer turns the wrapped lines of a
+  multi-line estimator repr into their own empty rows.
+- Package metadata is standard PEP 621 (`[project]`) rather than `[tool.poetry]`, with
+  a PEP 639 license expression; Poetry remains the build backend and dev tool.
+  `poetry.lock` is committed, so CI installs a reproducible environment.
+- The installation guide gives the exact commands for a CUDA build on Windows (whose
+  default torch wheel is CPU-only) and a CPU-only build on Linux.
+
+### Removed
+No deprecation shims: this release changes what some parameters *mean*, and code
+that keeps running while quietly producing different numbers is worse than code that
+stops. Every removal raises with its replacement named.
+
+- `UnivariateEdgeSelection(edge_statistic=...)`. `'pearson'` and `'spearman'` carry
+  over unchanged as `selection_statistic`; the rest map as
+  `'point_biserial'` -> `selection_statistic='pearson'`,
+  `'pearson_partial'`/`'spearman_partial'`/`'point_biserial_partial'` -> the same
+  statistic with `selection_input='residualized'`. `'point_biserial'` was never a
+  separate statistic — Pearson against a 0/1 target *is* the point-biserial
+  correlation.
+- `CPMAnalysis(calculate_residuals=...)`. Use `selection_input='residualized'` with
+  `model_input='residualized'`. **Edge sets change**: the old path selected with a
+  plain correlation on residualised edges, whose effective alpha shrank as
+  confounding grew (measured 5.1% -> 3.3% -> 2.1% at nominal 5%); the new one is
+  nominal at every confound level.
+- `Models.residuals`, as described above.
+- `cccpm.statistics.torch_bonferroni`. Bonferroni is now a critical value inside
+  `PThreshold.select`, applied per run.
+
+### Added
+- **The report states which confound configuration produced it.** `run_config.json`
+  records `selection_input` / `model_input` / `selection_statistic` alongside
+  `task_type.txt`; the headline and a stat chip name the cell of the 2x2
+  (`none` / `edge selection only` / `features only` / `edge selection and features`),
+  and the Model Comparison section explains what it means. Previously a naive run and
+  a fully controlled one opened with the identical sentence and the configuration was
+  only in the appendix table. Result directories written before 0.7.0 say nothing
+  rather than guessing.
+- The model glossary describes the models *this* run produced — under
+  `model_input='residualized'`, `connectome` is labelled as the deconfounded-strength
+  model rather than "connectivity alone".
+- Vanilla CPM without covariates: `covariates` is optional in `CPMAnalysis.run`. Only
+  the `connectome` model is defined; the rest are NaN and `available_models.json`
+  records which rows are real. Options requiring covariates raise up front.
+- `pyflakes` runs in CI.
+
+### Fixed
+- **Edge-selection p-values are exact.** They used to go through the normal tail
+  instead of the t tail, which is anti-conservative by roughly 1/n (max error 0.018
+  at n=30, 0.001 at n=500): an edge with exact p = 0.065 could be selected at 0.05.
+  Selection is now exact without computing a p-value per edge — for fixed df, p is
+  strictly decreasing in |t|, so `PThreshold` compares |t| against the exact critical
+  value of each threshold, on the device. **Edge sets change slightly at every
+  sample size; regenerate any published numbers.** `correlations_and_pvalues` returns
+  exact p-values (scipy, CPU); the new `edge_statistics` returns `(r, t, df)`, and
+  `EdgeStatistic.fit_transform` / `PThreshold.select(r, t, df)` follow it.
+  `UnivariateEdgeSelection.p_edges` is replaced by `t_edges` and `df`.
+- **Multiple-comparison corrections were applied across the whole permutation
+  batch.** `PThreshold` corrected `p.flatten()`, so a permutation chunk of P runs
+  was corrected as F × P tests: each permuted run faced a far stricter threshold than
+  the real run (Bonferroni, one run: 18 edges alone, 5 inside a 50-run batch), and one
+  that changed with the chunk size. The null was therefore weaker than the procedure
+  it tested, and permutation p-values for any `correction` other than `None` were
+  liberal. Corrections are now per run. The default `correction=None` was not
+  affected.
+- Permutation p-values for undefined models were reported at the permutation floor
+  (`1/(n_perms+1)`, i.e. maximally significant) instead of NaN.
+- Classification metrics turned NaN predictions into a plausible-looking score near the
+  base rate, because every comparison against NaN is silently False.
+- `simulate_confounded_data_chyzhyk` raised `UnboundLocalError` for an invalid
+  `link_type` instead of a `ValueError` naming the valid options.
+- Results files (`run_config.json`, `available_models.json`, `task_type.txt`, the
+  stability-significance metadata) were read and written with the locale codec, so a
+  results directory written on a cp1252 Windows machine was not portable, and a
+  non-cp1252 character in a name raised on write. All package file I/O is UTF-8 now.
+- The run's working tensor aliased the caller's array when the input was float32 on
+  the CPU (a read-only view for a pandas DataFrame, which torch warned about). It is
+  now always a copy.
+
+### Moved
+- `examples/confound_inflation_demo.py` → `scripts/confound_inflation_demo.py`.
+  It is the package's demonstration that partial-correlation selection does not
+  fully deconfound, on data with an analytically known answer — evidence, not a
+  template to copy, and 340 lines of parameter sweep sitting beside the
+  quickstarts implied otherwise.
+
 ## [0.5.0] — 2026-08-26
 
 ### Added
@@ -129,6 +262,14 @@ Documentation and examples: SEM-based simulated data.
   older `simulate_simple` generator.
 
 ### Removed
+- `examples/profile_run.py` and `scripts/benchmark_batching.py`. The first was a
+  timing scratch file (hardcoded `device='cuda'`, writing into another example's
+  output directory); the second could no longer run at all — it imports
+  `cccpm.batch_planning`, removed when the batched/unbatched split went away.
+  Pyflakes covers `scripts/` but cannot resolve imports, so nothing caught it.
+- `examples/example_simulated_data.py`. Its one distinctive feature over the
+  quickstarts was nested CV for the p-threshold, which `regression_quickstart.py`
+  now shows directly.
 - Redundant example scripts (`example_simulated_classification.py`, the two
   `mediator_*` examples) and the unused `simulation/mediator_simulation.py` module.
 

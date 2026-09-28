@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-import numpy as np
 
 
 def get_colors_from_colormap(n_colors, colormap_name='tab10'):

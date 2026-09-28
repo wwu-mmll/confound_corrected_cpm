@@ -1,6 +1,15 @@
-import warnings
-import numpy as np
+"""
+Edge selection: which edges enter the model.
+
+The statistics themselves live in `statistics.py`. This module is the policy
+layer on top of them -- the significance thresholding (`PThreshold`), the two
+structural filters (presence, connected components), and the
+`UnivariateEdgeSelection` facade that expands a user's configuration into the
+parameter grid the inner CV iterates over.
+"""
 from typing import Union
+
+import numpy as np
 
 import networkx as nx
 import torch
@@ -8,191 +17,8 @@ import torch
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
 
-
-def torch_rankdata(data, dim=-1):
-    """
-    Computes ranks of the data along a given dimension.
-    Equivalent to scipy.stats.rankdata (method='ordinal') but fully vectorized on GPU.
-    """
-    # argsort twice gives the rank indices (0, 1, 2...)
-    # We add 1.0 to match standard 1-based ranking
-    return data.argsort(dim=dim).argsort(dim=dim).float() + 1.0
-
-
-def get_residuals(data, confounds):
-    """
-    Regresses out 'confounds' from 'data' using OLS and returns the residuals.
-
-    Args:
-        data: (..., N_samples) or (N_samples, ...)
-              The target data (can be X or Y). Can be numpy or torch.
-        confounds: (N_samples, N_confounds). Can be numpy or torch.
-
-    Returns:
-        residuals: Same shape and type as data
-    """
-    # 1. Add Intercept column to confounds (standard OLS practice)
-    # Shape: (N_samples, N_confounds + 1)
-    if not hasattr(confounds, 'shape'):  # Safety check
-        return data
-
-    # Convert numpy to torch if needed, track for conversion back
-    return_numpy = isinstance(data, np.ndarray)
-    data = torch.as_tensor(data, dtype=torch.float64)
-    confounds = torch.as_tensor(confounds, dtype=torch.float64)
-
-    n_samples = confounds.shape[0]
-    # Create the intercept column on the same device as the inputs so this works
-    # when X/confounds live on the GPU (otherwise torch.cat mixes cpu + cuda).
-    ones = torch.ones(n_samples, 1, dtype=confounds.dtype, device=confounds.device)
-    Z = torch.cat((ones, confounds), dim=1)
-
-    # 2. Compute the Projector (Hat Matrix component)
-    # Beta = (Z^T Z)^-1 Z^T y
-    # We precompute pinv(Z) for speed: (Z^T Z)^-1 Z^T
-    # Z_pinv shape: (N_confounds+1, N_samples)
-    Z_pinv = torch.linalg.pinv(Z)
-
-    # 3. Apply to Data (Vectorized)
-    # We need to handle data shapes carefully.
-    # Data is usually [N_samples, Features] OR [N_perms, N_samples]
-
-    def _maybe_to_numpy(result):
-        # .cpu() is a no-op on CPU tensors but required before .numpy() on GPU.
-        return result.cpu().numpy() if return_numpy else result
-
-    # CASE A: Data is [N_samples, Features] (Like X)
-    if data.shape[0] == n_samples:
-        # Beta: (Confounds, Features) = (Confounds, Samples) @ (Samples, Features)
-        beta = torch.matmul(Z_pinv, data)
-        # Preds: (Samples, Features) = (Samples, Confounds) @ (Confounds, Features)
-        preds = torch.matmul(Z, beta)
-        return _maybe_to_numpy(data - preds)
-
-    # CASE B: Data is [Batch, N_samples] (Like Y_perms)
-    elif data.shape[-1] == n_samples:
-        # We assume data is [Batch, N_samples]. We need to transpose for matmul
-        data_T = data.transpose(-1, -2)  # [N_samples, Batch]
-
-        beta = torch.matmul(Z_pinv, data_T)  # [Confounds, Batch]
-        preds = torch.matmul(Z, beta)  # [Samples, Batch]
-
-        return _maybe_to_numpy((data_T - preds).transpose(-1, -2))  # Return to [Batch, Samples]
-
-    else:
-        raise ValueError(f"Data shape {data.shape} incompatible with confounds {confounds.shape}")
-
-
-def correlations_and_pvalues(X, Y_perms,
-                             correlation_type='pearson',
-                             confounds=None):
-    """
-    Univariate edge selection as a vectorised OLS GLM, batched over permutations.
-
-    For each edge (column of ``X``) and each (permuted) target (column of
-    ``Y_perms``) this fits, in one batched linear-algebra pass on CPU/GPU, the
-    linear model
-
-        target ~ intercept [+ confounds] + edge
-
-    and returns the edge effect and the p-value of its coefficient. By the
-    Frisch–Waugh–Lovell theorem the coefficient only requires residualising the
-    *edge* on the confounds — the target is **never** residualised to obtain the
-    coefficient (its raw values drive it; this is what we want when the target is
-    the thing we ultimately predict). This single path is mathematically
-    identical to:
-
-      * Pearson correlation                         (continuous target, no confounds)
-      * point-biserial correlation                  (binary 0/1 target, no confounds)
-      * the partial-correlation / coefficient F-test (confounds present)
-      * Spearman, when ``X`` and ``Y`` are rank-transformed first.
-
-    A binary (0/1) target needs no special handling: regressing it on an edge is
-    the linear-probability model, whose coefficient test equals the
-    point-biserial correlation. (Its homoskedastic p-values are the conventional
-    point-biserial ones; OLS standard errors are not heteroskedasticity-robust,
-    which is standard for this kind of screening filter.)
-
-    The reported ``r`` is the **semi-partial** correlation (confounds removed
-    from the connectome edge only, not the target). Its sign and the p-value are
-    those of the regression coefficient, so the choice of semi-partial vs partial
-    affects only the reported effect-size magnitude, never which edges are
-    selected.
-
-    Args:
-        X: (N_samples, N_features) — continuous edge values (fixed across perms)
-        Y_perms: (N_samples, N_perms) — target(s), one column per permutation
-        correlation_type: 'pearson' (linear / point-biserial) or 'spearman' (ranks)
-        confounds: optional (N_samples, N_confounds); when given, the edge effect
-                   controls for these covariates.
-
-    Returns:
-        r_matrix: (N_features, N_perms) — semi-partial correlation (effect size)
-        p_matrix: (N_features, N_perms) — p-value of the edge coefficient
-    """
-    X = torch.as_tensor(X)
-    Y = torch.as_tensor(Y_perms, dtype=X.dtype, device=X.device)
-    n_samples = X.size(0)
-
-    # Spearman = Pearson on ranks. Rank every variable (incl. the confounds),
-    # matching the conventional "rank, then partial" definition (e.g. pingouin).
-    if correlation_type == 'spearman':
-        X = torch_rankdata(X, dim=0)
-        Y = torch_rankdata(Y, dim=0)
-        if confounds is not None:
-            confounds = torch_rankdata(
-                torch.as_tensor(confounds, dtype=X.dtype, device=X.device), dim=0)
-
-    # --- Residualise on the confounds (or just centre, when there are none) ---
-    if confounds is not None:
-        confounds = torch.as_tensor(confounds, dtype=X.dtype, device=X.device)
-        k_confounds = confounds.size(1)
-        # FWL: residualising only the EDGE is sufficient for the coefficient.
-        # Y is residualised solely to obtain the full model's error variance.
-        X_res = torch.as_tensor(get_residuals(X, confounds), dtype=X.dtype, device=X.device)
-        Y_res = torch.as_tensor(get_residuals(Y, confounds), dtype=X.dtype, device=X.device)
-    else:
-        # Residualising on an intercept only is just mean-centring.
-        k_confounds = 0
-        X_res = X - X.mean(dim=0, keepdim=True)
-        Y_res = Y - Y.mean(dim=0, keepdim=True)
-
-    # Mean-centre so cross-products are (co)variances. X_res is already centred
-    # (the intercept is part of the confound space), but be explicit.
-    X_res = X_res - X_res.mean(dim=0, keepdim=True)
-    Y_res = Y_res - Y_res.mean(dim=0, keepdim=True)
-    Y_centered = Y - Y.mean(dim=0, keepdim=True)   # raw target, centred
-
-    # Cross-products. Because X_res is orthogonal to the confound space
-    # (including the intercept), X_res^T Y == X_res^T Y_res, so the raw centred
-    # target gives exactly the regression coefficient (no Y residualisation).
-    cross = torch.matmul(X_res.t(), Y_centered)        # (F, P)  = x_res^T y
-    sxx = (X_res ** 2).sum(dim=0)                      # (F,)    ||x_res||^2
-    sse_y = (Y_res ** 2).sum(dim=0)                    # (P,)    full-model error SS
-    ssy = (Y_centered ** 2).sum(dim=0)                 # (P,)    total SS of target
-
-    # Partial correlation == regression-coefficient test; it drives the p-value.
-    partial_r = cross / (torch.sqrt(sxx.unsqueeze(1) * sse_y.unsqueeze(0)) + 1e-12)
-    partial_r = torch.clamp(partial_r, -0.999999, 0.999999)
-
-    # Semi-partial correlation (confounds removed from the edge only) — reported
-    # effect size; same sign as the coefficient.
-    semipartial_r = cross / (torch.sqrt(sxx.unsqueeze(1) * ssy.unsqueeze(0)) + 1e-12)
-    semipartial_r = torch.clamp(semipartial_r, -0.999999, 0.999999)
-
-    # p-value of the edge coefficient, df = N - k - 2.
-    # NOTE: normal approximation to the t-tail, kept identical to the previous
-    # implementation. See RELEASE_PLAN "Open decisions #6" — do not change the
-    # tail approximation without sign-off (torch 2.x lacks an exact incomplete
-    # beta / t-CDF; this is the GPU-friendly approximation).
-    df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=partial_r.dtype)
-    t_stats = partial_r * torch.sqrt(df / (1 - partial_r ** 2))
-    z = t_stats / torch.sqrt(df / (df + 1))
-    val = -torch.abs(z) / 1.41421356
-    p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
-
-    return semipartial_r, p_matrix
-
+from cccpm.statistics import edge_statistics, t_pvalues, critical_t
+from cccpm.validation import infer_n_nodes
 
 
 def resolve_presence_threshold(presence_filter):
@@ -237,16 +63,20 @@ def resolve_min_component_size(connected_components):
 def filter_connected_components(mask, min_edges):
     """
     Keep only selected edges that belong to a connected component with at least
-    ``min_edges`` edges, per network layer and run; drop the rest.
+    ``min_edges`` edges; drop the rest.
 
-    Edges are nodes-in-common connections of a graph built per (network, run)
-    from the selected edges. Isolated single edges form a one-edge component and
-    are removed when ``min_edges >= 2``. ``mask`` is the ``[Features, 2, Runs]``
-    selection tensor (dim 1 = positive/negative); the returned tensor has the
-    same shape/dtype with dropped edges set to 0.
+    A graph is built independently for each (network, *batch) slice from that
+    slice's selected edges, treating edges sharing a node as connected. Isolated
+    single edges form a one-edge component and are removed when
+    ``min_edges >= 2``.
+
+    ``mask`` is ``[Features, 2, *batch]`` (dim 1 = positive/negative; batch is
+    typically params x runs). The returned tensor has the same shape and dtype,
+    with dropped edges set to 0.
+
+    This is CPU/networkx work and is not vectorised -- it runs once per
+    (network, *batch) slice.
     """
-    from cccpm.utils import infer_n_nodes
-
     n_features = mask.shape[0]
     n_nodes = infer_n_nodes(n_features)
     if n_nodes is None:
@@ -255,9 +85,16 @@ def filter_connected_components(mask, min_edges):
     rows, cols = np.triu_indices(n_nodes, k=1)
     out = mask.clone()
     selected = mask.detach().cpu().numpy() > 0
-    for layer in range(selected.shape[1]):
-        for run in range(selected.shape[2]):
-            edge_idx = np.nonzero(selected[:, layer, run])[0]
+
+    # Flatten every axis after [Features, 2] so one loop covers any batch shape.
+    n_layers = selected.shape[1]
+    batch_shape = selected.shape[2:]
+    flat = selected.reshape(n_features, n_layers, -1)
+    out_flat = out.reshape(n_features, n_layers, -1)
+
+    for layer in range(n_layers):
+        for b in range(flat.shape[2]):
+            edge_idx = np.nonzero(flat[:, layer, b])[0]
             if edge_idx.size == 0:
                 continue
             graph = nx.Graph()
@@ -270,12 +107,13 @@ def filter_connected_components(mask, min_edges):
             if drop:
                 for e in edge_idx:
                     if (rows[e], cols[e]) in drop:
-                        out[e, layer, run] = 0
-    return out
+                        out_flat[e, layer, b] = 0
+
+    return out_flat.reshape(n_features, n_layers, *batch_shape)
 
 
 class BaseEdgeSelector(BaseEstimator):
-    def select(self, r, p):
+    def select(self, r, p, thresholds=None):
         pass
 
 
@@ -344,39 +182,183 @@ class PThreshold(BaseEdgeSelector):
         else:
             raise ValueError("correction must be None, str, or list")
 
-    def select(self, r, p):
-        # Correction logic (requires p to be flat/numpy usually, ensure compatibility)
-        if self._correction is not None:
-            # Assuming p is passed as or converted to numpy for statsmodels
-            from statsmodels.stats import multitest
-            # You might need to flatten and reshape if p is multidimensional
-            shape = p.shape
-            _, p_flat, _, _ = multitest.multipletests(p.flatten(), alpha=0.05, method=self._correction)
-            p = p_flat.reshape(shape)  # Reshape back or keep as tensor depending on input type
+    def _p_cutoffs(self, thresholds, n_tests):
+        """Per-threshold uncorrected p cut-offs for a single-step correction, or None.
 
-        # Calculate boolean masks
-        pos_mask = (p < self.threshold[0]) & (r > 0)
-        neg_mask = (p < self.threshold[0]) & (r < 0)
+        For no correction, Bonferroni and Sidak, "corrected p < threshold" is
+        "p < cut-off" for a cut-off that depends only on the threshold and the
+        number of tests -- so selection needs no p-values at all, only the t
+        statistic against the matching critical value.
+        """
+        if self._correction is None:
+            return [float(a) for a in thresholds]
+        if self._correction == 'bonferroni':
+            return [float(a) / n_tests for a in thresholds]
+        if self._correction == 'sidak':
+            return [1.0 - (1.0 - float(a)) ** (1.0 / n_tests) for a in thresholds]
+        return None
 
-        # Stack into a single tensor: [Features, 2, ...]
-        return torch.stack([torch.as_tensor(pos_mask, device=r.device),
-                            torch.as_tensor(neg_mask, device=r.device)], dim=1)
+    def _stepwise_significant(self, t, df, thresholds):
+        """[N_features, N_thresholds, *rest] mask for a step-wise correction.
+
+        Holm, FDR and the rest need the p-values themselves, so these are exact
+        (scipy, CPU) and corrected one run at a time.
+        """
+        from statsmodels.stats import multitest
+        p = t_pvalues(t, df).cpu().double().numpy()
+        n_features, rest_shape = p.shape[0], p.shape[1:]
+        columns = p.reshape(n_features, -1)
+        corrected = np.empty_like(columns)
+        for run in range(columns.shape[1]):
+            _, corrected[:, run], _, _ = multitest.multipletests(
+                columns[:, run], alpha=0.05, method=self._correction)
+        corrected = corrected.reshape(n_features, 1, *rest_shape)
+        thresh = np.asarray(thresholds, dtype=np.float64).reshape(1, -1, *([1] * len(rest_shape)))
+        return torch.as_tensor(corrected < thresh, device=t.device)
+
+    def select(self, r, t, df, thresholds=None):
+        """
+        Select edges whose (optionally corrected) p-value falls below each
+        threshold, split into positive- and negative-correlation networks.
+
+        Selection is exact without computing a p-value per edge: for fixed df the
+        two-sided p-value is strictly decreasing in |t|, so ``p < alpha`` is
+        ``|t| > critical_t(alpha, df)`` -- one scalar scipy call per threshold,
+        with the comparison on the device. Step-wise corrections (Holm, FDR, ...)
+        need the p-values themselves and compute them exactly on the CPU.
+
+        The correction is applied **per run**: each column of ``t`` is one
+        analysis (the real target, or one permutation) with ``N_features`` tests
+        of its own. A permuted run must be thresholded exactly like the real one,
+        or the null distribution is not a null of the same procedure.
+
+        Args:
+            r: [N_features, *rest] effect sizes; their sign picks the network.
+            t: [N_features, *rest] t statistics, ``rest`` being any batch axes
+               already present (in practice the runs/permutations axis).
+            df: degrees of freedom of ``t``.
+            thresholds: sequence of p-value thresholds. Defaults to
+                        ``self.threshold``, which is always a list.
+
+        Returns:
+            Boolean tensor [N_features, 2, N_params, *rest], where dim 1 is
+            [positive, negative] and N_params == len(thresholds).
+        """
+        if thresholds is None:
+            thresholds = self.threshold
+        rest_shape = t.shape[1:]
+
+        cutoffs = self._p_cutoffs(thresholds, n_tests=t.shape[0])
+        if cutoffs is not None:
+            crit = torch.as_tensor([critical_t(a, df) for a in cutoffs],
+                                   device=t.device, dtype=t.dtype)
+            crit = crit.view(1, -1, *([1] * len(rest_shape)))
+            significant = t.abs().unsqueeze(1) > crit          # [F, N_params, *rest]
+        else:
+            significant = self._stepwise_significant(t, df, thresholds)
+
+        r_exp = r.unsqueeze(1)                                 # [F, 1, *rest]
+        pos_mask = significant & (r_exp > 0)
+        neg_mask = significant & (r_exp < 0)
+        return torch.stack([pos_mask, neg_mask], dim=1)
+
+
+SELECTION_STATISTICS = ('pearson', 'spearman')
+SELECTION_INPUTS = ('raw', 'residualized')
+
+# How the removed ``edge_statistic`` values map onto the current pair. Used only
+# to write a helpful error; see `resolve_selection_spec`.
+_REMOVED_EDGE_STATISTICS = {
+    'pearson': ('pearson', 'raw'),
+    'spearman': ('spearman', 'raw'),
+    'point_biserial': ('pearson', 'raw'),
+    'pearson_partial': ('pearson', 'residualized'),
+    'spearman_partial': ('spearman', 'residualized'),
+    'point_biserial_partial': ('pearson', 'residualized'),
+}
+
+
+def resolve_selection_spec(selection_statistic, selection_input):
+    """
+    Validate the edge-selection specification.
+
+    Returns ``(selection_statistic, selection_input)``.
+    """
+    if selection_statistic not in SELECTION_STATISTICS:
+        # 'pearson' and 'spearman' are valid here and were also `edge_statistic`
+        # values meaning the same thing, so they are not caught above. What lands
+        # here is a value that only ever made sense as `edge_statistic` -- point
+        # the user at the pair that replaced it.
+        if selection_statistic in _REMOVED_EDGE_STATISTICS:
+            statistic, selection = _REMOVED_EDGE_STATISTICS[selection_statistic]
+            raise ValueError(
+                f"{selection_statistic!r} was an `edge_statistic` value, which "
+                f"was removed in 0.7.0. Use selection_statistic={statistic!r} "
+                f"with selection_input={selection!r} instead."
+                + ("" if selection == 'raw' else
+                   " Note that confound-controlled selection now uses the "
+                   "per-edge coefficient test (df = N - 2 - C) rather than a "
+                   "plain correlation against the raw target, so edge sets "
+                   "differ from 0.6.x.")
+            )
+        raise ValueError(
+            f"selection_statistic must be one of {SELECTION_STATISTICS}, "
+            f"got {selection_statistic!r}."
+        )
+    if selection_input not in SELECTION_INPUTS:
+        raise ValueError(
+            f"selection_input must be one of {SELECTION_INPUTS}, "
+            f"got {selection_input!r}."
+        )
+    return selection_statistic, selection_input
 
 
 class EdgeStatistic(BaseEstimator):
-    def __init__(self, edge_statistic: str = 'spearman',
+    """
+    The per-edge statistic used to rank and threshold edges.
+
+    Two independent choices:
+
+    ``selection_statistic``
+        ``'pearson'`` or ``'spearman'``. A binary 0/1 target through the Pearson
+        path *is* the point-biserial correlation, so it needs no separate value.
+
+    ``selection_input``
+        ``'raw'`` ignores the covariates. ``'residualized'`` controls for them:
+        one regression per edge, ``y ~ 1 + Z + edge``, reporting the semipartial
+        correlation as the effect size and the coefficient's p-value with
+        ``df = N - 2 - C``.
+
+    On ``'residualized'``: the effect size is reported as the *semipartial*
+    correlation -- the edge's unique contribution as a share of the total
+    variance of y -- because that denominator stays comparable across analyses.
+    The partial correlation is the same effect on a denominator that shrinks
+    with how confounded y is. They are monotone transforms of each other within
+    a fold (verified: rank correlation exactly 1.0), so the choice affects what
+    is printed, never which edges are selected. Both come from one regression,
+    which is where the p-value comes from too.
+
+    For Spearman the ranking happens *first*, including on the confounds, and
+    the residualisation follows -- the conventional "rank, then partial"
+    definition. The reverse order does not work: ranking is nonlinear, so
+    ranking a residualised edge puts the confound signal back in (measured:
+    11.9 versus 6.5e-13 of residual confound signal).
+    """
+
+    def __init__(self, selection_statistic: str = 'spearman',
+                 selection_input: str = 'raw',
                  presence_filter: Union[bool, float] = False):
-        self.edge_statistic = edge_statistic
+        self.selection_statistic = selection_statistic
+        self.selection_input = selection_input
         self.presence_filter = presence_filter
+        self._statistic, self._input = resolve_selection_spec(
+            selection_statistic, selection_input)
 
     def fit_transform(self,
                       X,
                       y,
                       covariates,
                       device):
-        r_edges, p_edges = (torch.zeros((X.shape[1], y.shape[1]), device=device),
-                            torch.ones((X.shape[1], y.shape[1]), device=device))
-
         # 1. Convert to GPU Tensors immediately
         X = torch.as_tensor(X, device=device, dtype=torch.float32)
         y = torch.as_tensor(y, device=device, dtype=torch.float32)
@@ -396,39 +378,28 @@ class EdgeStatistic(BaseEstimator):
         # real signed distribution around a mean of ~0. Uses X only (no target),
         # computed here on the training subjects, so it adds no leakage. This is
         # additive to the variance gate above, which already drops all-zero edges.
+        # It always sees the raw connectome: confound control happens inside the
+        # statistic below, never by residualising X before this point.
         presence_threshold = resolve_presence_threshold(self.presence_filter)
         if presence_threshold is not None:
             presence = (X != 0).float().mean(dim=0)
             valid_edges = valid_edges & (presence >= presence_threshold)
 
-        if self.edge_statistic == 'pearson':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
-                                                                      correlation_type='pearson')
-        elif self.edge_statistic == 'spearman':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
-                                                                      correlation_type='spearman')
-        elif self.edge_statistic == 'pearson_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
-                                                                      confounds=covariates,
-                                                                      correlation_type='pearson')
-        elif self.edge_statistic == 'spearman_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
-                                                                      confounds=covariates,
-                                                                      correlation_type='spearman')
-        elif self.edge_statistic == 'point_biserial':
-            # Point-biserial is Pearson against a binary 0/1 target; the unified
-            # OLS path handles it with no special-casing.
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
-                                                                      correlation_type='pearson')
-        elif self.edge_statistic == 'point_biserial_partial':
-            r_edges_masked, p_edges_masked = correlations_and_pvalues(X=X[:, valid_edges], Y_perms=y,
-                                                                      confounds=covariates,
-                                                                      correlation_type='pearson')
-        else:
-            raise NotImplementedError("Unsupported edge selection method")
-        r_edges[valid_edges] = r_edges_masked.to(r_edges.dtype)
-        p_edges[valid_edges] = p_edges_masked.to(p_edges.dtype)
-        return r_edges, p_edges
+        confounds = covariates if self._input == 'residualized' else None
+        if confounds is None and self._input == 'residualized':
+            raise ValueError(
+                "selection_input='residualized' requires covariates, but none "
+                "were supplied. Use selection_input='raw' for an analysis "
+                "without confound control."
+            )
+        r_edges, t_edges, df = edge_statistics(
+            X=X, Y_perms=y, confounds=confounds,
+            correlation_type=self._statistic)
+
+        # Excluded edges get r = t = 0, which no threshold selects. No dynamic
+        # shape change.
+        mask = valid_edges.to(r_edges.dtype).unsqueeze(1)
+        return r_edges * mask, t_edges * mask, df
 
 
 class UnivariateEdgeSelection(BaseEstimator):
@@ -442,12 +413,17 @@ class UnivariateEdgeSelection(BaseEstimator):
 
     Parameters
     ----------
-    edge_statistic: str, default='spearman'
-        Correlation statistic used to relate each edge to the target. One of
-        ``'pearson'``, ``'spearman'``, ``'pearson_partial'``, ``'spearman_partial'``
-        (continuous target), or ``'point_biserial'`` / ``'point_biserial_partial'``
-        (binary target). The ``*_partial`` variants control for the covariates
-        during selection.
+    selection_statistic: str, default='spearman'
+        Correlation used to relate each edge to the target: ``'pearson'`` or
+        ``'spearman'``. A binary 0/1 target through the Pearson path is the
+        point-biserial correlation, so it needs no separate value.
+    selection_input: str, default='raw'
+        Whether edge selection controls for the covariates. ``'raw'`` ignores
+        them. ``'residualized'`` fits one regression per edge,
+        ``y ~ 1 + Z + edge``, reporting the semipartial correlation and the
+        coefficient's p-value (``df = N - 2 - C``) -- so a ``p < 0.05``
+        threshold means a 5% per-edge false-positive rate whatever the
+        confounding. It requires covariates.
     presence_filter: bool or float, default=False
         Optional pre-filter that keeps only edges which are nonzero in at least a
         given fraction of subjects, dropping structural/near-zero edges before
@@ -456,10 +432,10 @@ class UnivariateEdgeSelection(BaseEstimator):
         structural connectomes (e.g. DTI streamline counts); leave off
         (``False``) for functional data, whose edges have a real signed
         distribution around a mean of ~0. Computed per fold on the training
-        subjects from the connectome only, so it adds no target leakage. Note:
-        with ``CPMAnalysis(calculate_residuals=True)`` the connectome is
-        residualized before selection, so the filter then sees residualized (not
-        raw) values.
+        subjects from the connectome only, so it adds no target leakage. It
+        always sees the raw connectome, including under
+        ``selection_input='residualized'`` -- confound control now happens
+        inside the statistic rather than by residualising X beforehand.
     connected_components: bool or int, default=False
         If set, keep only selected edges that belong to a connected component
         with at least this many edges (per positive/negative network), dropping
@@ -471,26 +447,21 @@ class UnivariateEdgeSelection(BaseEstimator):
         configurations to tune them via an inner CV.
     """
     def __init__(self,
-                 edge_statistic: str = 'spearman',
+                 selection_statistic: str = 'spearman',
+                 selection_input: str = 'raw',
                  presence_filter: Union[bool, float] = False,
                  connected_components: Union[bool, int] = False,
-                 edge_selection: Union[list, None, PThreshold] = None,
-                 t_test_filter=None):
+                 edge_selection: Union[list, None, PThreshold] = None):
         self.r_edges = None
-        self.p_edges = None
-        if t_test_filter is not None:
-            warnings.warn(
-                "`t_test_filter` never functioned and has been replaced by "
-                "`presence_filter` (keep edges nonzero in at least a fraction of "
-                "subjects). Ignoring `t_test_filter`; use `presence_filter` "
-                "instead.",
-                DeprecationWarning, stacklevel=2,
-            )
+        self.t_edges = None
+        self.df = None
+        self.selection_statistic = selection_statistic
+        self.selection_input = selection_input
         self.presence_filter = presence_filter
         self.connected_components = connected_components
-        self.t_test_filter = t_test_filter
-        self.edge_statistic = EdgeStatistic(edge_statistic=edge_statistic,
-                                            presence_filter=presence_filter)
+        self.statistic = EdgeStatistic(selection_statistic=selection_statistic,
+                                       selection_input=selection_input,
+                                       presence_filter=presence_filter)
         self.edge_selection = edge_selection
         if isinstance(edge_selection, (list, tuple)):
             self.edge_selection = edge_selection
@@ -509,11 +480,14 @@ class UnivariateEdgeSelection(BaseEstimator):
         return ParameterGrid(grid_elements)
 
     def fit_transform(self, X, y=None, covariates=None, device=torch.device('cpu')):
-        self.r_edges, self.p_edges = self.edge_statistic.fit_transform(X=X, y=y, covariates=covariates, device=device)
+        self.r_edges, self.t_edges, self.df = self.statistic.fit_transform(
+            X=X, y=y, covariates=covariates, device=device)
         return self
 
-    def return_selected_edges(self):
-        selected_edges = self.edge_selection.select(r=self.r_edges, p=self.p_edges)
+    def return_selected_edges(self, thresholds=None):
+        """Edge masks [Features, 2, N_params, *runs] for the fitted statistics."""
+        selected_edges = self.edge_selection.select(
+            r=self.r_edges, t=self.t_edges, df=self.df, thresholds=thresholds)
         min_edges = resolve_min_component_size(self.connected_components)
         if min_edges is not None:
             selected_edges = filter_connected_components(selected_edges, min_edges)

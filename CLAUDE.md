@@ -36,12 +36,12 @@ mkdocs build
 ### Pipeline Flow
 
 `CPMAnalysis.run()` orchestrates the full pipeline:
-1. **Data validation** — `check_data()`, `impute_missing_values()` in `utils.py`
+1. **Data validation** — `check_data()` in `validation.py`, imputation/residualisation in `preprocessing.py`
 2. **Task type detection** — auto-detects regression vs classification from target variable
 3. **Outer CV loop** — splits data, runs edge selection → model fitting → scoring per fold
 4. **Inner CV** (optional) — hyperparameter tuning via `run_inner_folds()` in `inner_fold.py`
 5. **Permutation testing** (optional) — shuffled targets for statistical significance
-6. **Results aggregation** — `ResultsManager` / `PermutationManager` in `results_manager.py`
+6. **Results aggregation** — `ResultsManager` in `results_manager.py`; permutation p-values, NBS/TFCE in `inference.py`
 7. **HTML report** — `reporting/html_report.py`
 
 ### Key Modules
@@ -51,12 +51,18 @@ mkdocs build
 | `cpm_analysis.py` | Main `CPMAnalysis` class — entry point and orchestrator |
 | `models/linear_model.py` | `LinearCPM` — PyTorch linear/logistic regression with Cholesky solver |
 | `models/nonlinear_models.py` | `DecisionTreeCPM` / `RandomForestCPM` / `GAMCPM` — alternative CPM model backends |
-| `edge_selection.py` | `UnivariateEdgeSelection` — correlation-based feature selection (Pearson/Spearman/partial) with p-value thresholding |
+| `statistics.py` | The edge statistic itself — one vectorised OLS GLM covering Pearson/Spearman/point-biserial and their partial variants (t statistic + df), plus ranks, residualisation, exact p-values and the critical t value that `PThreshold` selects on |
+| `edge_selection.py` | `UnivariateEdgeSelection` / `PThreshold` / `EdgeStatistic` — the `selection_statistic` x `selection_input` confound choice, p-value thresholding, presence and connected-component filters, parameter grid |
 | `scoring.py` | `FastCPMMetrics` / `FastCPMClassificationMetrics` — GPU-accelerated metrics |
 | `inner_fold.py` | Inner CV for hyperparameter optimization |
-| `results_manager.py` | `ResultsManager` / `PermutationManager` — aggregation and p-value computation |
+| `results_manager.py` | `ResultsManager` — preallocated accumulation of per-fold results |
+| `inference.py` | `PermutationManager` — permutation p-values, NBS and TFCE edge-level correction |
 | `constants.py` | Enums: `TaskType`, `Networks`, `Models`, `Metrics` |
-| `utils.py` | Data validation, train/test splitting, edge stability, matrix/vector conversion |
+| `validation.py` | Input validation (`check_data`), task-type detection, variable names |
+| `connectome.py` | Matrix <-> upper-triangular-vector conversion, the single place the edge indexing convention lives |
+| `preprocessing.py` | Per-fold train/test split, imputation, confound residualisation, edge-stability thresholding |
+| `memory.py` | Permutation chunk planning (`plan_permutation_chunk`) |
+| `reporting/data_insights.py` | Input-data summary figures — kept in `reporting/` so the numeric core stays plotting-free |
 
 ### Internal Tensor Shapes
 
@@ -68,7 +74,43 @@ mkdocs build
 
 ### Model Variants
 
-Each fold fits four model types (defined in `Models` enum): **connectome**, **covariates**, **full**, **residuals**. Each is evaluated across network types (positive, negative, both).
+Each fold fits three model types (defined in `Models` enum): **connectome**, **covariates**, **full**, plus **increment** (full − covariates) computed at aggregation. Each is evaluated across network types (positive, negative, both). Whether the connectome has been deconfounded is a property of the run (`model_input`), not a model name.
+
+Passing `covariates=None` to `CPMAnalysis.run` is vanilla CPM: only **connectome** is
+defined, the other variants are NaN-filled (the results tensor keeps its full shape),
+and `available_models.json` in the results directory tells the report which model rows
+carry a real number. Options that presuppose covariates (`*_partial` edge statistics,
+`selection_input='residualized'`) raise up front.
+
+### Confound control
+
+Two independent choices, not four levers:
+
+- **`selection_input`** (`'raw'` | `'residualized'`, on `UnivariateEdgeSelection`) — does
+  edge selection control for the covariates? `'residualized'` is one regression per edge,
+  `y ~ 1 + Z + edge`: semipartial correlation reported as the effect size, the
+  coefficient's p-value with `df = N - 2 - C`. It is a design decision, deliberately *not*
+  part of the parameter grid.
+- **`model_input`** (`'raw'` | `'residualized'`, on `CPMAnalysis`) — is the covariate
+  variance regressed out of the connectome the models consume? Fitted on train, applied
+  to test, and applied *after* edge selection so the two choices stay independent.
+
+This has to be a run-level knob rather than an extra model. OLS is invariant to it once
+the covariates are in the design (`full` and `increment` are unchanged — residualising
+moves variance from the strength column into the Z columns, which are already there), but
+the non-linear backends are not: on identical edges, `full` moves by 391% of sd(y) for
+`DecisionTreeCPM`, 65% for `RandomForestCPM` and 19% for `GAMCPM`. A "residualised" model
+name would mean something different for every backend, and a user could not tell which
+connectome produced `full`. Guarded by
+`tests/test_confound_api.py::test_nonlinear_models_are_not_invariant_to_model_input`.
+
+`edge_statistic` and `CPMAnalysis(calculate_residuals=...)` were removed in 0.7.0
+rather than deprecated — they changed meaning, and code that runs while silently
+producing different numbers is worse than code that stops. Both raise with the
+replacement named.
+
+`increment` is NaN for metrics whose difference is not a statistic (Pearson r, F1) —
+see `constants.INCREMENTABLE_METRICS`.
 
 ### Package Structure
 
@@ -76,4 +118,10 @@ Source code lives in `src/cccpm/` (Poetry src layout). Tests in `tests/` with fi
 
 ## CI
 
-GitHub Actions runs `pytest --cov` on push/PR to `main` and `develop` branches (Python 3.11).
+GitHub Actions runs on push/PR to `main` and `develop`:
+
+- **Pyflakes** (`lint` job) over `src/ tests/ examples/ scripts/`. Pyflakes only —
+  undefined names, unused imports, unreachable code; no style rules. Run it locally with
+  `poetry run python -m pyflakes src/ tests/ examples/ scripts/`.
+- **Tests** across a matrix of ubuntu/macos/windows x Python 3.10-3.13, with coverage
+  uploaded to Coveralls from the ubuntu/3.11 job.

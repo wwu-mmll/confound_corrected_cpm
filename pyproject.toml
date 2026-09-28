@@ -1,25 +1,57 @@
-[tool.poetry]
+[project]
 name = "cccpm"
-version = "0.5.0"
+version = "0.7.0"
 description = "Confound-Corrected Connectome-based Predictive Modeling Python Package"
 authors = [
-    "Nils Winter <nils.r.winter@uni-muenster.de>",
-    "MMLL <nils.r.winter@uni-muenster.de>"
+    { name = "Nils Winter", email = "nils.r.winter@uni-muenster.de" },
+    { name = "MMLL", email = "nils.r.winter@uni-muenster.de" },
 ]
 license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
-homepage = "https://wwu-mmll.github.io/confound_corrected_cpm/"
-repository = "https://github.com/wwu-mmll/confound_corrected_cpm"
-documentation = "https://wwu-mmll.github.io/confound_corrected_cpm/"
+requires-python = ">=3.10,<3.15"
 keywords = ["connectome", "predictive-modeling", "neuroimaging", "cpm", "machine-learning", "psychiatry"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+# torch is the default PyPI wheel on purpose (decided 2026-09-28): CUDA on Linux,
+# CPU elsewhere. Choosing a specific CUDA build is documented in installation.md.
+dependencies = [
+    "torch>=2.2",
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn>=1.6",
+    "statsmodels",
+    "nilearn",
+    "matplotlib",
+    "seaborn",
+    "jinja2",
+    "pycirclize",
+    "tqdm",
+    "pygam",
+    "psutil",
+    # the following packages are requirements for netplotbrain
+    "netplotbrain",
+    "networkx",
+    "bleach",
+    "tinycss2",
+    "plotly",
+    "scikit-image",
+]
 
+[project.urls]
+Homepage = "https://wwu-mmll.github.io/confound_corrected_cpm/"
+Documentation = "https://wwu-mmll.github.io/confound_corrected_cpm/"
+Repository = "https://github.com/wwu-mmll/confound_corrected_cpm"
+Changelog = "https://github.com/wwu-mmll/confound_corrected_cpm/blob/main/CHANGELOG.md"
+
+# Poetry-specific packaging only: the metadata above is standard (PEP 621), so
+# pip, uv and any other PEP 517 frontend read it directly.
+[tool.poetry]
 packages = [
     { include = "cccpm", from = "src" }
 ]
@@ -52,34 +84,11 @@ source = [
     "**/site-packages/cccpm"
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.10,<3.15"
-torch = ">=2.2"
-numpy = "*"
-pandas = "*"
-scipy = "*"
-scikit-learn = ">=1.6"
-statsmodels = "*"
-nilearn = "*"
-matplotlib = "*"
-seaborn = "*"
-jinja2 = "*"
-pycirclize = "*"
-tqdm = "*"
-pygam = "*"
-
-# the following packages are requirements for netplotbrain
-netplotbrain = "*"
-networkx = "*"
-bleach = "*"
-tinycss2 = "*"
-plotly = "*"
-scikit-image = "*"
-
 [tool.poetry.group.dev.dependencies]
 pingouin = "*"
 pytest = "*"
 pytest-cov = "*"
+pyflakes = "^3.4.0"
 
 [tool.poetry.group.docs]
 optional = true
@@ -90,5 +99,5 @@ mkdocs-material = "*"
 mkdocstrings = {version = "*", extras = ["python"]}
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core>=2.2.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"

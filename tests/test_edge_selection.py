@@ -1,12 +1,7 @@
 import numpy as np
-import pandas as pd
 import pytest
 import torch
-import statsmodels.api as sm
-from scipy.stats import pointbiserialr
 from cccpm.edge_selection import (
-    correlations_and_pvalues,
-    get_residuals,
     resolve_presence_threshold,
     resolve_min_component_size,
     filter_connected_components,
@@ -17,126 +12,10 @@ from cccpm.edge_selection import (
 from cccpm.constants import Networks
 
 
-def test_partial_path_matches_glm_coefficient(simulated_data):
-    """The confound-controlled edge selection must reproduce the OLS GLM.
-
-    For every edge, the p-value returned by ``correlations_and_pvalues`` with
-    confounds must equal the p-value of the edge coefficient in the regression
-    ``y ~ intercept + confounds + edge`` (statsmodels OLS). The reported r must
-    be the *semi-partial* correlation (confound removed from the edge only),
-    and its sign must match the regression coefficient. P-values use a normal
-    approximation to the t-tail (Open decision #6), so they are compared at a
-    looser tolerance than the (exact) statsmodels values.
-    """
-    X, y, covariates = simulated_data
-    Xt = torch.as_tensor(X, dtype=torch.float64)
-    yt = torch.as_tensor(y, dtype=torch.float64).reshape(-1, 1)
-    cov = covariates.astype(np.float64)
-
-    r, p = correlations_and_pvalues(Xt, yt, correlation_type='pearson',
-                                    confounds=torch.as_tensor(cov))
-    r = r.numpy().ravel()
-    p = p.numpy().ravel()
-
-    n = X.shape[0]
-    Z = sm.add_constant(cov)
-    Pz = Z @ np.linalg.pinv(Z)          # confound hat matrix
-    for i in range(X.shape[1]):
-        m = sm.OLS(y, sm.add_constant(np.column_stack([cov, X[:, i]]))).fit()
-        # GLM coefficient p-value (exact). Our p uses the normal-tail approx.
-        np.testing.assert_allclose(p[i], m.pvalues[-1], atol=2e-3)
-        # reported r is the semi-partial correlation: corr(raw y, residualised edge)
-        x_res = X[:, i] - Pz @ X[:, i]
-        yc = y - y.mean()
-        sr = np.dot(x_res, yc) / (np.linalg.norm(x_res) * np.linalg.norm(yc))
-        np.testing.assert_allclose(r[i], sr, atol=1e-6)
-        assert np.sign(r[i]) == np.sign(m.params[-1])
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-def test_partial_edge_selection_runs_on_gpu():
-    """The confound-controlled path must run when X/y/confounds live on the GPU.
-
-    Regression test for a device mismatch: get_residuals built the intercept
-    column on the CPU, so torch.cat(ones, confounds) crashed with confounds on
-    cuda. GPU results must also match the CPU computation.
-    """
-    dev = torch.device('cuda')
-    rng = np.random.RandomState(0)
-    X = torch.as_tensor(rng.randn(80, 30), dtype=torch.float32, device=dev)
-    y = torch.as_tensor(rng.randn(80, 1), dtype=torch.float32, device=dev)
-    Z = torch.as_tensor(rng.randn(80, 2), dtype=torch.float32, device=dev)
-
-    r, p = correlations_and_pvalues(X, y, correlation_type='pearson', confounds=Z)
-    assert r.device.type == 'cuda' and p.device.type == 'cuda'
-
-    r_cpu, p_cpu = correlations_and_pvalues(
-        X.cpu(), y.cpu(), correlation_type='pearson', confounds=Z.cpu())
-    torch.testing.assert_close(r.cpu(), r_cpu, rtol=1e-4, atol=1e-5)
-    torch.testing.assert_close(p.cpu(), p_cpu, rtol=1e-4, atol=1e-5)
-
-
-def test_get_residuals_matches_ols():
-    """get_residuals must reproduce OLS-with-intercept residuals for both
-    data orientations: [N_samples, features] and [batch, N_samples]."""
-    rng = np.random.RandomState(7)
-    n, k = 100, 3
-    Z = rng.randn(n, k)
-    Zi = np.column_stack([np.ones(n), Z])               # intercept + confounds
-
-    # Orientation A: data is [N_samples, features]
-    data_A = rng.randn(n, 8)
-    beta = np.linalg.lstsq(Zi, data_A, rcond=None)[0]
-    expected_A = data_A - Zi @ beta
-    got_A = get_residuals(data_A, Z)
-    np.testing.assert_allclose(got_A, expected_A, atol=1e-9)
-
-    # Orientation B: data is [batch, N_samples] (e.g. permuted targets)
-    data_B = rng.randn(5, n)
-    beta_B = np.linalg.lstsq(Zi, data_B.T, rcond=None)[0]
-    expected_B = (data_B.T - Zi @ beta_B).T
-    got_B = get_residuals(data_B, Z)
-    np.testing.assert_allclose(got_B, expected_B, atol=1e-9)
-
-    # Residuals must be orthogonal to the confound space (incl. the intercept).
-    np.testing.assert_allclose(Zi.T @ got_A, 0.0, atol=1e-8)
-
-
-@pytest.mark.parametrize("seed,n,n1", [
-    (1, 80, 20),    # imbalanced groups
-    (2, 60, 30),    # balanced
-    (3, 200, 40),   # larger, imbalanced
-    (4, 40, 8),     # small n, strong imbalance
-])
-def test_point_biserial_matches_scipy(seed, n, n1):
-    """A binary 0/1 target through the unified OLS path must equal point-biserial.
-
-    Point-biserial correlation is Pearson against a 0/1 target, which is exactly
-    what the OLS path computes for a binary outcome (no special-casing).
-    Regression test for a bug where the old group-mean formula used the *pooled
-    within-group* SD as the denominator (instead of the total SD of X), which
-    inflated |r| — with imbalanced groups and strong separation it drove r to
-    the clamp (1.0) where scipy reports ~0.78.
-    """
-    rng = np.random.RandomState(seed)
-    y = np.array([1] * n1 + [0] * (n - n1)).astype(np.float64)
-    rng.shuffle(y)
-    # features with varying (incl. strong) association with the binary target
-    X = (y[:, None] * rng.uniform(0, 3, 6) + rng.randn(n, 6)).astype(np.float64)
-
-    r, _ = correlations_and_pvalues(torch.as_tensor(X), torch.as_tensor(y).reshape(-1, 1),
-                                    correlation_type='pearson')
-    r = r.numpy().ravel()
-
-    scipy_r = np.array([pointbiserialr(y, X[:, i])[0] for i in range(X.shape[1])])
-    np.testing.assert_allclose(r, scipy_r, atol=1e-6)
-
-
-@pytest.mark.parametrize("statistic", [
-    "pearson", "spearman", "pearson_partial", "spearman_partial",
-])
-def test_batched_edge_statistics_match_per_column(statistic):
-    """Computing (r, p) for all target columns at once must equal computing
+@pytest.mark.parametrize("selection_input", ["raw", "residualized"])
+@pytest.mark.parametrize("statistic", ["pearson", "spearman"])
+def test_batched_edge_statistics_match_per_column(statistic, selection_input):
+    """Computing (r, t) for all target columns at once must equal computing
     each column separately (up to float32 rounding).
 
     The pipeline batches edge-statistic computation over all runs/permutations
@@ -146,7 +25,7 @@ def test_batched_edge_statistics_match_per_column(statistic):
     across permutations. The two paths are not bit-identical because a batched
     matrix-matrix product accumulates in a different order than the per-column
     matrix-vector product, but they agree to float32 precision (which does not
-    change the downstream p<threshold edge selection in practice — this is also
+    change the downstream |t|>critical edge selection in practice — this is also
     exactly what the inner-CV path has always computed).
     """
     rng = np.random.RandomState(0)
@@ -155,29 +34,30 @@ def test_batched_edge_statistics_match_per_column(statistic):
     Y = rng.randn(n_samples, n_runs).astype(np.float32)
     covariates = rng.randn(n_samples, 2).astype(np.float32)
 
-    stat = EdgeStatistic(edge_statistic=statistic)
+    stat = EdgeStatistic(selection_statistic=statistic,
+                         selection_input=selection_input)
     device = torch.device('cpu')
 
     # Batched: all columns at once.
-    r_all, p_all = stat.fit_transform(X=X, y=Y, covariates=covariates, device=device)
+    r_all, t_all, df_all = stat.fit_transform(X=X, y=Y, covariates=covariates, device=device)
 
     # Per column, exactly as the old loop did.
     for run_id in range(n_runs):
-        r_col, p_col = stat.fit_transform(
+        r_col, t_col, df_col = stat.fit_transform(
             X=X, y=Y[:, [run_id]], covariates=covariates, device=device)
+        assert df_col == df_all
         torch.testing.assert_close(r_all[:, [run_id]], r_col, rtol=1e-5, atol=1e-6)
-        torch.testing.assert_close(p_all[:, [run_id]], p_col, rtol=1e-5, atol=1e-6)
+        torch.testing.assert_close(t_all[:, [run_id]], t_col, rtol=1e-4, atol=1e-5)
 
 
+@pytest.mark.parametrize("selection_input", ["raw", "residualized"])
 @pytest.mark.parametrize("statistic,binary_target", [
     ("pearson", False),
     ("spearman", False),
-    ("pearson_partial", False),
-    ("spearman_partial", False),
-    ("point_biserial", True),
-    ("point_biserial_partial", True),
+    ("pearson", True),      # a 0/1 target: the point-biserial correlation
 ])
-def test_edge_selection_recovers_signed_edges(statistic, binary_target):
+def test_edge_selection_recovers_signed_edges(statistic, binary_target,
+                                              selection_input):
     """
     End-to-end test of the production edge-selection path
     (UnivariateEdgeSelection -> EdgeStatistic dispatch -> PThreshold.select)
@@ -197,7 +77,8 @@ def test_edge_selection_recovers_signed_edges(statistic, binary_target):
     covariates = rng.randn(n_samples, 1).astype(np.float32)
 
     sel = UnivariateEdgeSelection(
-        edge_statistic=statistic,
+        selection_statistic=statistic,
+        selection_input=selection_input,
         edge_selection=[PThreshold(threshold=[0.01], correction=[None])],
     )
     # Configure as a single selector, exactly as the pipeline does
@@ -253,11 +134,11 @@ def _sparse_presence_data(seed=0):
 def test_presence_filter_drops_sparse_edges(threshold, expected_min_fraction):
     """Only edges nonzero in >= threshold of subjects survive the filter."""
     X, y = _sparse_presence_data()
-    stat = EdgeStatistic(edge_statistic='pearson', presence_filter=threshold)
-    r, p = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    stat = EdgeStatistic(selection_statistic='pearson', presence_filter=threshold)
+    r, t, _ = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
 
     presence = (X != 0).mean(axis=0)
-    kept = (p[:, 0].numpy() < 1.0)  # p==1 marks a filtered/invalid edge
+    kept = (t[:, 0].numpy() != 0.0)  # t==0 marks a filtered/invalid edge
     for j in range(X.shape[1]):
         if presence[j] + 1e-9 >= expected_min_fraction:
             assert kept[j], f"edge {j} (presence {presence[j]:.2f}) should survive"
@@ -268,10 +149,10 @@ def test_presence_filter_drops_sparse_edges(threshold, expected_min_fraction):
 def test_presence_filter_off_by_default_keeps_all():
     """With the filter off, sparse-but-variable edges are still evaluated."""
     X, y = _sparse_presence_data()
-    stat = EdgeStatistic(edge_statistic='pearson')  # default: no presence filter
-    r, p = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    stat = EdgeStatistic(selection_statistic='pearson')  # default: no presence filter
+    r, t, _ = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
     # Every column has variance > 0, so none is dropped by the variance gate.
-    assert bool((p[:, 0].numpy() < 1.0).all()), "no edge should be filtered when off"
+    assert bool((t[:, 0].numpy() != 0.0).all()), "no edge should be filtered when off"
 
 
 def test_presence_filter_adds_to_variance_gate():
@@ -283,24 +164,13 @@ def test_presence_filter_adds_to_variance_gate():
     X = np.zeros((n, 1), dtype=np.float32)
     X[:20, 0] = rng.randn(20).astype(np.float32) + 5.0  # nonzero in 20% only
 
-    no_filter = EdgeStatistic(edge_statistic='pearson')
-    _, p_off = no_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
-    assert p_off[0, 0].item() < 1.0  # survives the variance gate
+    no_filter = EdgeStatistic(selection_statistic='pearson')
+    _, t_off, _ = no_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    assert t_off[0, 0].item() != 0.0  # survives the variance gate
 
-    with_filter = EdgeStatistic(edge_statistic='pearson', presence_filter=0.5)
-    _, p_on = with_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
-    assert p_on[0, 0].item() == 1.0  # dropped by the presence filter
-
-
-def test_t_test_filter_deprecated():
-    """The old, never-functional t_test_filter keyword warns and is ignored."""
-    with pytest.warns(DeprecationWarning):
-        sel = UnivariateEdgeSelection(
-            edge_statistic='pearson', t_test_filter=True,
-            edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
-        )
-    # presence_filter stays at its default (off) — t_test_filter is not mapped.
-    assert sel.presence_filter is False
+    with_filter = EdgeStatistic(selection_statistic='pearson', presence_filter=0.5)
+    _, t_on, _ = with_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    assert t_on[0, 0].item() == 0.0  # dropped by the presence filter
 
 
 # --- Connected-component edge filtering ---------------------------------------
@@ -333,7 +203,7 @@ def test_filter_connected_components_drops_lone_edges():
 
 def _sel_with_edges(connected_components):
     sel = UnivariateEdgeSelection(
-        edge_statistic='pearson',
+        selection_statistic='pearson',
         connected_components=connected_components,
         edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
     )
@@ -341,11 +211,11 @@ def _sel_with_edges(connected_components):
     # 5 nodes / 10 edges: positive edges 0=(0,1), 4=(1,2) form a chain; 9=(3,4)
     # is isolated. All are strongly, significantly positive.
     r = torch.zeros(10, 1)
-    p = torch.ones(10, 1)
+    t = torch.zeros(10, 1)
     for e in (0, 4, 9):
         r[e, 0] = 0.5
-        p[e, 0] = 0.001
-    sel.r_edges, sel.p_edges = r, p
+        t[e, 0] = 6.0        # p ~ 1e-7 at df=100
+    sel.r_edges, sel.t_edges, sel.df = r, t, 100
     return sel
 
 
@@ -358,3 +228,87 @@ def test_connected_components_filter_end_to_end():
 
     edges_off = _sel_with_edges(False).return_selected_edges()
     assert bool(edges_off[9, Networks.positive, 0])     # lone edge kept
+
+
+def _t_and_exact_p(rng, n_features, n_runs, df):
+    """Random t statistics spanning the selection boundary, with their exact p."""
+    from scipy import stats
+    t = rng.standard_t(df, size=(n_features, n_runs)) * 2.5
+    return t, 2 * stats.t.sf(np.abs(t), df)
+
+
+@pytest.mark.parametrize("correction", [None, "bonferroni", "sidak", "holm", "fdr_bh"])
+def test_pthreshold_matches_statsmodels_per_run(correction):
+    """Selection equals exact p-values, corrected by statsmodels one run at a time.
+
+    The reference is independent of the code under test: scipy's exact t tail,
+    then statsmodels' correction applied separately to each column.
+    """
+    from statsmodels.stats import multitest
+
+    rng = np.random.RandomState(11)
+    df, n_features, n_runs = 40, 200, 3
+    t, p = _t_and_exact_p(rng, n_features, n_runs, df)
+    r = np.sign(t) * 0.1
+    threshold = 0.05
+
+    p_corrected = p.copy()
+    if correction is not None:
+        for run in range(n_runs):
+            _, p_corrected[:, run], _, _ = multitest.multipletests(
+                p[:, run], alpha=0.05, method=correction)
+    expected_pos = (p_corrected < threshold) & (r > 0)
+    expected_neg = (p_corrected < threshold) & (r < 0)
+    assert expected_pos.any() and not expected_pos.all()   # the case is not trivial
+
+    selector = PThreshold(threshold=threshold, correction=correction)
+    edges = selector.select(r=torch.as_tensor(r), t=torch.as_tensor(t), df=df)
+
+    # select() returns [Features, 2, N_thresholds, Runs]; one threshold here.
+    assert edges.shape == (n_features, 2, 1, n_runs)
+    np.testing.assert_array_equal(edges[:, 0, 0].numpy(), expected_pos)
+    np.testing.assert_array_equal(edges[:, 1, 0].numpy(), expected_neg)
+
+
+@pytest.mark.parametrize("correction", ["bonferroni", "sidak", "holm", "fdr_bh"])
+def test_a_runs_selection_does_not_depend_on_its_batch(correction):
+    """A run is corrected over its own edges, not over every run in the batch.
+
+    Regression test. The correction used to run over ``p.flatten()``, so a
+    permutation chunk of shape [F, P] was corrected as F x P tests: each permuted
+    run faced a far stricter threshold than the real run (and one that changed
+    with the chunk size), making the permutation null weaker than the procedure
+    it was meant to be a null of.
+    """
+    rng = np.random.RandomState(5)
+    df, n_features, n_runs = 40, 150, 50
+    t, _ = _t_and_exact_p(rng, n_features, n_runs, df)
+    r = torch.as_tensor(np.sign(t) * 0.1)
+    t = torch.as_tensor(t)
+
+    selector = PThreshold(threshold=0.05, correction=correction)
+    batched = selector.select(r=r, t=t, df=df)
+    for run in (0, n_runs // 2, n_runs - 1):
+        alone = selector.select(r=r[:, [run]], t=t[:, [run]], df=df)
+        assert torch.equal(batched[..., [run]], alone), f"run {run} changed with its batch"
+
+
+# --- Threshold-grid (params axis) tests --------------------------------
+
+
+def test_select_params_axis_matches_per_threshold_calls():
+    """PThreshold.select's params dim must reproduce independent
+    select() calls, one per threshold, exactly."""
+    rng = np.random.RandomState(21)
+    r = torch.as_tensor(rng.randn(30, 4))
+    t = torch.as_tensor(rng.randn(30, 4) * 4)
+    thresholds = [0.01, 0.05, 0.1]
+
+    selector = PThreshold(threshold=thresholds, correction='bonferroni')
+    batched = selector.select(r=r, t=t, df=50, thresholds=thresholds)  # [F,2,3,4]
+    assert batched.shape == (30, 2, 3, 4)
+
+    for i, threshold in enumerate(thresholds):
+        ref_selector = PThreshold(threshold=threshold, correction='bonferroni')
+        ref = ref_selector.select(r=r, t=t, df=50)          # [F, 2, 1, R]
+        assert torch.equal(batched[:, :, i, :], ref[:, :, 0, :])

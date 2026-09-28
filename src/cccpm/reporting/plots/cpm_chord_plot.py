@@ -6,31 +6,6 @@ import pandas as pd
 import netplotbrain
 
 
-def vector_to_upper_triangular_matrix(vector):
-    """
-    Convert a vector containing strictly upper triangular elements back
-    to a 2D square matrix.
-
-    Parameters:
-    vector (np.ndarray): A vector containing the strictly upper triangular elements.
-
-    Returns:
-    np.ndarray: The reconstructed 2D square matrix.
-    """
-    # Calculate the size of the matrix from the vector length
-    size = int((np.sqrt(8 * vector.size + 1) - 1) / 2) + 1
-    if size * (size - 1) // 2 != vector.size:
-        raise ValueError("Vector size does not match the number of elements for a valid square matrix.")
-
-    matrix = np.zeros((size, size))
-    # Get the indices of the strictly upper triangular part
-    row_indices, col_indices = np.triu_indices(size, k=1)
-    # Place the elements into the matrix
-    matrix[row_indices, col_indices] = vector
-    matrix[col_indices, row_indices] = vector
-    return matrix
-
-
 def get_colors_from_colormap(n_colors, colormap_name='tab10'):
     """
     Get a set of distinct colors from a specified colormap.
@@ -140,10 +115,3 @@ def plot_netplotbrain(results_folder, selected_metric, atlas_labels):
         edges_netplot = None
     fig.savefig(os.path.join(results_folder, "plots", f"netplotbrain_{selected_metric}.png"))
     return os.path.join(results_folder, "plots", f"netplotbrain_{selected_metric}.png"), edges_netplot
-
-
-if __name__ == "__main__":
-    results_directory = '/spm-data/vault-data3/mmll/projects/cpm_python/results/hcp_SSAGA_TB_Yrs_Smoked_spearman_partial_p=0.001/'
-    selected_metric = "sig_stability_negative_edges"
-    #plot_cpm_chord_plot(results_directory, selected_metric)
-    plot_netplotbrain(results_directory, selected_metric)

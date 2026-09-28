@@ -43,8 +43,19 @@ def format_results_table(df, precision=2):
         std = df[(metric, "std")]
         p = df[(metric, "p")]
 
-        # Format mean [std]
-        summary_col = mean.round(precision).astype(str) + " [" + std.round(precision).astype(str) + "]"
+        # Format mean [std]. NaN means "not applicable", not "missing": the
+        # increment of a metric whose difference is not a statistic (Pearson r,
+        # F1) is deliberately not computed, and a model variant that a run does
+        # not define is NaN-filled. An em dash says that; "nan" does not.
+        def summary_string(row):
+            if pd.isna(row["mean"]):
+                return "\u2014"
+            if pd.isna(row["std"]):
+                return f"{row['mean']:.{precision}f}"
+            return f"{row['mean']:.{precision}f} [{row['std']:.{precision}f}]"
+
+        summary_col = pd.DataFrame({"mean": mean, "std": std}).apply(
+            summary_string, axis=1)
 
         # Annotate p-values with asterisks (we'll apply bold via styling)
         def p_string(val):
@@ -115,7 +126,7 @@ def format_results_table(df, precision=2):
 
 
 def extract_log_block(filepath):
-    with open(filepath, "r") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     # Find all indices of separator lines (e.g. "=======")
@@ -167,11 +178,19 @@ def parse_config_block(log_path: str) -> list[tuple[str, str]]:
     raw = extract_log_block(log_path)
     pairs = []
     for line in raw.splitlines():
-        line = line.strip()
-        if not line:
+        if not line.strip():
             continue
+        # Values can wrap: an estimator repr is logged over several lines, and
+        # its continuations are indented. Treating them as new keys produced
+        # rows like "threshold=[0.05])]," with an empty value in the report's
+        # configuration table.
+        is_continuation = line[:1].isspace() and pairs
+        line = line.strip()
         m = re.match(r"^([^:]+):\s*(.*)$", line)
-        if m:
+        if is_continuation:
+            key, value = pairs[-1]
+            pairs[-1] = (key, f"{value} {line}".strip())
+        elif m:
             pairs.append((m.group(1).strip(), m.group(2).strip()))
         else:
             pairs.append((line, ""))

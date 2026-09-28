@@ -14,7 +14,6 @@ from typing import Optional
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -32,6 +31,7 @@ from cccpm.reporting.table_builders import (
     create_hyperparameter_table,
 )
 from cccpm.reporting.plots.plots import (
+    MODEL_ORDER,
     histograms_network_strengths,
     performance_grid,
     scatter_plot_main,
@@ -84,6 +84,47 @@ def _format_p(p: float) -> str:
     return f"p = {p:.3f}".replace("0.", ".")
 
 
+# How the confound 2x2 reads to a human. `selection_input` controls whether edge
+# selection accounts for the covariates; `model_input` whether the connectome the
+# model consumes is deconfounded.
+_CONFOUND_CONTROL_LABELS = {
+    ('raw', 'raw'): ("none",
+                     "Confounds were not accounted for anywhere. Any association "
+                     "the covariates have with the target is still in this result."),
+    ('residualized', 'raw'): ("edge selection only",
+                              "Edge selection accounted for the covariates, but the "
+                              "network strengths the model uses did not -- so the "
+                              "prediction can still carry confound variance."),
+    ('raw', 'residualized'): ("features only",
+                              "The connectome was deconfounded before the model, but "
+                              "edge selection was not -- the selected edges can still "
+                              "be ones the covariates explain."),
+    ('residualized', 'residualized'): ("edge selection and features",
+                                       "Confounds were accounted for both when "
+                                       "selecting edges and in the connectome the "
+                                       "model consumes."),
+}
+
+
+def describe_confound_control(run_config: Optional[dict]):
+    """
+    ``(label, explanation)`` for this run's confound configuration.
+
+    Returns ``(None, None)`` when the configuration is unknown -- a results
+    directory written before it was recorded -- rather than guessing, because
+    claiming "none" for a run that was in fact controlled is worse than saying
+    nothing at all.
+    """
+    if not run_config:
+        return None, None
+    if run_config.get('has_covariates') is False:
+        return ("no covariates",
+                "This analysis ran without covariates, so there was nothing to "
+                "control for and only the connectome model is defined.")
+    key = (run_config.get('selection_input'), run_config.get('model_input'))
+    return _CONFOUND_CONTROL_LABELS.get(key, (None, None))
+
+
 def _summary_value(summary_df: Optional[pd.DataFrame], label: str) -> Optional[str]:
     if summary_df is None or label not in summary_df.index:
         return None
@@ -109,12 +150,17 @@ def build_hero_context(
     task_type: str,
     version: str,
     run_date: str,
+    available_models: Optional[list] = None,
+    run_config: Optional[dict] = None,
 ) -> dict:
     """
     Build the hero: a one-sentence verdict, key-stat chips, and the prominent
     predicted-vs-observed scatter for the headline (connectome, both) model.
     """
     import re
+
+    available_models = available_models or MODEL_ORDER
+    confound_label, confound_explanation = describe_confound_control(run_config)
 
     cfg = _config_dict(results_directory)
     raw = "\n".join(f"{k}: {v}" for k, v in _config_items(results_directory))
@@ -155,9 +201,15 @@ def build_hero_context(
         cv_part = f"{n_folds}-fold CV" if n_folds else "cross-validation"
         perm_part = f", {n_perm} permutations" if n_perm else ""
         p_part = f", {_format_p(pval)}" if pval is not None else ""
+        # Name the confound configuration in the headline itself. Without it a
+        # naive run and a fully controlled one open with the same sentence, and
+        # whoever is handed the HTML cannot tell them apart.
+        confound_part = (f" Confound control: {confound_label}."
+                         if confound_label else "")
         headline = (
             f"The connectome model {verb} {y_name}: "
             f"{metric_label} = {value:.2f}{p_part} ({cv_part}{perm_part})."
+            f"{confound_part}"
         )
     else:
         headline = ""
@@ -167,7 +219,7 @@ def build_hero_context(
     n_nodes = None
     if n_features is not None:
         try:
-            from cccpm.utils import infer_n_nodes
+            from cccpm.validation import infer_n_nodes
             n_nodes = infer_n_nodes(int(float(n_features)))
         except Exception:
             n_nodes = None
@@ -195,8 +247,12 @@ def build_hero_context(
     if n_edges is not None:
         chips.append(("Stable edges", str(n_edges)))
     ncov = _summary_value(summary_df, "Number of covariates")
-    if ncov:
+    # "Covariates: 0" is noise; the Model Comparison section already says the
+    # analysis ran without them.
+    if ncov and str(ncov).strip() not in ("0", "0.0"):
         chips.append(("Covariates", ncov))
+    if confound_label:
+        chips.append(("Confound control", confound_label))
     if p_thresh:
         chips.append(("Edge p-threshold", p_thresh))
     if n_perm:
@@ -242,8 +298,11 @@ def build_hero_context(
         _scatter("connectome", "both", "scatter_both", "Connectome — both networks"),
         _scatter("connectome", "positive", "scatter_positive", "Connectome — positive network"),
         _scatter("connectome", "negative", "scatter_negative", "Connectome — negative network"),
-        _scatter("covariates", "both", "scatter_covariates", "Covariates only"),
     ]
+    # Omitted, not rendered blank, when the run had no covariates.
+    if "covariates" in available_models:
+        hero_scatters.append(
+            _scatter("covariates", "both", "scatter_covariates", "Covariates only"))
     hero_scatters = [s for s in hero_scatters if s is not None]
 
     return {
@@ -253,6 +312,8 @@ def build_hero_context(
         "headline": headline,
         "stat_chips": chips,
         "hero_scatters": hero_scatters,
+        "confound_control": confound_label,
+        "confound_explanation": confound_explanation,
         "config_items": _config_items(results_directory),
     }
 

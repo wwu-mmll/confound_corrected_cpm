@@ -131,7 +131,7 @@ sim = simulate_data_given_kappa(
 ```
 
 This is the parameterisation used in the two [quickstart examples](examples/regression.md)
-and in `examples/confound_inflation_demo.py`.
+and in `scripts/confound_inflation_demo.py`.
 
 ## Sweeping a grid of scenarios
 
@@ -150,7 +150,7 @@ for (r2, kappa), sim in grid.items():
 
 For a full worked example that runs CCCPM across such a grid and shows that
 partial-correlation edge selection does **not** remove the inflation (only
-residualization does), see `examples/confound_inflation_demo.py`.
+residualization does), see `scripts/confound_inflation_demo.py`.
 
 ## Making the target binary
 

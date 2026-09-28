@@ -80,7 +80,7 @@ def run_benchmark(nodes, samples, perms, devices, n_repeat=3):
                 X, Y, cov, edges = _make_data(n_samples, n_nodes, n_perms)
                 for device in devices:
                     dev = torch.device(device)
-                    stat = EdgeStatistic(edge_statistic="pearson")
+                    stat = EdgeStatistic(selection_statistic="pearson")
                     edge_fn = lambda: stat.fit_transform(
                         X=X, y=Y, covariates=cov, device=dev)
                     edges_dev = edges.to(dev)

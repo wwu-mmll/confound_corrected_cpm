@@ -20,12 +20,6 @@ from cccpm.cpm_analysis import CPMAnalysis
 # Registry
 # ---------------------------------------------------------------------------
 
-def test_list_atlases_nonempty():
-    atlases = list_atlases()
-    assert atlases, "expected at least one bundled atlas"
-    assert "Schaefer100-17" in atlases
-
-
 def test_bundled_atlases_have_required_schema():
     for name in list_atlases():
         df = load_atlas(name)
@@ -36,66 +30,69 @@ def test_bundled_atlases_have_required_schema():
             assert pd.api.types.is_numeric_dtype(df[col]), f"{name}.{col} not numeric"
 
 
-def test_schaefer_node_counts_and_networks():
-    df = load_atlas("Schaefer100-17")
-    assert len(df) == 100
-    assert "network" in df.columns
-    # 17-network parcellation should expose more networks than the 7-network one.
-    assert df["network"].nunique() > load_atlas("Schaefer100-7")["network"].nunique()
+# What each bundled atlas must contain. Spans coordinate-defined, volumetric and
+# surface-derived (volumetric-MNI) parcellations; one table rather than five
+# near-identical test functions.
+ATLAS_EXPECTATIONS = [
+    # (name, n_regions, hemispheres, structures)
+    ("Schaefer100-7", 100, None, None),
+    ("Schaefer100-17", 100, None, None),
+    ("Schaefer400-17", 400, None, None),
+    ("Power264", 264, None, None),
+    ("Dosenbach160", 160, None, None),
+    ("Seitzman300", 300, None, None),
+    ("Destrieux148", 148, {"L", "R"}, None),
+    ("HarvardOxfordCortical", 96, {"L", "R"}, None),
+    ("AAL116", 116, None, {"cortical", "subcortical", "cerebellum"}),
+    ("Glasser360", 360, {"L", "R"}, None),
+    ("DesikanKilliany68", 68, {"L", "R"}, None),
+]
+
+
+def test_bundled_atlas_contents():
+    """One test over the table, not one per atlas: the failure message names the
+    atlas, so per-atlas test IDs only inflate the collected count."""
+    for name, n_regions, hemispheres, structures in ATLAS_EXPECTATIONS:
+        df = load_atlas(name)
+        assert len(df) == n_regions, f"{name} has {len(df)} regions"
+        if hemispheres is not None:
+            assert set(df["hemisphere"]) >= hemispheres, name
+        if structures is not None:
+            assert set(df["structure"]) >= structures, name
 
 
 def test_expected_atlases_are_bundled():
-    # A representative set spanning coordinate-defined, volumetric, and
-    # surface-derived (volumetric-MNI) parcellations.
-    expected = {
-        "Schaefer100-7", "Schaefer400-17", "Power264", "Dosenbach160",
-        "Seitzman300", "Destrieux148", "HarvardOxfordCortical",
-        "AAL116", "Glasser360", "DesikanKilliany68",
-    }
-    assert expected <= set(list_atlases())
+    assert {name for name, *_ in ATLAS_EXPECTATIONS} <= set(list_atlases())
 
 
-def test_surface_derived_atlases_have_node_counts_and_hemispheres():
-    destrieux = load_atlas("Destrieux148")
-    assert len(destrieux) == 148
-    # Destrieux is split evenly across hemispheres.
-    assert set(destrieux["hemisphere"]) >= {"L", "R"}
-
-    ho = load_atlas("HarvardOxfordCortical")
-    assert len(ho) == 96
-    assert set(ho["hemisphere"]) >= {"L", "R"}
+def test_schaefer_17_networks_are_finer_than_7():
+    assert (load_atlas("Schaefer100-17")["network"].nunique()
+            > load_atlas("Schaefer100-7")["network"].nunique())
 
 
-def test_volumetric_atlases_node_counts():
-    assert len(load_atlas("AAL116")) == 116
-    assert len(load_atlas("Glasser360")) == 360
+def test_region_names_match_anatomy():
+    """Names were assigned by anatomy; spot-check a landmark lands where it should."""
     dk = load_atlas("DesikanKilliany68")
-    assert len(dk) == 68
-    assert set(dk["hemisphere"]) == {"L", "R"}
-    # Names were assigned by anatomy; spot-check a landmark lands where it should.
-    prec = dk.loc[dk.region == "L_precentral", ["x", "y", "z"]].to_numpy()[0]
-    assert prec[0] < 0 and prec[2] > 30  # left, dorsal — motor strip
-    # AAL spans cortex, subcortex and cerebellum; Glasser is cortical only.
-    assert set(load_atlas("AAL116")["structure"]) >= {"cortical", "subcortical", "cerebellum"}
-    assert set(load_atlas("Glasser360")["hemisphere"]) == {"L", "R"}
+    x, _, z = dk.loc[dk.region == "L_precentral", ["x", "y", "z"]].to_numpy()[0]
+    assert x < 0 and z > 30  # left, dorsal -- motor strip
 
 
 def test_wholebrain_variants_add_subcortical():
-    # Each whole-brain variant = its cortical atlas + 14 subcortical structures.
+    """Each whole-brain variant = its cortical atlas + 14 subcortical structures."""
     for cortical, wholebrain in [
         ("DesikanKilliany68", "DesikanKillianyWholeBrain"),
         ("Destrieux148", "DestrieuxWholeBrain"),
         ("Glasser360", "GlasserWholeBrain"),
         ("HarvardOxfordCortical", "HarvardOxfordWholeBrain"),
     ]:
-        cort = load_atlas(cortical)
         wb = load_atlas(wholebrain)
-        assert len(wb) == len(cort) + 14
+        assert len(wb) == len(load_atlas(cortical)) + 14, wholebrain
+
         sub = wb[wb["structure"] == "subcortical"]
-        assert len(sub) == 14
+        assert len(sub) == 14, wholebrain
         assert {"L_Hippocampus", "R_Thalamus", "L_Amygdala"} <= set(sub["region"])
         # Subcortical structures are lateralised correctly (left is x < 0).
-        assert ((sub["hemisphere"] == "L") == (sub["x"] < 0)).all()
+        assert ((sub["hemisphere"] == "L") == (sub["x"] < 0)).all(), wholebrain
 
 
 def test_load_atlas_is_case_insensitive():
@@ -111,34 +108,27 @@ def test_load_unknown_atlas_raises():
 # resolve_atlas: path vs name vs None
 # ---------------------------------------------------------------------------
 
-def test_resolve_none_returns_none():
+def _custom_csv(tmp_path, name="custom.csv", **columns):
+    csv = tmp_path / name
+    pd.DataFrame(columns or {"region": ["a", "b"], "x": [1, 2],
+                             "y": [3, 4], "z": [5, 6]}).to_csv(csv, index=False)
+    return csv
+
+
+def test_resolve_atlas_accepts_none_a_name_and_a_path(tmp_path):
+    """The three things `atlas=` may be, in one place."""
     assert resolve_atlas(None) is None
+    assert len(resolve_atlas("Power264")) == 264
+    assert list(resolve_atlas(str(_custom_csv(tmp_path)))["region"]) == ["a", "b"]
 
 
-def test_resolve_builtin_name():
-    df = resolve_atlas("Power264")
-    assert len(df) == 264
-
-
-def test_resolve_custom_csv_path(tmp_path):
-    csv = tmp_path / "custom.csv"
-    pd.DataFrame(
-        {"region": ["a", "b"], "x": [1, 2], "y": [3, 4], "z": [5, 6]}
-    ).to_csv(csv, index=False)
-    df = resolve_atlas(str(csv))
-    assert list(df["region"]) == ["a", "b"]
-
-
-def test_resolve_missing_csv_path_raises(tmp_path):
+def test_resolve_atlas_rejects_bad_paths(tmp_path):
     with pytest.raises(AtlasError, match="does not exist"):
         resolve_atlas(str(tmp_path / "nope.csv"))
 
-
-def test_resolve_custom_csv_missing_columns_raises(tmp_path):
-    csv = tmp_path / "bad.csv"
-    pd.DataFrame({"region": ["a"], "x": [1]}).to_csv(csv, index=False)
+    incomplete = _custom_csv(tmp_path, "bad.csv", region=["a"], x=[1])
     with pytest.raises(AtlasError, match="missing required column"):
-        resolve_atlas(str(csv))
+        resolve_atlas(str(incomplete))
 
 
 # ---------------------------------------------------------------------------

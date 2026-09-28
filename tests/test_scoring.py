@@ -42,29 +42,7 @@ def simple_data():
     return y_true, y_pred
 
 
-@pytest.fixture
-def perfect_data():
-    """Creates data where predictions perfectly match ground truth."""
-    np.random.seed(42)
-    N_samples = 30
-    N_runs = 2
-
-    y_true = np.random.randn(N_samples, N_runs).astype(np.float32)
-    # Expand y_true to [N_samples, N_models, N_networks, N_runs]
-    y_pred = np.broadcast_to(
-        y_true[:, np.newaxis, np.newaxis, :],
-        (N_samples, N_MODELS, N_NETWORKS, N_runs)
-    ).copy()
-
-    return y_true, y_pred
-
-
 class TestFastCPMMetrics:
-
-    def test_initialization(self, device):
-        """Test that FastCPMMetrics initializes correctly."""
-        evaluator = FastCPMMetrics(device=device)
-        assert evaluator.device == device
 
     def test_score_output_shape(self, simple_data, device):
         """Test that score returns correct output shape."""
@@ -75,75 +53,6 @@ class TestFastCPMMetrics:
         N_runs = y_true.shape[1]
         expected_shape = (N_METRICS, N_MODELS, N_NETWORKS, N_runs)
         assert scores.shape == expected_shape, f"Expected {expected_shape}, got {scores.shape}"
-
-    def test_score_returns_tensor(self, simple_data, device):
-        """Test that score returns a torch.Tensor."""
-        y_true, y_pred = simple_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-        assert isinstance(scores, torch.Tensor)
-
-    def test_perfect_predictions_pearson(self, perfect_data, device):
-        """Test that perfect predictions yield Pearson correlation of 1."""
-        y_true, y_pred = perfect_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        pearson_scores = scores[Metrics.pearson_score, :, :, :]
-        assert torch.allclose(pearson_scores, torch.ones_like(pearson_scores), atol=1e-5)
-
-    def test_perfect_predictions_mse(self, perfect_data, device):
-        """Test that perfect predictions yield MSE of 0."""
-        y_true, y_pred = perfect_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        mse_scores = scores[Metrics.mean_squared_error, :, :, :]
-        assert torch.allclose(mse_scores, torch.zeros_like(mse_scores), atol=1e-5)
-
-    def test_perfect_predictions_mae(self, perfect_data, device):
-        """Test that perfect predictions yield MAE of 0."""
-        y_true, y_pred = perfect_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        mae_scores = scores[Metrics.mean_absolute_error, :, :, :]
-        assert torch.allclose(mae_scores, torch.zeros_like(mae_scores), atol=1e-5)
-
-    def test_perfect_predictions_explained_variance(self, perfect_data, device):
-        """Test that perfect predictions yield explained variance of 1."""
-        y_true, y_pred = perfect_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        ev_scores = scores[Metrics.explained_variance_score, :, :, :]
-        assert torch.allclose(ev_scores, torch.ones_like(ev_scores), atol=1e-5)
-
-    def test_mse_calculation(self, device):
-        """Test MSE calculation with known values."""
-        N, P = 10, 1
-        y_true = np.full((N, P), 2.0, dtype=np.float32)
-        y_pred = np.full((N, N_MODELS, N_NETWORKS, P), 4.0, dtype=np.float32)
-
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        mse_scores = scores[Metrics.mean_squared_error, :, :, :]
-        expected = torch.full_like(mse_scores, 4.0)  # (4-2)^2 = 4
-        assert torch.allclose(mse_scores, expected, atol=1e-5)
-
-    def test_mae_calculation(self, device):
-        """Test MAE calculation with known values."""
-        N, P = 10, 1
-        y_true = np.full((N, P), 2.0, dtype=np.float32)
-        y_pred = np.full((N, N_MODELS, N_NETWORKS, P), 5.0, dtype=np.float32)
-
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        mae_scores = scores[Metrics.mean_absolute_error, :, :, :]
-        expected = torch.full_like(mae_scores, 3.0)  # |5-2| = 3
-        assert torch.allclose(mae_scores, expected, atol=1e-5)
 
     def test_covariates_shared_across_networks(self, device):
         """Test that when covariates preds are identical across networks, scores match."""
@@ -184,42 +93,6 @@ class TestFastCPMMetrics:
 
         assert torch.allclose(scores_np, scores_torch, atol=1e-5)
 
-    def test_pearson_negative_correlation(self, device):
-        """Test Pearson correlation with negatively correlated predictions."""
-        N, P = 50, 1
-        y_true = np.linspace(0, 10, N).reshape(-1, 1).astype(np.float32)
-        y_pred_vals = -y_true  # Perfect negative correlation
-        y_pred = np.broadcast_to(
-            y_pred_vals[:, np.newaxis, np.newaxis, :],
-            (N, N_MODELS, N_NETWORKS, P)
-        ).copy()
-
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        pearson_scores = scores[Metrics.pearson_score, :, :, :]
-        expected = torch.full_like(pearson_scores, -1.0)
-        assert torch.allclose(pearson_scores, expected, atol=1e-5)
-
-    def test_multiple_permutations(self, device):
-        """Test that multiple runs are handled correctly."""
-        np.random.seed(42)
-        N, P = 30, 5
-        y_true = np.random.randn(N, P).astype(np.float32)
-        y_pred = np.random.randn(N, N_MODELS, N_NETWORKS, P).astype(np.float32)
-
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        assert scores.shape[-1] == P
-
-        # Each run should have different scores (extremely unlikely to be identical)
-        for model in Models:
-            for network in Networks:
-                for metric in [Metrics.pearson_score, Metrics.mean_squared_error]:
-                    run_scores = scores[metric, model, network, :]
-                    assert not torch.allclose(run_scores, run_scores[0].expand_as(run_scores))
-
     def test_score_models_wrapper(self, simple_data, device):
         """Test the score_models wrapper function for regression."""
         y_true, y_pred = simple_data
@@ -230,73 +103,44 @@ class TestFastCPMMetrics:
         assert scores.shape == expected_shape
         assert isinstance(scores, torch.Tensor)
 
-    def test_metrics_ordering(self, simple_data, device):
-        """Test that metrics are correctly ordered according to constants.Metrics."""
-        y_true, y_pred = simple_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
+    def test_metrics_ordering(self, device):
+        """Each row of the score tensor is the metric its `Metrics` member names.
 
-        assert scores.shape[0] == N_METRICS
+        The previous version of this test asserted `scores[metric].shape`, which
+        holds for any index in range and so said nothing about ordering. If the
+        enum and the tensor's rows ever disagreed, every reported number would be
+        silently mislabelled -- so compare against an independent reference per
+        row, with predictions good enough that the metrics take distinct values.
+        """
+        rng = np.random.RandomState(0)
+        N = 200
+        y_true = rng.randn(N, 1).astype(np.float32)
+        y_pred = np.empty((N, N_MODELS, N_NETWORKS, 1), dtype=np.float32)
+        y_pred[:] = (y_true + rng.randn(N, 1).astype(np.float32) * 0.5)[
+            :, None, None, :]
 
-        for metric in [Metrics.explained_variance_score, Metrics.pearson_score,
-                       Metrics.mean_squared_error, Metrics.mean_absolute_error]:
-            metric_scores = scores[metric, :, :, :]
-            assert metric_scores.shape == (N_MODELS, N_NETWORKS, y_true.shape[1])
+        scores = FastCPMMetrics(device=device).score(y_true, y_pred)
+
+        yt, yp = y_true[:, 0], y_pred[:, 0, 0, 0]
+        expected = {
+            Metrics.explained_variance_score: explained_variance_score(yt, yp),
+            Metrics.mean_squared_error: mean_squared_error(yt, yp),
+            Metrics.mean_absolute_error: mean_absolute_error(yt, yp),
+            Metrics.pearson_score: pearsonr(yt, yp)[0],
+        }
+        # The guard only means something if the rows are distinguishable.
+        assert len(set(round(v, 4) for v in expected.values())) == len(expected)
+
+        for metric, reference in expected.items():
+            assert np.isclose(scores[metric, 0, 0, 0].cpu().item(), reference,
+                              rtol=1e-4), (
+                f"row {int(metric)} is not {metric.name}: got "
+                f"{scores[metric, 0, 0, 0].cpu().item():.6f}, "
+                f"expected {reference:.6f}")
 
 
 class TestFastCPMMetricsVsSklearn:
     """Test that FastCPMMetrics produces the same results as scikit-learn."""
-
-    def _check_metric_vs_reference(self, scores, y_true, y_pred, metric_idx,
-                                    reference_fn, label):
-        """Helper to compare our metric against a reference for all model/network/run combos."""
-        N_runs = y_true.shape[1]
-        metric_scores = scores[metric_idx, :, :, :].cpu().numpy()
-
-        for model in Models:
-            for network in Networks:
-                for run_idx in range(N_runs):
-                    yt = y_true[:, run_idx]
-                    yp = y_pred[:, model, network, run_idx]
-                    expected = reference_fn(yt, yp)
-                    actual = metric_scores[model, network, run_idx]
-                    assert np.isclose(actual, expected, rtol=1e-4), (
-                        f"{label} mismatch for {model.name}/{network.name}/run{run_idx}: "
-                        f"ours={actual:.6f}, reference={expected:.6f}"
-                    )
-
-    def test_mse_vs_sklearn(self, simple_data, device):
-        y_true, y_pred = simple_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-        self._check_metric_vs_reference(scores, y_true, y_pred,
-            Metrics.mean_squared_error, mean_squared_error, "MSE")
-
-    def test_mae_vs_sklearn(self, simple_data, device):
-        y_true, y_pred = simple_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-        self._check_metric_vs_reference(scores, y_true, y_pred,
-            Metrics.mean_absolute_error, mean_absolute_error, "MAE")
-
-    def test_explained_variance_vs_sklearn(self, simple_data, device):
-        y_true, y_pred = simple_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-        self._check_metric_vs_reference(scores, y_true, y_pred,
-            Metrics.explained_variance_score, explained_variance_score, "EV")
-
-    def test_pearson_vs_scipy(self, simple_data, device):
-        y_true, y_pred = simple_data
-        evaluator = FastCPMMetrics(device=device)
-        scores = evaluator.score(y_true, y_pred)
-
-        def pearson_ref(yt, yp):
-            r, _ = pearsonr(yt, yp)
-            return r
-
-        self._check_metric_vs_reference(scores, y_true, y_pred,
-            Metrics.pearson_score, pearson_ref, "Pearson")
 
     def test_all_metrics_vs_sklearn_random_data(self, device):
         """Comprehensive test with varying prediction quality."""

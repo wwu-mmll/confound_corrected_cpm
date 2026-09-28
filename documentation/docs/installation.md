@@ -48,12 +48,29 @@ python -c "import cccpm; print(cccpm.__version__)"
 
 You do **not** need a GPU — CCCPM is fast on CPU for typical connectome sizes.
 
-- **NVIDIA GPU (Linux/Windows):** pass `device="cuda"` to `CPMAnalysis`. If the default
-  PyTorch wheel doesn't match your CUDA driver, install the matching build first by
-  following the [official PyTorch instructions](https://pytorch.org/get-started/locally/),
-  then `pip install cccpm`.
+- **NVIDIA GPU:** pass `device="cuda"` to `CPMAnalysis`. On **Linux** the default
+  wheel already includes CUDA. On **Windows** the default wheel is CPU-only, so install
+  a CUDA build of PyTorch *first*, then CCCPM — pip keeps the torch that is already
+  there. The same applies on Linux if the default build doesn't match your driver.
+  Pick the CUDA version for your driver from the
+  [official PyTorch instructions](https://pytorch.org/get-started/locally/), e.g.:
+
+    ```bash
+    pip install torch --index-url https://download.pytorch.org/whl/cu126
+    pip install cccpm
+    ```
+
 - **Apple Silicon (M-series Macs):** PyTorch's MPS backend is available automatically.
-- **CPU only:** the default — nothing extra to do.
+- **CPU only:** the default — nothing extra to do. On Linux, a CPU-only torch is a much
+  smaller download:
+
+    ```bash
+    pip install torch --index-url https://download.pytorch.org/whl/cpu
+    pip install cccpm
+    ```
+
+Check what you got with
+`python -c "import torch; print(torch.__version__, torch.cuda.is_available())"`.
 
 ## Platform notes
 
@@ -75,13 +92,15 @@ You do **not** need a GPU — CCCPM is fast on CPU for typical connectome sizes.
 === "Linux"
 
     - The default `torch` wheel includes CUDA support and is large. For a smaller,
-      CPU-only install, follow the PyTorch CPU instructions before installing CCCPM.
+      CPU-only install, see [CPU vs GPU](#cpu-vs-gpu) above.
 
 === "Windows"
 
     - Use a recent 64-bit Python from [python.org](https://www.python.org/) or the
       Microsoft Store. Installing into a virtual environment (above) avoids most
       permission and PATH issues.
+    - The default `torch` wheel is CPU-only. For an NVIDIA GPU, install a CUDA build
+      first — see [CPU vs GPU](#cpu-vs-gpu) above.
 
 ## Development install
 

@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import warnings
 
@@ -10,20 +11,43 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit, KFold, RepeatedKFold, StratifiedKFold
-from sklearn.linear_model import LinearRegression
 
 from cccpm.inner_fold import run_inner_folds
 from cccpm.logging import setup_logging
 from cccpm.models.linear_model import LinearCPM
-from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold, resolve_presence_threshold
-from cccpm.results_manager import ResultsManager, PermutationManager
-from cccpm.utils import (train_test_split, check_data, impute_missing_values,
-                         select_stable_edges, generate_data_insights, detect_task_type,
-                         validate_task_type, infer_n_nodes)
+from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
+from cccpm.results_manager import ResultsManager
+from cccpm.inference import PermutationManager
+from cccpm.preprocessing import (to_device, torch_train_test_split, torch_impute_missing_values,
+                                 residualize_train_test, select_stable_edges)
+from cccpm.validation import (check_data, detect_task_type, validate_task_type,
+                              infer_n_nodes)
+from cccpm.memory import plan_permutation_chunk
 from cccpm.atlases import resolve_atlas
 from cccpm.scoring import score_models
 from cccpm.reporting import HTMLReporter
-from cccpm.constants import Networks, TaskType
+from cccpm.reporting.data_insights import generate_data_insights
+from cccpm.constants import Models, Networks, TaskType
+
+
+# Parameters renamed in 0.7.0, mapped to their replacement.
+#
+# "edge significance" conflated two different questions: the p-value that decides
+# whether an edge is *selected* (set on PThreshold), and whether an edge is
+# selected across folds *more consistently than chance*. These parameters only
+# ever meant the second -- which is what the outputs have always been called
+# (stability_edges_significance.npy). `nbs_threshold` had the same problem one
+# level down: it is a fraction of folds, not a p-value, and it sat in the same
+# call as `PThreshold(threshold=...)` with nothing to tell them apart.
+_RENAMED_IN_0_7_0 = {
+    'edge_significance_method': (
+        'stability_significance_method',
+        "it sets how edge *stability* significance is established from the "
+        "permutations, not how edges are selected"),
+    'nbs_threshold': (
+        'nbs_stability_threshold',
+        "it is a stability threshold -- a fraction of folds -- not a p-value"),
+}
 
 
 class CPMAnalysis:
@@ -39,21 +63,22 @@ class CPMAnalysis:
                  cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = KFold(n_splits=10, shuffle=True, random_state=42),
                  inner_cv: Union[BaseCrossValidator, BaseShuffleSplit, RepeatedKFold, StratifiedKFold] = None,
                  edge_selection: UnivariateEdgeSelection = UnivariateEdgeSelection(
-                     edge_statistic='pearson',
+                     selection_statistic='pearson',
                      edge_selection=[PThreshold(threshold=[0.05], correction=[None])]
                  ),
                  select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
-                 calculate_residuals: bool = False,
+                 model_input: str = 'raw',
                  n_permutations: int = 0,
-                 edge_significance_method: str = "nbs",
-                 nbs_threshold: float = 0.5,
+                 stability_significance_method: str = "nbs",
+                 nbs_stability_threshold: float = 0.5,
                  nbs_component_stat: str = "extent",
                  atlas: str = None,
                  atlas_labels: str = None,
                  device: str = 'cpu',
-                 random_state: int = 42):
+                 random_state: int = 42,
+                 **removed):
         """
         Initialize the CPMAnalysis object.
 
@@ -85,21 +110,39 @@ class CPMAnalysis:
         impute_missing_values: bool, default=True
             Whether to impute missing values in ``X`` and the covariates (NaNs in
             the target ``y`` always raise an error).
-        calculate_residuals: bool, default=False
-            If ``True``, regress the covariates out of the connectome before
-            modeling (residualization), in addition to the model variants.
+        model_input: str, default='raw'
+            What the predictive models consume. ``'raw'`` uses the connectome as
+            given; ``'residualized'`` regresses the covariates out of it first,
+            fitting the residualiser on each training split and applying it to the
+            held-out split. Independent of ``selection_input``, which controls edge
+            selection: together they are the 2x2 of confound control.
+
+            This is a property of the run, not an extra model. It has to be: OLS
+            is invariant to it once the covariates are in the design -- `full` and
+            `increment` are unchanged -- but a tree, forest or GAM is not. On
+            identical edges, fitting `full` on raw versus residualised connectivity
+            moves predictions by 391% of sd(y) for ``DecisionTreeCPM``, 65% for
+            ``RandomForestCPM`` and 19% for ``GAMCPM``, against 0.0% for
+            ``LinearCPM``. A "residualised" *model* would therefore mean something
+            different for every backend, and the user could not tell from the
+            results which connectome produced `full`.
         n_permutations: int, default=0
             Number of label permutations for significance testing. ``0`` disables
             permutation testing; use 1000+ for publishable p-values.
-        edge_significance_method: str, default='nbs'
-            How edge-stability significance is established from the permutations.
-            ``'nbs'`` uses the Network-Based Statistic (connected-component test,
-            subnetwork-level FWER control); ``'tfce'`` uses network Threshold-Free
-            Cluster Enhancement (per-edge FWER control, no primary threshold).
-        nbs_threshold: float, default=0.5
-            Stability threshold (``>=``) for NBS component forming. Because
-            stability is discrete over the outer folds, ``0.5`` keeps edges
-            selected in a majority of folds. Ignored when method is ``'tfce'``.
+        stability_significance_method: str, default='nbs'
+            How edge-*stability* significance is established from the
+            permutations -- that is, whether an edge is selected across folds
+            more consistently than chance. This is a different question from
+            which edges pass the selection threshold in the first place, which
+            is set on :class:`PThreshold`. ``'nbs'`` uses the Network-Based
+            Statistic (connected-component test, subnetwork-level FWER control);
+            ``'tfce'`` uses network Threshold-Free Cluster Enhancement (per-edge
+            FWER control, no primary threshold).
+        nbs_stability_threshold: float, default=0.5
+            **Stability** threshold (``>=``) for NBS component forming -- a
+            fraction of folds, not a p-value. Because stability is discrete over
+            the outer folds, ``0.5`` keeps edges selected in a majority of them.
+            Ignored when the method is ``'tfce'``.
         nbs_component_stat: str, default='extent'
             NBS component statistic: ``'extent'`` (number of edges, classic NBS)
             or ``'intensity'`` (summed supra-threshold stability). Ignored when
@@ -125,6 +168,16 @@ class CPMAnalysis:
             Seed for permutation generation. Uses a local RNG and does not modify
             the global NumPy/torch random state.
         """
+        for old, (new, why) in _RENAMED_IN_0_7_0.items():
+            if old in removed:
+                raise TypeError(
+                    f"{old!r} was renamed to {new!r} in 0.7.0, because {why}. "
+                    f"Pass {new}={removed[old]!r} instead.")
+        if removed:
+            raise TypeError(
+                f"{type(self).__name__}() got an unexpected keyword argument "
+                f"{sorted(removed)[0]!r}.")
+
         self.results_directory = results_directory
 
         # Convert string to TaskType enum if needed
@@ -147,20 +200,15 @@ class CPMAnalysis:
         self.select_stable_edges = select_stable_edges
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
-        self.calculate_residuals = calculate_residuals
+        if model_input not in ('raw', 'residualized'):
+            raise ValueError(
+                f"model_input must be 'raw' or 'residualized', got {model_input!r}.")
+        self.model_input = model_input
 
-        # The presence filter is meant to drop structural zeros from the raw
-        # connectome; with global residualization the connectome is mean-centred
-        # before selection, so the filter would see residualized values instead.
-        if calculate_residuals and resolve_presence_threshold(
-                getattr(self.edge_selection, 'presence_filter', False)) is not None:
-            self.logger.warning(
-                "Both calculate_residuals=True and a presence_filter are set: the "
-                "presence filter will see residualized (not raw) connectome values."
-            )
+
         self.n_permutations = n_permutations
-        self.edge_significance_method = edge_significance_method
-        self.nbs_threshold = nbs_threshold
+        self.stability_significance_method = stability_significance_method
+        self.nbs_stability_threshold = nbs_stability_threshold
         self.nbs_component_stat = nbs_component_stat
 
         if device.lower() == 'gpu' or device.lower() == 'cuda':
@@ -208,7 +256,8 @@ class CPMAnalysis:
         if self.select_stable_edges:
             self.logger.info(f"Stability threshold:     {self.stability_threshold}")
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
-        self.logger.info(f"Calculate residuals:     {'Yes' if self.calculate_residuals else 'No'}")
+        self.logger.info(f"Selection input:         {self.edge_selection.statistic._input}")
+        self.logger.info(f"Model input:             {self.model_input}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
         self.logger.info(f"Device:                  {self.device}")
         self.logger.info("="*50)
@@ -270,10 +319,52 @@ class CPMAnalysis:
                 f"atlas matching your parcellation."
             )
 
+    def _available_models(self):
+        """
+        Which model variants this run defines. Without covariates only
+        ``connectome`` is meaningful: ``covariates`` has an empty design,
+        ``full`` collapses onto ``connectome``, and ``increment`` would be
+        identically zero.
+        """
+        if getattr(self, 'has_covariates', True):
+            return [m.name for m in Models]
+        return [Models.connectome.name]
+
+    def _validate_covariate_requirements(self, covariates):
+        """
+        Fail up front when an option that needs covariates was combined with no
+        covariates, naming the offending parameter.
+
+        Without this the run would not crash -- it would quietly degrade. A
+        ``*_partial`` statistic with an empty confound design is just the plain
+        statistic with an empty confound design is just the plain statistic, so
+        the run would produce a full set of plausible numbers that silently
+        answer a different question -- the failure mode this package has been
+        bitten by before.
+        """
+        if covariates is not None:
+            return
+
+        offenders = []
+        if self.edge_selection.statistic._input == 'residualized':
+            offenders.append(
+                "selection_input='residualized' (confound-controlled edge "
+                "selection needs confounds; use selection_input='raw')")
+        if self.model_input == 'residualized':
+            offenders.append(
+                "model_input='residualized' (there is nothing to residualise "
+                "the connectome against; use model_input='raw')")
+
+        if offenders:
+            raise ValueError(
+                "covariates=None, but these options require covariates: "
+                + "; ".join(offenders) + "."
+            )
+
     def run(self,
             X: Union[pd.DataFrame, np.ndarray],
             y: Union[pd.Series, pd.DataFrame, np.ndarray],
-            covariates: Union[pd.Series, pd.DataFrame, np.ndarray]):
+            covariates: Union[pd.Series, pd.DataFrame, np.ndarray, None] = None):
         """
         Estimates a model using the provided data and conducts permutation testing. This method first fits the model to the actual data and subsequently performs estimation on permuted data for a specified number of permutations. Finally, it calculates permutation results.
 
@@ -282,13 +373,32 @@ class CPMAnalysis:
         X: Feature data used for the model. Can be a pandas DataFrame or a NumPy array.
         y: Target variable used in the estimation process. Can be a pandas Series, DataFrame, or a NumPy array.
         covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
+            Omit it (or pass ``None``) for vanilla CPM with no confound control. In that
+            mode only the ``connectome`` model is defined -- ``covariates``, ``full``,
+            ``full`` and ``increment`` need covariates and are reported as NaN,
+            and the models that do exist are listed in ``available_models.json``.
+            Options that presuppose covariates (a ``*_partial`` edge statistic,
+            ``model_input='residualized'``) then raise up front.
 
         """
-        self.logger.info(f"Starting CPM estimation.")
+        self.logger.info("Starting CPM estimation.")
+
+        self._validate_covariate_requirements(covariates)
 
         # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
+
+        self.has_covariates = covariates is not None
+        if not self.has_covariates:
+            self.logger.info(
+                "No covariates supplied: running vanilla CPM. Only the "
+                "'connectome' model is defined; covariates/full/"
+                "increment are reported as NaN.")
+            # A zero-width design keeps every tensor operation downstream valid
+            # without a `None` check in each of them. LinearCPM reads the width,
+            # not this flag, to decide which variants exist.
+            covariates = np.empty((X.shape[0], 0), dtype=np.float64)
 
         # Guard against an atlas that doesn't match the connectome size.
         self._validate_atlas_node_count(X.shape[1])
@@ -302,8 +412,21 @@ class CPMAnalysis:
             self.logger.info(f"Using specified task type: {self.task_type.value}")
 
         # Save task type to results directory for HTML report
-        with open(os.path.join(self.results_directory, 'task_type.txt'), 'w') as f:
+        with open(os.path.join(self.results_directory, 'task_type.txt'), 'w', encoding='utf-8') as f:
             f.write(self.task_type.value)
+
+        # Same, for the confound configuration. The report has to be able to say
+        # which cell of the selection_input x model_input 2x2 produced it --
+        # otherwise a naive run and a fully controlled one are indistinguishable
+        # to anyone who is handed the HTML. Written as a file rather than parsed
+        # back out of the log, so it survives a run with logging turned down.
+        with open(os.path.join(self.results_directory, 'run_config.json'), 'w', encoding='utf-8') as f:
+            json.dump({
+                'selection_statistic': self.edge_selection.statistic._statistic,
+                'selection_input': self.edge_selection.statistic._input,
+                'model_input': self.model_input,
+                'has_covariates': self.has_covariates,
+            }, f)
 
         # Estimate models on actual data
         self._single_run(X=X, y=y.reshape(-1, 1), covariates=covariates, perm_run=False)
@@ -316,8 +439,8 @@ class CPMAnalysis:
             self._single_run(X=X, y=y_perms, covariates=covariates, perm_run=True)
             PermutationManager.calculate_permutation_results(
                 self.results_directory, self.logger,
-                method=self.edge_significance_method,
-                nbs_threshold=self.nbs_threshold,
+                method=self.stability_significance_method,
+                nbs_stability_threshold=self.nbs_stability_threshold,
                 nbs_component_stat=self.nbs_component_stat)
 
         self.logger.info("=" * 50)
@@ -333,7 +456,7 @@ class CPMAnalysis:
 
     def _create_permuted_y(self, y):
         # 1. Create a matrix of the repeat vector
-        y_tensor = torch.as_tensor(y, dtype=torch.float32)
+        y_tensor = to_device(y, "cpu")
         y_matrix = y_tensor.unsqueeze(0).expand(self.n_permutations, -1)
 
         # 2. Create random noise and get sorting indices (random permutation per row).
@@ -354,8 +477,8 @@ class CPMAnalysis:
         """
         Perform a full cross-validation run (real data or permuted targets).
 
-        Sets up the ResultsManager, iterates over outer folds, then
-        aggregates and saves results.
+        Sets up the ResultsManager, iterates over outer folds, then aggregates
+        and saves results.
         """
         if perm_run:
             results_directory = os.path.join(self.results_directory, "permutation")
@@ -365,10 +488,11 @@ class CPMAnalysis:
         # Retain per-fold edge masks (for edges.npy) only on the real run; the
         # permutation pass keeps just the fold-sum for the stability null, which
         # avoids a [Features, 2, Folds, n_permutations] tensor (huge for big
-        # parcellations × many folds × many permutations).
+        # parcellations x many folds x many permutations).
         results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
-                                         device=self.device, store_fold_edges=not perm_run)
+                                         device=self.device, store_fold_edges=not perm_run,
+                                         available_models=self._available_models())
 
         # For a RepeatedKFold the outer split index runs 0..(n_splits*n_repeats-1)
         # with all folds of repeat 0 first, then repeat 1, etc. Derive the repeat
@@ -377,16 +501,40 @@ class CPMAnalysis:
         n_repeats = getattr(self.cv, 'n_repeats', 1)
         splits_per_repeat = max(self.cv.get_n_splits() // n_repeats, 1)
 
-        iterator = tqdm(
-            enumerate(self.cv.split(X, y[:, 0])),
-            total=self.cv.get_n_splits(),
-            desc="Running outer folds",
-            unit="fold",
-        )
-        for outer_fold, (train, test) in iterator:
-            repeat = outer_fold // splits_per_repeat
-            self._run_outer_fold(outer_fold, repeat, train, test, X, y, covariates,
-                                 results_manager, perm_run)
+        # Move the full dataset to the compute device once, rather than
+        # re-uploading each fold's slice on every downstream torch.as_tensor
+        # call. Pure data placement; touches no statistic. (self.cv.split still
+        # runs on the original CPU X/y: sklearn splitters only derive index
+        # arrays from it, and some -- e.g. StratifiedKFold -- are not guaranteed
+        # to accept a CUDA tensor.) A copy, never a view of the caller's data.
+        X_dev = to_device(X, self.device)
+        y_dev = to_device(y, self.device)
+        cov_dev = to_device(covariates, self.device)
+
+        # Permutations stay fully vectorised; this only caps how many columns are
+        # in flight so a large parcellation x many permutations degrades in speed
+        # rather than running out of memory. For a real (non-permutation) run
+        # n_runs == 1, so it never engages.
+        n_runs = y.shape[1]
+        chunk = plan_permutation_chunk(n_features=X.shape[1], n_samples=X.shape[0],
+                                       n_runs=n_runs, device=self.device)
+        if chunk < n_runs:
+            self.logger.info(
+                f"Processing {n_runs} permutations in {-(-n_runs // chunk)} chunks of "
+                f"at most {chunk} to stay within available memory.")
+
+        splits = list(self.cv.split(X, y[:, 0]))
+        iterator = tqdm(total=self.cv.get_n_splits() * (-(-n_runs // chunk)),
+                        desc="Running outer folds", unit="fold")
+        for run_start in range(0, n_runs, chunk):
+            run_idx = slice(run_start, min(run_start + chunk, n_runs))
+            y_chunk = y_dev[:, run_idx]
+            for outer_fold, (train, test) in enumerate(splits):
+                repeat = outer_fold // splits_per_repeat
+                self._run_outer_fold(outer_fold, repeat, train, test, X_dev, y_chunk,
+                                     cov_dev, results_manager, perm_run, run_idx=run_idx)
+                iterator.update(1)
+        iterator.close()
 
         # Aggregate across folds
         results_manager.calculate_final_cv_results(task_type=self.task_type)
@@ -399,34 +547,30 @@ class CPMAnalysis:
             self.results_manager = results_manager
 
     def _run_outer_fold(self, outer_fold, repeat, train, test, X, y, covariates,
-                        results_manager, perm_run):
-        """
-        Execute a single outer CV fold: preprocess, select edges, fit model,
-        predict, and store results.
-        """
-        # Split
-        X_train, X_test, y_train, y_test, cov_train, cov_test = train_test_split(
+                        results_manager, perm_run, run_idx=slice(None)):
+        X_train, X_test, y_train, y_test, cov_train, cov_test = torch_train_test_split(
             train, test, X, y, covariates)
-
-        # Impute missing values
         if self.impute_missing_values:
-            X_train, X_test, cov_train, cov_test = impute_missing_values(
+            X_train, X_test, cov_train, cov_test = torch_impute_missing_values(
                 X_train, X_test, cov_train, cov_test)
 
-        # Residualize X to remove effect of covariates
-        if self.calculate_residuals:
-            residual_model = LinearRegression().fit(cov_train, X_train)
-            X_train = X_train - residual_model.predict(cov_train)
-            X_test = X_test - residual_model.predict(cov_test)
+        # edges: [Features, 2, Runs] -- one winning configuration per run.
+        # Selection always sees the connectome as supplied; whether it controls
+        # for the covariates is decided inside the statistic by selection_input.
+        edges = self._select_edges(X_train, y_train, cov_train, results_manager, outer_fold)
+        results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges,
+                                    run_idx=run_idx)
 
-        # Select edges (via inner CV or directly)
-        edges = self._select_edges(X_train, y_train, cov_train,
-                                   results_manager, outer_fold)
-        results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges)
+        # Deconfound the features the models consume, if asked. Fitted on train
+        # and applied to test, and deliberately *after* selection so the two
+        # choices stay independent.
+        if self.model_input == 'residualized':
+            X_train, X_test = residualize_train_test(
+                X_train, X_test, cov_train, cov_test)
 
-        # Build model and make predictions
         model = self.cpm_model(edges=edges, device=self.device, task_type=self.task_type)
         model.fit(X_train, y_train, cov_train)
+
         y_pred = model.predict(X_test, cov_test, return_proba=True)
 
         if not perm_run:
@@ -438,10 +582,10 @@ class CPMAnalysis:
                                                     y_true=y_test, fold=outer_fold,
                                                     test_indices=test, repeat=repeat)
 
-        # Score and store metrics
         metrics = score_models(y_true=y_test, y_pred=y_pred,
                                task_type=self.task_type, device=self.device)
-        results_manager.store_metrics(param_idx=0, fold_idx=outer_fold, metrics_tensor=metrics)
+        results_manager.store_metrics(param_idx=0, fold_idx=outer_fold,
+                                      metrics_tensor=metrics, run_idx=run_idx)
 
     def _select_edges(self, X_train, y_train, cov_train, results_manager, outer_fold):
         """
@@ -466,39 +610,30 @@ class CPMAnalysis:
                 device=self.device,
                 task_type=self.task_type,
             )
+            if self.select_stable_edges:
+                return select_stable_edges(stability_edges, self.stability_threshold)
         else:
             best_params = [self.edge_selection.param_grid[0]] * y_train.shape[1]
 
-        if self.select_stable_edges:
-            return select_stable_edges(stability_edges, self.stability_threshold)
-
-        edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
-                            device=self.device)
-
-        # The edge statistics (r, p) depend only on the data and the fixed
-        # correlation statistic — not on the per-run selector params — so compute
-        # them for every run in a single batched pass (over all target columns)
-        # instead of recomputing them once per run. This is the expensive step;
-        # only the cheap thresholding below can vary per run (e.g. when inner CV
-        # selects different params for different runs).
-        #
-        # INVARIANT: this single shared pass is correct only because the edge
-        # statistic itself is fixed across runs (it is a scalar on
-        # UnivariateEdgeSelection, never part of the tunable param grid — only
-        # the p-threshold / correction are). If the statistic (e.g. pearson vs
-        # spearman) ever becomes a per-run hyperparameter, r/p can no longer be
-        # shared and must be computed once per distinct statistic in play.
-        r_edges, p_edges = self.edge_selection.edge_statistic.fit_transform(
+        r_edges, t_edges, df = self.edge_selection.statistic.fit_transform(
             X=X_train, y=y_train, covariates=cov_train, device=self.device)
+        self.edge_selection.r_edges = r_edges
+        self.edge_selection.t_edges = t_edges
+        self.edge_selection.df = df
 
+        # return_selected_edges gives [Features, 2, N_thresholds, Runs]; with a
+        # single configuration set, N_thresholds == 1.
+        if all(params == best_params[0] for params in best_params):
+            self.edge_selection.set_params(**best_params[0])
+            return self.edge_selection.return_selected_edges()[:, :, 0, :]
+
+        # The inner CV picked a different configuration for different runs, so
+        # each run is thresholded with its own winner and reassembled.
+        edges = torch.zeros(X_train.shape[1], len(Networks) - 1, len(best_params),
+                            dtype=torch.bool, device=self.device)
         for run_id, params in enumerate(best_params):
             self.edge_selection.set_params(**params)
-            # Feed this run's precomputed r/p column into the (unchanged)
-            # selection path, keeping any per-run multiple-comparison correction
-            # applied within a single run's family of edges, exactly as before.
             self.edge_selection.r_edges = r_edges[:, [run_id]]
-            self.edge_selection.p_edges = p_edges[:, [run_id]]
-            current_edges = self.edge_selection.return_selected_edges()
-            edges[:, :, run_id] = current_edges.squeeze()
-
+            self.edge_selection.t_edges = t_edges[:, [run_id]]
+            edges[:, :, run_id] = self.edge_selection.return_selected_edges()[:, :, 0, 0]
         return edges

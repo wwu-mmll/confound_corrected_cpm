@@ -165,10 +165,13 @@ examples/simulated_data
 examples/results
 tests/tmp
 
-poetry.lock
 src/cccpm/simulation/simulation_results
 .claude
 
 *.DS_Store
 # Quickstart output when run from the repo root
 /results/
+
+# Numerical baselines captured by scripts/capture_baseline.py for refactor
+# regression testing. Regenerate locally; too large and machine-specific to track.
+baselines/

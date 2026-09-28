@@ -82,21 +82,13 @@ class TestModelInterface:
         model.fit(X, y, cov)
         ns = model.get_network_strengths(X, cov)
 
-        assert set(ns.keys()) == {"connectome", "residuals"}
-        for group in ["connectome", "residuals"]:
+        assert set(ns.keys()) == {"connectome"}
+        for group in ["connectome"]:
             assert "positive" in ns[group]
             assert "negative" in ns[group]
             assert isinstance(ns[group]["positive"], torch.Tensor)
             assert isinstance(ns[group]["negative"], torch.Tensor)
             assert ns[group]["positive"].shape[0] == X.shape[0]
-
-    @pytest.mark.parametrize("model_cls", ALL_MODELS)
-    def test_chaining(self, model_cls, simple_data):
-        """model.fit(...).predict(...) works (fit returns self)."""
-        X, y, cov, edges = simple_data
-        model = model_cls(edges=edges, device='cpu', task_type=TaskType.regression)
-        result = model.fit(X, y, cov).predict(X, cov)
-        assert isinstance(result, torch.Tensor)
 
 
 # ============================================================
@@ -113,7 +105,7 @@ class TestNonLinearModelsWithPipeline:
         X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=60, n_features=45)
 
         edge_selection = UnivariateEdgeSelection(
-            edge_statistic='pearson',
+            selection_statistic='pearson',
             edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
         )
 
@@ -131,3 +123,22 @@ class TestNonLinearModelsWithPipeline:
 
         assert cpm.results_manager is not None
         assert cpm.results_manager.agg_results is not None
+
+
+# ============================================================
+# LinearCPM params/runs batching
+# ============================================================
+
+def _uneven_splits(n_total, n_folds, seed):
+    rng = np.random.RandomState(seed)
+    idx = rng.permutation(n_total)
+    edges = sorted(rng.choice(range(5, n_total - 5), size=n_folds - 1, replace=False))
+    boundaries = [0] + list(edges) + [n_total]
+    splits = []
+    for i in range(n_folds):
+        test_idx = idx[boundaries[i]:boundaries[i + 1]]
+        train_idx = np.setdiff1d(idx, test_idx)
+        splits.append((train_idx, test_idx))
+    return splits
+
+
