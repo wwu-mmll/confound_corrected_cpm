@@ -11,6 +11,19 @@ estimated on the training split and only applied to the test split.
 import torch
 
 
+def to_device(array, device):
+    """Copy the caller's array into a float32 tensor on ``device``.
+
+    Always a copy. ``torch.as_tensor`` shares memory when the input is already
+    float32 on the CPU, so the run's working tensor would alias the user's own
+    data -- a pandas copy-on-write view is read-only, and torch warns that
+    writing to it is undefined. Nothing writes in place today (the first op is
+    fold indexing, which copies), but that is a property of the code downstream,
+    not a guarantee. Float64 input, the common case, was always copied anyway.
+    """
+    return torch.tensor(array, dtype=torch.float32, device=device)
+
+
 def torch_train_test_split(train, test, X, y, covariates):
     """Wie utils.train_test_split, aber X/y/covariates sind bereits GPU-Tensoren."""
     train_idx = torch.as_tensor(train, device=X.device)

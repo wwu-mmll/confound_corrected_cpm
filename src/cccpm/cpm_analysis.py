@@ -18,7 +18,7 @@ from cccpm.models.linear_model import LinearCPM
 from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager
 from cccpm.inference import PermutationManager
-from cccpm.preprocessing import (torch_train_test_split, torch_impute_missing_values,
+from cccpm.preprocessing import (to_device, torch_train_test_split, torch_impute_missing_values,
                                  residualize_train_test, select_stable_edges)
 from cccpm.validation import (check_data, detect_task_type, validate_task_type,
                               infer_n_nodes)
@@ -412,7 +412,7 @@ class CPMAnalysis:
             self.logger.info(f"Using specified task type: {self.task_type.value}")
 
         # Save task type to results directory for HTML report
-        with open(os.path.join(self.results_directory, 'task_type.txt'), 'w') as f:
+        with open(os.path.join(self.results_directory, 'task_type.txt'), 'w', encoding='utf-8') as f:
             f.write(self.task_type.value)
 
         # Same, for the confound configuration. The report has to be able to say
@@ -420,7 +420,7 @@ class CPMAnalysis:
         # otherwise a naive run and a fully controlled one are indistinguishable
         # to anyone who is handed the HTML. Written as a file rather than parsed
         # back out of the log, so it survives a run with logging turned down.
-        with open(os.path.join(self.results_directory, 'run_config.json'), 'w') as f:
+        with open(os.path.join(self.results_directory, 'run_config.json'), 'w', encoding='utf-8') as f:
             json.dump({
                 'selection_statistic': self.edge_selection.statistic._statistic,
                 'selection_input': self.edge_selection.statistic._input,
@@ -456,7 +456,7 @@ class CPMAnalysis:
 
     def _create_permuted_y(self, y):
         # 1. Create a matrix of the repeat vector
-        y_tensor = torch.as_tensor(y, dtype=torch.float32)
+        y_tensor = to_device(y, "cpu")
         y_matrix = y_tensor.unsqueeze(0).expand(self.n_permutations, -1)
 
         # 2. Create random noise and get sorting indices (random permutation per row).
@@ -506,10 +506,10 @@ class CPMAnalysis:
         # call. Pure data placement; touches no statistic. (self.cv.split still
         # runs on the original CPU X/y: sklearn splitters only derive index
         # arrays from it, and some -- e.g. StratifiedKFold -- are not guaranteed
-        # to accept a CUDA tensor.)
-        X_dev = torch.as_tensor(X, device=self.device, dtype=torch.float32)
-        y_dev = torch.as_tensor(y, device=self.device, dtype=torch.float32)
-        cov_dev = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
+        # to accept a CUDA tensor.) A copy, never a view of the caller's data.
+        X_dev = to_device(X, self.device)
+        y_dev = to_device(y, self.device)
+        cov_dev = to_device(covariates, self.device)
 
         # Permutations stay fully vectorised; this only caps how many columns are
         # in flight so a large parcellation x many permutations degrades in speed

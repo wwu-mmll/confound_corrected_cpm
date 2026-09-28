@@ -126,7 +126,7 @@ def format_results_table(df, precision=2):
 
 
 def extract_log_block(filepath):
-    with open(filepath, "r") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     # Find all indices of separator lines (e.g. "=======")

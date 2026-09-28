@@ -144,7 +144,7 @@ class PermutationManager:
                 f"Unknown edge-significance method '{method}'. Use 'nbs' or 'tfce'.")
 
         np.save(os.path.join(results_directory, 'stability_edges_significance.npy'), stability_significance)
-        with open(os.path.join(results_directory, 'stability_edges_significance_meta.json'), 'w') as f:
+        with open(os.path.join(results_directory, 'stability_edges_significance_meta.json'), 'w', encoding='utf-8') as f:
             json.dump(sig_meta, f)
 
         logger.debug("Saving significance of edge stability.")

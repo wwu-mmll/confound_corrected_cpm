@@ -80,7 +80,7 @@ class ReportDataLoader:
         path = os.path.join(self.results_directory, 'available_models.json')
         if not os.path.exists(path):
             return list(MODEL_ORDER)
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             available = set(json.load(f))
         return [m for m in MODEL_ORDER if m in available]
 
@@ -95,7 +95,7 @@ class ReportDataLoader:
         path = os.path.join(self.results_directory, 'run_config.json')
         if not os.path.exists(path):
             return {}
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             return json.load(f)
 
     def load_cv_results(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -217,7 +217,7 @@ class ReportDataLoader:
 
         path = os.path.join(self.results_directory, "stability_edges_significance_meta.json")
         if os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding='utf-8') as f:
                 return json.load(f)
         return None
 
@@ -247,7 +247,7 @@ class ReportDataLoader:
         """
         task_type_path = os.path.join(self.results_directory, 'task_type.txt')
         if os.path.exists(task_type_path):
-            with open(task_type_path, 'r') as f:
+            with open(task_type_path, 'r', encoding='utf-8') as f:
                 return f.read().strip()
         return 'regression'
 

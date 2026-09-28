@@ -96,6 +96,13 @@ stops. Every removal raises with its replacement named.
   base rate, because every comparison against NaN is silently False.
 - `simulate_confounded_data_chyzhyk` raised `UnboundLocalError` for an invalid
   `link_type` instead of a `ValueError` naming the valid options.
+- Results files (`run_config.json`, `available_models.json`, `task_type.txt`, the
+  stability-significance metadata) were read and written with the locale codec, so a
+  results directory written on a cp1252 Windows machine was not portable, and a
+  non-cp1252 character in a name raised on write. All package file I/O is UTF-8 now.
+- The run's working tensor aliased the caller's array when the input was float32 on
+  the CPU (a read-only view for a pandas DataFrame, which torch warned about). It is
+  now always a copy.
 
 ### Moved
 - `examples/confound_inflation_demo.py` → `scripts/confound_inflation_demo.py`.

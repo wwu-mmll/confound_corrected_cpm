@@ -15,6 +15,7 @@ import torch
 from sklearn.model_selection import KFold, RepeatedKFold
 
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
+from cccpm.preprocessing import to_device
 from cccpm.reporting.reporting_utils import average_over_repeats
 from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
@@ -40,6 +41,22 @@ def test_input_is_dataframe(cpm_instance, simulated_data):
         pd.DataFrame(y),
         pd.DataFrame(covariates)
     )
+
+
+def test_device_copy_never_aliases_the_callers_array():
+    """The run's working tensor is a copy, even of float32 CPU input.
+
+    ``torch.as_tensor`` returned a view there, so the pipeline's tensor shared
+    memory with the user's array -- or with a read-only pandas copy-on-write
+    view, which torch flags as undefined behaviour on write. Checked directly
+    rather than through the warning: torch emits that one once per process, so
+    whichever test ran first would have swallowed it.
+    """
+    X = np.arange(12, dtype=np.float32).reshape(3, 4)
+    X.setflags(write=False)
+    X_dev = to_device(X, "cpu")
+    assert X_dev.dtype == torch.float32
+    assert not np.shares_memory(X_dev.numpy(), X)
 
 
 # --- Repeated k-fold ---

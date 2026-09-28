@@ -360,7 +360,7 @@ class ResultsManager:
 
         # The report reads this to know which model rows carry a real number and
         # which are NaN placeholders for variants this run does not define.
-        with open(os.path.join(self.results_directory, 'available_models.json'), 'w') as f:
+        with open(os.path.join(self.results_directory, 'available_models.json'), 'w', encoding='utf-8') as f:
             json.dump(self.available_models, f)
 
         # Concatenate the per-fold prediction frames into a single DataFrame;

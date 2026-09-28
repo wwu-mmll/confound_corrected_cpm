@@ -21,7 +21,7 @@ CORE_MODULES = sorted(
 
 
 def _imported_modules(path):
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
