@@ -1,6 +1,6 @@
 # CCCPM Release Plan — what is left to do
 
-Goal: ship `cccpm` 0.7.0 — easy and reliable to install and use for
+Goal: `cccpm` 0.7.x — easy and reliable to install and use for
 connectome-based predictive modeling (CPM) across macOS / Linux / Windows and
 Python 3.10–3.14, with trustworthy results, modern docs, and a polished HTML
 report.
@@ -14,17 +14,14 @@ Status legend: `[ ]` todo · `[~]` in progress
 
 ---
 
-## 0. Blocking the 0.7.0 release
+## 0. Follow-through on 0.7.0
 
-In order:
+0.7.0 is on PyPI (2026-09-28, tag `v0.7.0` on `main` `629ad0a`).
 
-1. **Publish 0.7.0** — `CHANGELOG.md` and `CITATION.cff` say 0.7.0 /
-   2026-09-28, CI is green on all 13 jobs against the committed lock, and the
-   package smoke test now clean-installs the wheel on Linux, macOS and Windows.
-   Left: merge `develop` → `main`, tag `v0.7.0` (→ PyPI via `publish.yml`),
-   GitHub release, merge `main` back into `develop`.
-   The exact edge-selection p-values change edge sets, so the paper numbers
-   must be regenerated against this release (`../PAPER_PLAN.md`).
+- [ ] **Create the GitHub release** from tag `v0.7.0` (Nils — notes drafted
+      from the CHANGELOG section, with an upgrade table from 0.5.x).
+- [ ] **Regenerate the paper numbers** against this release: exact
+      edge-selection p-values change edge sets (`../PAPER_PLAN.md` §1).
 
 ---
 
@@ -108,9 +105,6 @@ were added — the two modules split out in 0.7.0 had no API reference at all.
       `Figure()` API so it renders via Agg regardless of the user's backend,
       without a global `matplotlib.use("Agg")` (workaround documented in
       `installation.md`: `MPLBACKEND=Agg`).
-- [ ] **`build_docs.yml` timing with the committed lock.** The docs group is
-      locked now, so the >10-minute re-resolution should be gone; confirm on
-      the first push to `main`.
 
 ## 5. Correctness & statistical validity
 
@@ -159,4 +153,5 @@ were added — the two modules split out in 0.7.0 had no API reference at all.
 
 *Released: 0.3.0 (install reliability), 0.3.1 (HTML report redesign), 0.4.0
 (NBS/TFCE edge-stability significance), 0.4.1 (increment baseline + TFCE
-fixes), 0.4.2 (built-in atlas registry), 0.5.0.*
+fixes), 0.4.2 (built-in atlas registry), 0.5.0, 0.7.0 (confound-control
+redesign, exact edge selection).*
