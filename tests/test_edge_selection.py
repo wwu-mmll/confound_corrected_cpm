@@ -15,7 +15,7 @@ from cccpm.constants import Networks
 @pytest.mark.parametrize("selection_input", ["raw", "residualized"])
 @pytest.mark.parametrize("statistic", ["pearson", "spearman"])
 def test_batched_edge_statistics_match_per_column(statistic, selection_input):
-    """Computing (r, p) for all target columns at once must equal computing
+    """Computing (r, t) for all target columns at once must equal computing
     each column separately (up to float32 rounding).
 
     The pipeline batches edge-statistic computation over all runs/permutations
@@ -25,7 +25,7 @@ def test_batched_edge_statistics_match_per_column(statistic, selection_input):
     across permutations. The two paths are not bit-identical because a batched
     matrix-matrix product accumulates in a different order than the per-column
     matrix-vector product, but they agree to float32 precision (which does not
-    change the downstream p<threshold edge selection in practice — this is also
+    change the downstream |t|>critical edge selection in practice — this is also
     exactly what the inner-CV path has always computed).
     """
     rng = np.random.RandomState(0)
@@ -39,14 +39,15 @@ def test_batched_edge_statistics_match_per_column(statistic, selection_input):
     device = torch.device('cpu')
 
     # Batched: all columns at once.
-    r_all, p_all = stat.fit_transform(X=X, y=Y, covariates=covariates, device=device)
+    r_all, t_all, df_all = stat.fit_transform(X=X, y=Y, covariates=covariates, device=device)
 
     # Per column, exactly as the old loop did.
     for run_id in range(n_runs):
-        r_col, p_col = stat.fit_transform(
+        r_col, t_col, df_col = stat.fit_transform(
             X=X, y=Y[:, [run_id]], covariates=covariates, device=device)
+        assert df_col == df_all
         torch.testing.assert_close(r_all[:, [run_id]], r_col, rtol=1e-5, atol=1e-6)
-        torch.testing.assert_close(p_all[:, [run_id]], p_col, rtol=1e-5, atol=1e-6)
+        torch.testing.assert_close(t_all[:, [run_id]], t_col, rtol=1e-4, atol=1e-5)
 
 
 @pytest.mark.parametrize("selection_input", ["raw", "residualized"])
@@ -134,10 +135,10 @@ def test_presence_filter_drops_sparse_edges(threshold, expected_min_fraction):
     """Only edges nonzero in >= threshold of subjects survive the filter."""
     X, y = _sparse_presence_data()
     stat = EdgeStatistic(selection_statistic='pearson', presence_filter=threshold)
-    r, p = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    r, t, _ = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
 
     presence = (X != 0).mean(axis=0)
-    kept = (p[:, 0].numpy() < 1.0)  # p==1 marks a filtered/invalid edge
+    kept = (t[:, 0].numpy() != 0.0)  # t==0 marks a filtered/invalid edge
     for j in range(X.shape[1]):
         if presence[j] + 1e-9 >= expected_min_fraction:
             assert kept[j], f"edge {j} (presence {presence[j]:.2f}) should survive"
@@ -149,9 +150,9 @@ def test_presence_filter_off_by_default_keeps_all():
     """With the filter off, sparse-but-variable edges are still evaluated."""
     X, y = _sparse_presence_data()
     stat = EdgeStatistic(selection_statistic='pearson')  # default: no presence filter
-    r, p = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    r, t, _ = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
     # Every column has variance > 0, so none is dropped by the variance gate.
-    assert bool((p[:, 0].numpy() < 1.0).all()), "no edge should be filtered when off"
+    assert bool((t[:, 0].numpy() != 0.0).all()), "no edge should be filtered when off"
 
 
 def test_presence_filter_adds_to_variance_gate():
@@ -164,12 +165,12 @@ def test_presence_filter_adds_to_variance_gate():
     X[:20, 0] = rng.randn(20).astype(np.float32) + 5.0  # nonzero in 20% only
 
     no_filter = EdgeStatistic(selection_statistic='pearson')
-    _, p_off = no_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
-    assert p_off[0, 0].item() < 1.0  # survives the variance gate
+    _, t_off, _ = no_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    assert t_off[0, 0].item() != 0.0  # survives the variance gate
 
     with_filter = EdgeStatistic(selection_statistic='pearson', presence_filter=0.5)
-    _, p_on = with_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
-    assert p_on[0, 0].item() == 1.0  # dropped by the presence filter
+    _, t_on, _ = with_filter.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
+    assert t_on[0, 0].item() == 0.0  # dropped by the presence filter
 
 
 # --- Connected-component edge filtering ---------------------------------------
@@ -210,11 +211,11 @@ def _sel_with_edges(connected_components):
     # 5 nodes / 10 edges: positive edges 0=(0,1), 4=(1,2) form a chain; 9=(3,4)
     # is isolated. All are strongly, significantly positive.
     r = torch.zeros(10, 1)
-    p = torch.ones(10, 1)
+    t = torch.zeros(10, 1)
     for e in (0, 4, 9):
         r[e, 0] = 0.5
-        p[e, 0] = 0.001
-    sel.r_edges, sel.p_edges = r, p
+        t[e, 0] = 6.0        # p ~ 1e-7 at df=100
+    sel.r_edges, sel.t_edges, sel.df = r, t, 100
     return sel
 
 
@@ -229,30 +230,67 @@ def test_connected_components_filter_end_to_end():
     assert bool(edges_off[9, Networks.positive, 0])     # lone edge kept
 
 
-def test_pthreshold_bonferroni_matches_statsmodels():
-    """PThreshold(correction='bonferroni').select must select exactly the edges
-    that statsmodels' bonferroni correction would pass at the given threshold."""
+def _t_and_exact_p(rng, n_features, n_runs, df):
+    """Random t statistics spanning the selection boundary, with their exact p."""
+    from scipy import stats
+    t = rng.standard_t(df, size=(n_features, n_runs)) * 2.5
+    return t, 2 * stats.t.sf(np.abs(t), df)
+
+
+@pytest.mark.parametrize("correction", [None, "bonferroni", "sidak", "holm", "fdr_bh"])
+def test_pthreshold_matches_statsmodels_per_run(correction):
+    """Selection equals exact p-values, corrected by statsmodels one run at a time.
+
+    The reference is independent of the code under test: scipy's exact t tail,
+    then statsmodels' correction applied separately to each column.
+    """
     from statsmodels.stats import multitest
 
     rng = np.random.RandomState(11)
-    n_features, n_runs = 100, 2
-    p = rng.uniform(0, 0.2, size=(n_features, n_runs)).astype(np.float64)
-    r = rng.randn(n_features, n_runs)
-
+    df, n_features, n_runs = 40, 200, 3
+    t, p = _t_and_exact_p(rng, n_features, n_runs, df)
+    r = np.sign(t) * 0.1
     threshold = 0.05
-    _, p_corrected_sm, _, _ = multitest.multipletests(
-        p.flatten(), alpha=0.05, method='bonferroni')
-    p_corrected_sm = p_corrected_sm.reshape(p.shape)
-    expected_pos = (p_corrected_sm < threshold) & (r > 0)
-    expected_neg = (p_corrected_sm < threshold) & (r < 0)
 
-    selector = PThreshold(threshold=threshold, correction='bonferroni')
-    edges = selector.select(r=torch.as_tensor(r), p=torch.as_tensor(p))
+    p_corrected = p.copy()
+    if correction is not None:
+        for run in range(n_runs):
+            _, p_corrected[:, run], _, _ = multitest.multipletests(
+                p[:, run], alpha=0.05, method=correction)
+    expected_pos = (p_corrected < threshold) & (r > 0)
+    expected_neg = (p_corrected < threshold) & (r < 0)
+    assert expected_pos.any() and not expected_pos.all()   # the case is not trivial
+
+    selector = PThreshold(threshold=threshold, correction=correction)
+    edges = selector.select(r=torch.as_tensor(r), t=torch.as_tensor(t), df=df)
 
     # select() returns [Features, 2, N_thresholds, Runs]; one threshold here.
     assert edges.shape == (n_features, 2, 1, n_runs)
     np.testing.assert_array_equal(edges[:, 0, 0].numpy(), expected_pos)
     np.testing.assert_array_equal(edges[:, 1, 0].numpy(), expected_neg)
+
+
+@pytest.mark.parametrize("correction", ["bonferroni", "sidak", "holm", "fdr_bh"])
+def test_a_runs_selection_does_not_depend_on_its_batch(correction):
+    """A run is corrected over its own edges, not over every run in the batch.
+
+    Regression test. The correction used to run over ``p.flatten()``, so a
+    permutation chunk of shape [F, P] was corrected as F x P tests: each permuted
+    run faced a far stricter threshold than the real run (and one that changed
+    with the chunk size), making the permutation null weaker than the procedure
+    it was meant to be a null of.
+    """
+    rng = np.random.RandomState(5)
+    df, n_features, n_runs = 40, 150, 50
+    t, _ = _t_and_exact_p(rng, n_features, n_runs, df)
+    r = torch.as_tensor(np.sign(t) * 0.1)
+    t = torch.as_tensor(t)
+
+    selector = PThreshold(threshold=0.05, correction=correction)
+    batched = selector.select(r=r, t=t, df=df)
+    for run in (0, n_runs // 2, n_runs - 1):
+        alone = selector.select(r=r[:, [run]], t=t[:, [run]], df=df)
+        assert torch.equal(batched[..., [run]], alone), f"run {run} changed with its batch"
 
 
 # --- Threshold-grid (params axis) tests --------------------------------
@@ -263,14 +301,14 @@ def test_select_params_axis_matches_per_threshold_calls():
     select() calls, one per threshold, exactly."""
     rng = np.random.RandomState(21)
     r = torch.as_tensor(rng.randn(30, 4))
-    p = torch.as_tensor(rng.uniform(0, 1, size=(30, 4)))
+    t = torch.as_tensor(rng.randn(30, 4) * 4)
     thresholds = [0.01, 0.05, 0.1]
 
     selector = PThreshold(threshold=thresholds, correction='bonferroni')
-    batched = selector.select(r=r, p=p, thresholds=thresholds)  # [F,2,3,4]
+    batched = selector.select(r=r, t=t, df=50, thresholds=thresholds)  # [F,2,3,4]
     assert batched.shape == (30, 2, 3, 4)
 
-    for i, t in enumerate(thresholds):
-        ref_selector = PThreshold(threshold=t, correction='bonferroni')
-        ref = ref_selector.select(r=r, p=p)          # [F, 2, 1, R]
+    for i, threshold in enumerate(thresholds):
+        ref_selector = PThreshold(threshold=threshold, correction='bonferroni')
+        ref = ref_selector.select(r=r, t=t, df=50)          # [F, 2, 1, R]
         assert torch.equal(batched[:, :, i, :], ref[:, :, 0, :])

@@ -3,16 +3,24 @@ The edge-level statistics.
 
 One vectorised OLS GLM underlies every edge statistic CCCPM offers -- Pearson,
 Spearman, point-biserial and their partial variants are all the same fit with
-different preprocessing of the inputs (see `correlations_and_pvalues`). This
+different preprocessing of the inputs (see `edge_statistics`). This
 module is that fit, plus the two transforms it composes with: rank conversion
-and confound residualisation, and the Bonferroni correction applied to its
-p-values.
+and confound residualisation, and the exact t-distribution p-values of its
+coefficient.
+
+The fit stays on the device and yields a t statistic per edge. p-values are exact
+(``scipy.special.stdtr``) and computed on the CPU, which is too slow to do for
+every edge x permutation in a pipeline run -- so the pipeline never does. It
+thresholds on the t statistic instead, against the exact critical value of each
+p-threshold (see `critical_t` and `PThreshold.select`), which selects exactly the
+edges an exact p-value would.
 
 Split out of `edge_selection.py` so that the maths sits apart from the policy
 that consumes it -- which edges to keep, and how the selectors are configured.
 """
 import numpy as np
 import torch
+from scipy import special, stats
 
 
 def torch_rankdata(data, dim=-1):
@@ -99,33 +107,7 @@ def get_residuals(data, confounds):
         raise ValueError(f"Data shape {data.shape} incompatible with confounds {confounds.shape}")
 
 
-def torch_bonferroni(p, alpha=0.05):
-    """
-    Bonferroni multiple-comparisons correction, computed entirely in torch.
-
-    Equivalent to
-    ``statsmodels.stats.multitest.multipletests(p.flatten(), alpha=alpha, method='bonferroni')``,
-    but stays on-device (no CPU/GPU sync): p_corrected = min(p * n, 1), where n
-    is the total number of tests (i.e. ``p.numel()``, matching statsmodels'
-    behaviour of correcting over the flattened array).
-
-    Args:
-        p: p-values tensor, any shape.
-        alpha: significance level used for the reject mask.
-
-    Returns:
-        reject: bool tensor, same shape as p — True where p_corrected < alpha.
-        p_corrected: tensor, same shape as p, clamped to at most 1.
-    """
-    n = p.numel()
-    p_corrected = torch.clamp(p * n, max=1.0)
-    reject = p_corrected < alpha
-    return reject, p_corrected
-
-
-def correlations_and_pvalues(X, Y_perms,
-                             correlation_type='pearson',
-                             confounds=None):
+def edge_statistics(X, Y_perms, correlation_type='pearson', confounds=None):
     """
     Univariate edge selection as a vectorised OLS GLM, batched over permutations.
 
@@ -135,7 +117,7 @@ def correlations_and_pvalues(X, Y_perms,
 
         target ~ intercept [+ confounds] + edge
 
-    and returns the edge effect and the p-value of its coefficient. By the
+    and returns the edge effect and the t statistic of its coefficient. By the
     Frisch–Waugh–Lovell theorem the coefficient only requires residualising the
     *edge* on the confounds — the target is **never** residualised to obtain the
     coefficient (its raw values drive it; this is what we want when the target is
@@ -168,7 +150,8 @@ def correlations_and_pvalues(X, Y_perms,
 
     Returns:
         r_matrix: (N_features, N_perms) — semi-partial correlation (effect size)
-        p_matrix: (N_features, N_perms) — p-value of the edge coefficient
+        t_matrix: (N_features, N_perms) — t statistic of the edge coefficient
+        df: int — its degrees of freedom, ``N - 2 - N_confounds``
     """
     X = torch.as_tensor(X)
     Y = torch.as_tensor(Y_perms, dtype=X.dtype, device=X.device)
@@ -211,7 +194,7 @@ def correlations_and_pvalues(X, Y_perms,
     sse_y = (Y_res ** 2).sum(dim=0)                    # (P,)    full-model error SS
     ssy = (Y_centered ** 2).sum(dim=0)                 # (P,)    total SS of target
 
-    # Partial correlation == regression-coefficient test; it drives the p-value.
+    # Partial correlation == regression-coefficient test; it drives the t statistic.
     partial_r = cross / (torch.sqrt(sxx.unsqueeze(1) * sse_y.unsqueeze(0)) + 1e-12)
     partial_r = torch.clamp(partial_r, -0.999999, 0.999999)
 
@@ -220,15 +203,45 @@ def correlations_and_pvalues(X, Y_perms,
     semipartial_r = cross / (torch.sqrt(sxx.unsqueeze(1) * ssy.unsqueeze(0)) + 1e-12)
     semipartial_r = torch.clamp(semipartial_r, -0.999999, 0.999999)
 
-    # p-value of the edge coefficient, df = N - k - 2.
-    # NOTE: normal approximation to the t-tail, kept identical to the previous
-    # implementation. See RELEASE_PLAN "Open decisions #6" — do not change the
-    # tail approximation without sign-off (torch 2.x lacks an exact incomplete
-    # beta / t-CDF; this is the GPU-friendly approximation).
-    df = torch.tensor(n_samples - 2 - k_confounds, device=X.device, dtype=partial_r.dtype)
-    t_stats = partial_r * torch.sqrt(df / (1 - partial_r ** 2))
-    z = t_stats / torch.sqrt(df / (df + 1))
-    val = -torch.abs(z) / 1.41421356
-    p_matrix = 2 * (0.5 * (1 + torch.erf(val)))
+    # t statistic of the edge coefficient, df = N - 2 - k.
+    df = n_samples - 2 - k_confounds
+    t_matrix = partial_r * torch.sqrt(df / (1 - partial_r ** 2))
 
-    return semipartial_r, p_matrix
+    return semipartial_r, t_matrix, df
+
+
+def t_pvalues(t, df):
+    """Exact two-sided p-values of t statistics with ``df`` degrees of freedom.
+
+    Computed with scipy on the CPU and returned on ``t``'s device and dtype. Exact,
+    but ~4 s for a 35,778-edge x 1000-permutation batch, which is why the pipeline
+    thresholds with `critical_t` instead of calling this.
+    """
+    t_np = t.detach().cpu().double().numpy()
+    p = 2.0 * special.stdtr(df, -np.abs(t_np))
+    return torch.as_tensor(p, dtype=t.dtype, device=t.device)
+
+
+def critical_t(alpha, df):
+    """The |t| above which a two-sided p-value falls below ``alpha``.
+
+    ``p < alpha`` iff ``|t| > critical_t(alpha, df)``, because the two-sided
+    p-value is strictly decreasing in |t| for fixed df. One scalar scipy call per
+    threshold; the comparison itself stays on the device.
+    """
+    return float(stats.t.isf(alpha / 2.0, df))
+
+
+def correlations_and_pvalues(X, Y_perms, correlation_type='pearson', confounds=None):
+    """`edge_statistics` with exact p-values in place of the t statistic.
+
+    For direct use and for tests. The pipeline itself never materialises a
+    p-value per edge -- see `critical_t`.
+
+    Returns:
+        r_matrix: (N_features, N_perms) — semi-partial correlation (effect size)
+        p_matrix: (N_features, N_perms) — exact two-sided p-value of the edge coefficient
+    """
+    r, t, df = edge_statistics(X, Y_perms, correlation_type=correlation_type,
+                               confounds=confounds)
+    return r, t_pvalues(t, df)

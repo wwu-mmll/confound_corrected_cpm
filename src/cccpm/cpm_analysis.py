@@ -615,10 +615,11 @@ class CPMAnalysis:
         else:
             best_params = [self.edge_selection.param_grid[0]] * y_train.shape[1]
 
-        r_edges, p_edges = self.edge_selection.statistic.fit_transform(
+        r_edges, t_edges, df = self.edge_selection.statistic.fit_transform(
             X=X_train, y=y_train, covariates=cov_train, device=self.device)
         self.edge_selection.r_edges = r_edges
-        self.edge_selection.p_edges = p_edges
+        self.edge_selection.t_edges = t_edges
+        self.edge_selection.df = df
 
         # return_selected_edges gives [Features, 2, N_thresholds, Runs]; with a
         # single configuration set, N_thresholds == 1.
@@ -633,6 +634,6 @@ class CPMAnalysis:
         for run_id, params in enumerate(best_params):
             self.edge_selection.set_params(**params)
             self.edge_selection.r_edges = r_edges[:, [run_id]]
-            self.edge_selection.p_edges = p_edges[:, [run_id]]
+            self.edge_selection.t_edges = t_edges[:, [run_id]]
             edges[:, :, run_id] = self.edge_selection.return_selected_edges()[:, :, 0, 0]
         return edges

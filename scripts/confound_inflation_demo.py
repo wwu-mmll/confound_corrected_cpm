@@ -157,7 +157,7 @@ def selected_edge_mask(X, y, Z, selection_input):
     ue = _edge_selection(selection_input)
     ue.fit_transform(X=X, y=y.reshape(-1, 1), covariates=Z)
     selector = PThreshold(threshold=P_THRESHOLD, correction=None)
-    edges = selector.select(r=ue.r_edges, p=ue.p_edges)   # [F, 2, runs]
+    edges = selector.select(r=ue.r_edges, t=ue.t_edges, df=ue.df)   # [F, 2, runs]
     return edges.bool().any(dim=1).squeeze(-1).cpu().numpy().astype(bool)
 
 

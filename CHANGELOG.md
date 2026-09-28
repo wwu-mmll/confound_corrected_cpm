@@ -58,6 +58,8 @@ stops. Every removal raises with its replacement named.
   confounding grew (measured 5.1% -> 3.3% -> 2.1% at nominal 5%); the new one is
   nominal at every confound level.
 - `Models.residuals`, as described above.
+- `cccpm.statistics.torch_bonferroni`. Bonferroni is now a critical value inside
+  `PThreshold.select`, applied per run.
 
 - **`increment` is no longer reported for metrics whose difference is not a
   statistic.** It is a difference of two metrics, which only means something where
@@ -90,6 +92,24 @@ stops. Every removal raises with its replacement named.
 - `pyflakes` runs in CI.
 
 ### Fixed
+- **Edge-selection p-values are exact.** They used to go through the normal tail
+  instead of the t tail, which is anti-conservative by roughly 1/n (max error 0.018
+  at n=30, 0.001 at n=500): an edge with exact p = 0.065 could be selected at 0.05.
+  Selection is now exact without computing a p-value per edge — for fixed df, p is
+  strictly decreasing in |t|, so `PThreshold` compares |t| against the exact critical
+  value of each threshold, on the device. **Edge sets change slightly at every
+  sample size; regenerate any published numbers.** `correlations_and_pvalues` returns
+  exact p-values (scipy, CPU); the new `edge_statistics` returns `(r, t, df)`, and
+  `EdgeStatistic.fit_transform` / `PThreshold.select(r, t, df)` follow it.
+  `UnivariateEdgeSelection.p_edges` is replaced by `t_edges` and `df`.
+- **Multiple-comparison corrections were applied across the whole permutation
+  batch.** `PThreshold` corrected `p.flatten()`, so a permutation chunk of P runs
+  was corrected as F × P tests: each permuted run faced a far stricter threshold than
+  the real run (Bonferroni, one run: 18 edges alone, 5 inside a 50-run batch), and one
+  that changed with the chunk size. The null was therefore weaker than the procedure
+  it tested, and permutation p-values for any `correction` other than `None` were
+  liberal. Corrections are now per run. The default `correction=None` was not
+  affected.
 - Permutation p-values for undefined models were reported at the permutation floor
   (`1/(n_perms+1)`, i.e. maximally significant) instead of NaN.
 - Classification metrics turned NaN predictions into a plausible-looking score near the

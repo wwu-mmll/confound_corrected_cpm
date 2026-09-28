@@ -31,7 +31,7 @@ def plan_permutation_chunk(n_features, n_samples, n_runs, device,
     instead of crashing.
 
     The per-column cost is dominated by the ~10 [N_features, N_runs] float32
-    temporaries inside `correlations_and_pvalues` (residualised X and y, cross
+    temporaries inside `edge_statistics` (residualised X and y, cross
     products, r, t, z, p, ...). Measured directly at ~40 bytes per
     (run x feature), stable across n_features from 4,950 to 35,778; the
     n_samples term covers the prediction and rank tensors, which are much

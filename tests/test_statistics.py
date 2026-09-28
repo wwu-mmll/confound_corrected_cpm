@@ -3,19 +3,21 @@ Tests for the edge statistics in cccpm.statistics.
 
 Every check here is against an external reference -- statsmodels' GLM for the
 partial path, scipy's pointbiserialr for the binary path, OLS residuals computed
-from the definition, statsmodels' multipletests for the correction. The
-policy layer built on top of these lives in test_edge_selection.py.
+from the definition, scipy's t distribution for the p-values and critical
+values. The policy layer built on top of these lives in test_edge_selection.py.
 """
 import numpy as np
 import pytest
 import torch
 import statsmodels.api as sm
 from scipy.stats import pointbiserialr
+from scipy.stats import t as t_dist
 
 from cccpm.statistics import (
     correlations_and_pvalues,
     get_residuals,
-    torch_bonferroni,
+    critical_t,
+    t_pvalues,
 )
 
 
@@ -26,9 +28,7 @@ def test_partial_path_matches_glm_coefficient(simulated_data):
     confounds must equal the p-value of the edge coefficient in the regression
     ``y ~ intercept + confounds + edge`` (statsmodels OLS). The reported r must
     be the *semi-partial* correlation (confound removed from the edge only),
-    and its sign must match the regression coefficient. P-values use a normal
-    approximation to the t-tail (Open decision #6), so they are compared at a
-    looser tolerance than the (exact) statsmodels values.
+    and its sign must match the regression coefficient. Both p-values are exact.
     """
     X, y, covariates = simulated_data
     Xt = torch.as_tensor(X, dtype=torch.float64)
@@ -44,8 +44,7 @@ def test_partial_path_matches_glm_coefficient(simulated_data):
     Pz = Z @ np.linalg.pinv(Z)          # confound hat matrix
     for i in range(X.shape[1]):
         m = sm.OLS(y, sm.add_constant(np.column_stack([cov, X[:, i]]))).fit()
-        # GLM coefficient p-value (exact). Our p uses the normal-tail approx.
-        np.testing.assert_allclose(p[i], m.pvalues[-1], atol=2e-3)
+        np.testing.assert_allclose(p[i], m.pvalues[-1], rtol=1e-7, atol=1e-12)
         # reported r is the semi-partial correlation: corr(raw y, residualised edge)
         x_res = X[:, i] - Pz @ X[:, i]
         yc = y - y.mean()
@@ -133,18 +132,18 @@ def test_point_biserial_matches_scipy(seed, n, n1):
     np.testing.assert_allclose(r, scipy_r, atol=1e-6)
 
 
-def test_torch_bonferroni_matches_statsmodels():
-    """torch_bonferroni must reproduce statsmodels' bonferroni-corrected p-values
-    and reject mask exactly (it's just min(p * n, 1))."""
-    from statsmodels.stats import multitest
+@pytest.mark.parametrize("df", [5, 28, 120, 998])
+def test_critical_t_selects_exactly_what_the_exact_p_value_does(df):
+    """``|t| > critical_t(alpha, df)`` must be ``p < alpha`` for the exact p.
 
-    rng = np.random.RandomState(3)
-    p = rng.uniform(0, 1, size=(50, 4)).astype(np.float64)
+    This is what lets the pipeline threshold on the device without computing a
+    p-value per edge. The reference is scipy's t tail, independent of both.
+    """
+    rng = np.random.RandomState(df)
+    t = torch.as_tensor(rng.standard_t(df, size=5000) * 2.0)
+    p_exact = 2 * t_dist.sf(np.abs(t.numpy()), df)
+    np.testing.assert_allclose(t_pvalues(t, df).numpy(), p_exact, rtol=1e-10, atol=0)
 
-    reject_sm, p_corrected_sm, _, _ = multitest.multipletests(
-        p.flatten(), alpha=0.05, method='bonferroni')
-
-    reject, p_corrected = torch_bonferroni(torch.as_tensor(p), alpha=0.05)
-
-    np.testing.assert_allclose(p_corrected.numpy().flatten(), p_corrected_sm, atol=1e-12)
-    np.testing.assert_array_equal(reject.numpy().flatten(), reject_sm)
+    for alpha in (0.1, 0.05, 0.01, 0.001, 1e-6):
+        selected = (t.abs() > critical_t(alpha, df)).numpy()
+        np.testing.assert_array_equal(selected, p_exact < alpha)

@@ -22,7 +22,7 @@ from sklearn.model_selection import KFold
 
 from cccpm import CPMAnalysis, PThreshold, UnivariateEdgeSelection
 from cccpm.edge_selection import EdgeStatistic
-from cccpm.statistics import correlations_and_pvalues, get_residuals
+from cccpm.statistics import correlations_and_pvalues, edge_statistics, get_residuals
 
 
 def _data(seed=0, n=300, n_features=300, n_confounds=3, confound_beta=0.8):
@@ -37,8 +37,8 @@ def _data(seed=0, n=300, n_features=300, n_confounds=3, confound_beta=0.8):
 def _stat(**kwargs):
     X, y, Z = _data()
     st = EdgeStatistic(**kwargs)
-    r, p = st.fit_transform(X=X, y=y, covariates=Z, device=torch.device('cpu'))
-    return r.numpy(), p.numpy()
+    r, t, _ = st.fit_transform(X=X, y=y, covariates=Z, device=torch.device('cpu'))
+    return r.numpy(), t.numpy()
 
 
 # ---------------------------------------------------------------------------
@@ -110,23 +110,24 @@ def test_unknown_values_are_rejected():
 
 def test_residualized_selection_is_the_edge_coefficient_test():
     """One regression per edge, y ~ 1 + Z + edge: the reported effect size is
-    the semipartial correlation and the p-value is the coefficient's."""
+    the semipartial correlation and the t statistic is the coefficient's."""
     X, y, Z = _data()
-    r, p = _stat(selection_statistic='pearson', selection_input='residualized')
-    r_ref, p_ref = correlations_and_pvalues(
+    r, t = _stat(selection_statistic='pearson', selection_input='residualized')
+    r_ref, t_ref, df = edge_statistics(
         torch.as_tensor(X), torch.as_tensor(y),
         confounds=torch.as_tensor(Z), correlation_type='pearson')
+    assert df == X.shape[0] - 2 - Z.shape[1]
     np.testing.assert_array_equal(r, r_ref.numpy())
-    np.testing.assert_array_equal(p, p_ref.numpy())
+    np.testing.assert_array_equal(t, t_ref.numpy())
 
 
 def test_raw_selection_ignores_the_covariates():
     X, y, Z = _data()
-    r_raw, p_raw = _stat(selection_statistic='pearson', selection_input='raw')
-    r_ref, p_ref = correlations_and_pvalues(
+    r_raw, t_raw = _stat(selection_statistic='pearson', selection_input='raw')
+    r_ref, t_ref, _ = edge_statistics(
         torch.as_tensor(X), torch.as_tensor(y), correlation_type='pearson')
     np.testing.assert_array_equal(r_raw, r_ref.numpy())
-    np.testing.assert_array_equal(p_raw, p_ref.numpy())
+    np.testing.assert_array_equal(t_raw, t_ref.numpy())
 
 
 def test_semipartial_and_partial_rank_edges_identically():

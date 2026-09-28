@@ -19,6 +19,7 @@ All tests run on CPU with float64/float32 tolerances.
 """
 
 import numpy as np
+import pytest
 import torch
 from scipy import stats
 from sklearn.linear_model import LinearRegression, LogisticRegression
@@ -97,9 +98,7 @@ def test_pearson_matches_scipy():
     r_ref, p_ref = ref_pearson(X, y)
 
     np.testing.assert_allclose(r_tb, r_ref, atol=1e-6)
-    # p-values use a (documented) normal approximation to the t tail; at n=1000
-    # this is indistinguishable from the exact t-based p-value.
-    np.testing.assert_allclose(p_tb, p_ref, atol=2e-3)
+    np.testing.assert_allclose(p_tb, p_ref, rtol=1e-6, atol=1e-12)
     # And the selected-edge masks must be identical.
     np.testing.assert_array_equal(p_tb < P_THRESHOLD, p_ref < P_THRESHOLD)
 
@@ -113,7 +112,7 @@ def test_partial_matches_reference():
 
     # Reported effect size is the semipartial (part) correlation.
     np.testing.assert_allclose(r_tb, r_ref, atol=1e-6)
-    np.testing.assert_allclose(p_tb, p_ref, atol=2e-3)
+    np.testing.assert_allclose(p_tb, p_ref, rtol=1e-6, atol=1e-12)
     np.testing.assert_array_equal(p_tb < P_THRESHOLD, p_ref < P_THRESHOLD)
 
 
@@ -324,57 +323,33 @@ def test_classification_pipeline_matches_sklearn(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# 5. How wrong is the normal approximation to the t tail?                      #
+# 5. Edge selection is exact at small n                                        #
 # --------------------------------------------------------------------------- #
-def test_edge_pvalues_vs_exact_t_distribution():
-    """Quantify the documented normal approximation in the edge-selection
-    p-values against the exact two-sided t-test.
+@pytest.mark.parametrize("n", [30, 60, 500])
+def test_edge_selection_matches_the_exact_t_test_at_small_n(n):
+    """The pipeline selects exactly the edges whose exact t-test p is below the
+    threshold, at every cohort size.
 
-    `correlations_and_pvalues` converts the t statistic through the standard
-    normal tail rather than `scipy.stats.t.sf`, which makes every p-value
-    slightly too small (anti-conservative), by more at small n. This is
-    RELEASE_PLAN decision #6, and it was previously unmeasured: the existing
-    equivalence tests run at n=1000, where the difference vanishes.
-
-    Measured here (max |p_exact - p_approx| over 200 edges, seed 7):
-
-        n=30  0.0184   (0.0146 near the p=0.05 boundary)
-        n=60  0.0089   (0.0063)
-        n=120 0.0044   (0.0036)
-        n=500 0.0010   (0.0009)
-
-    So it decays like ~1/n and is worst where it matters least in practice: at
-    n=30 an edge whose exact p is 0.065 can be selected at a 0.05 threshold. At
-    any cohort size CPM is normally run on, it cannot move an edge across the
-    boundary meaningfully.
-
-    The assertions pin the *direction* (never conservative) and the decay; the
-    magnitude bounds are loose enough not to be seed-fragile.
+    Regression test. The edge-selection p-value used to go through
+    the normal tail rather than the t tail, which is anti-conservative by
+    ~1/n: max |p_exact - p_approx| was 0.018 at n=30, so an edge with exact
+    p = 0.065 could be selected at a 0.05 threshold. With 2000 null-ish edges
+    at n=30 roughly thirty land in that band, so this fails on the old code.
+    The reference is scipy's t tail on a per-column Pearson r.
     """
+    from cccpm import UnivariateEdgeSelection, PThreshold
+
     rng = np.random.RandomState(7)
-    # Largest deviation is at the smallest n. 30 is a realistic small CPM cohort.
-    worst_by_n = {}
-    for n in (30, 60, 120, 500):
-        X = rng.randn(n, 200)
-        y = X[:, 0] * 0.3 + rng.randn(n)
+    X = rng.randn(n, 2000)
+    y = X[:, 0] * 0.3 + rng.randn(n)
 
-        _, p_tb = correlations_and_pvalues(
-            X, y.reshape(-1, 1), correlation_type="pearson")
-        p_tb = p_tb.numpy().ravel()
+    sel = UnivariateEdgeSelection(
+        selection_statistic="pearson",
+        edge_selection=[PThreshold(threshold=[P_THRESHOLD], correction=[None])])
+    sel.set_params(**list(sel.param_grid)[0])
+    edges = sel.fit_transform(X=X, y=y.reshape(-1, 1), covariates=None) \
+               .return_selected_edges()[:, :, 0, 0].numpy()
 
-        r_ref, p_exact = ref_pearson(X, y)      # uses scipy.stats.t.sf
-
-        # Direction: the normal tail is never heavier than the t tail, so the
-        # approximate p-value is never larger than the exact one.
-        assert np.all(p_tb <= p_exact + 1e-9), (
-            f"n={n}: approximation produced a conservative p-value, which it cannot do")
-
-        worst_by_n[n] = float(np.max(p_exact - p_tb))
-
-    # The error shrinks monotonically with n, and is already small at n=30.
-    ns = sorted(worst_by_n)
-    for a, b in zip(ns, ns[1:]):
-        assert worst_by_n[b] < worst_by_n[a], f"error grew from n={a} to n={b}: {worst_by_n}"
-
-    assert worst_by_n[30] < 0.02, f"larger than documented at n=30: {worst_by_n[30]:.4f}"
-    assert worst_by_n[500] < 2e-3, f"larger than documented at n=500: {worst_by_n[500]:.6f}"
+    r_ref, p_exact = ref_pearson(X, y)      # uses scipy.stats.t.sf
+    np.testing.assert_array_equal(edges[:, 0], (p_exact < P_THRESHOLD) & (r_ref > 0))
+    np.testing.assert_array_equal(edges[:, 1], (p_exact < P_THRESHOLD) & (r_ref < 0))

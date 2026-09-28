@@ -17,7 +17,7 @@ import torch
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ParameterGrid
 
-from cccpm.statistics import correlations_and_pvalues, torch_bonferroni
+from cccpm.statistics import edge_statistics, t_pvalues, critical_t
 from cccpm.validation import infer_n_nodes
 
 
@@ -182,36 +182,61 @@ class PThreshold(BaseEdgeSelector):
         else:
             raise ValueError("correction must be None, str, or list")
 
-    def _apply_correction(self, p):
-        """Multiple-comparison-correct `p`, returning a tensor of the same shape."""
-        if self._correction is None:
-            return p
-        if self._correction == 'bonferroni':
-            # Stays on-device (no CPU/GPU sync), unlike the statsmodels path below.
-            _, p_corrected = torch_bonferroni(p)
-            return p_corrected
-        # Other statsmodels corrections still require a CPU round-trip.
-        from statsmodels.stats import multitest
-        shape = p.shape
-        p_np = p.detach().cpu().numpy() if isinstance(p, torch.Tensor) else p
-        _, p_flat, _, _ = multitest.multipletests(p_np.flatten(), alpha=0.05, method=self._correction)
-        p_flat = p_flat.reshape(shape)
-        return torch.as_tensor(p_flat, device=p.device, dtype=p.dtype) if isinstance(p, torch.Tensor) else p_flat
+    def _p_cutoffs(self, thresholds, n_tests):
+        """Per-threshold uncorrected p cut-offs for a single-step correction, or None.
 
-    def select(self, r, p, thresholds=None):
+        For no correction, Bonferroni and Sidak, "corrected p < threshold" is
+        "p < cut-off" for a cut-off that depends only on the threshold and the
+        number of tests -- so selection needs no p-values at all, only the t
+        statistic against the matching critical value.
+        """
+        if self._correction is None:
+            return [float(a) for a in thresholds]
+        if self._correction == 'bonferroni':
+            return [float(a) / n_tests for a in thresholds]
+        if self._correction == 'sidak':
+            return [1.0 - (1.0 - float(a)) ** (1.0 / n_tests) for a in thresholds]
+        return None
+
+    def _stepwise_significant(self, t, df, thresholds):
+        """[N_features, N_thresholds, *rest] mask for a step-wise correction.
+
+        Holm, FDR and the rest need the p-values themselves, so these are exact
+        (scipy, CPU) and corrected one run at a time.
+        """
+        from statsmodels.stats import multitest
+        p = t_pvalues(t, df).cpu().double().numpy()
+        n_features, rest_shape = p.shape[0], p.shape[1:]
+        columns = p.reshape(n_features, -1)
+        corrected = np.empty_like(columns)
+        for run in range(columns.shape[1]):
+            _, corrected[:, run], _, _ = multitest.multipletests(
+                columns[:, run], alpha=0.05, method=self._correction)
+        corrected = corrected.reshape(n_features, 1, *rest_shape)
+        thresh = np.asarray(thresholds, dtype=np.float64).reshape(1, -1, *([1] * len(rest_shape)))
+        return torch.as_tensor(corrected < thresh, device=t.device)
+
+    def select(self, r, t, df, thresholds=None):
         """
         Select edges whose (optionally corrected) p-value falls below each
         threshold, split into positive- and negative-correlation networks.
 
-        The correction is applied once and then compared against every
-        threshold at the same time, so searching a threshold grid costs one
-        call rather than one call per value. All thresholds share this
-        selector's single `correction` method -- different correction methods
-        use different formulas and need separate calls.
+        Selection is exact without computing a p-value per edge: for fixed df the
+        two-sided p-value is strictly decreasing in |t|, so ``p < alpha`` is
+        ``|t| > critical_t(alpha, df)`` -- one scalar scipy call per threshold,
+        with the comparison on the device. Step-wise corrections (Holm, FDR, ...)
+        need the p-values themselves and compute them exactly on the CPU.
+
+        The correction is applied **per run**: each column of ``t`` is one
+        analysis (the real target, or one permutation) with ``N_features`` tests
+        of its own. A permuted run must be thresholded exactly like the real one,
+        or the null distribution is not a null of the same procedure.
 
         Args:
-            r, p: [N_features, *rest], `rest` being any batch axes already
-                  present (in practice the runs/permutations axis).
+            r: [N_features, *rest] effect sizes; their sign picks the network.
+            t: [N_features, *rest] t statistics, ``rest`` being any batch axes
+               already present (in practice the runs/permutations axis).
+            df: degrees of freedom of ``t``.
             thresholds: sequence of p-value thresholds. Defaults to
                         ``self.threshold``, which is always a list.
 
@@ -221,18 +246,20 @@ class PThreshold(BaseEdgeSelector):
         """
         if thresholds is None:
             thresholds = self.threshold
+        rest_shape = t.shape[1:]
 
-        p_corrected = self._apply_correction(p)
-        rest_shape = p_corrected.shape[1:]
-        thresholds_t = torch.as_tensor(list(thresholds), device=r.device,
-                                       dtype=p_corrected.dtype)
-        thresh_view = thresholds_t.view(1, -1, *([1] * len(rest_shape)))
+        cutoffs = self._p_cutoffs(thresholds, n_tests=t.shape[0])
+        if cutoffs is not None:
+            crit = torch.as_tensor([critical_t(a, df) for a in cutoffs],
+                                   device=t.device, dtype=t.dtype)
+            crit = crit.view(1, -1, *([1] * len(rest_shape)))
+            significant = t.abs().unsqueeze(1) > crit          # [F, N_params, *rest]
+        else:
+            significant = self._stepwise_significant(t, df, thresholds)
 
-        p_exp = p_corrected.unsqueeze(1)   # [N_features, 1, *rest]
-        r_exp = r.unsqueeze(1)             # [N_features, 1, *rest]
-        pos_mask = (p_exp < thresh_view) & (r_exp > 0)
-        neg_mask = (p_exp < thresh_view) & (r_exp < 0)
-
+        r_exp = r.unsqueeze(1)                                 # [F, 1, *rest]
+        pos_mask = significant & (r_exp > 0)
+        neg_mask = significant & (r_exp < 0)
         return torch.stack([pos_mask, neg_mask], dim=1)
 
 
@@ -332,9 +359,6 @@ class EdgeStatistic(BaseEstimator):
                       y,
                       covariates,
                       device):
-        r_edges, p_edges = (torch.zeros((X.shape[1], y.shape[1]), device=device),
-                            torch.ones((X.shape[1], y.shape[1]), device=device))
-
         # 1. Convert to GPU Tensors immediately
         X = torch.as_tensor(X, device=device, dtype=torch.float32)
         y = torch.as_tensor(y, device=device, dtype=torch.float32)
@@ -368,15 +392,14 @@ class EdgeStatistic(BaseEstimator):
                 "were supplied. Use selection_input='raw' for an analysis "
                 "without confound control."
             )
-        r_edges_masked, p_edges_masked = correlations_and_pvalues(
+        r_edges, t_edges, df = edge_statistics(
             X=X, Y_perms=y, confounds=confounds,
             correlation_type=self._statistic)
 
-        # no dynamic shape change
-        mask = valid_edges.to(r_edges_masked.dtype).unsqueeze(1)
-        r_edges = r_edges_masked.to(r_edges.dtype) * mask
-        p_edges = p_edges_masked.to(p_edges.dtype) * mask + (1.0 - mask)
-        return r_edges, p_edges
+        # Excluded edges get r = t = 0, which no threshold selects. No dynamic
+        # shape change.
+        mask = valid_edges.to(r_edges.dtype).unsqueeze(1)
+        return r_edges * mask, t_edges * mask, df
 
 
 class UnivariateEdgeSelection(BaseEstimator):
@@ -430,7 +453,8 @@ class UnivariateEdgeSelection(BaseEstimator):
                  connected_components: Union[bool, int] = False,
                  edge_selection: Union[list, None, PThreshold] = None):
         self.r_edges = None
-        self.p_edges = None
+        self.t_edges = None
+        self.df = None
         self.selection_statistic = selection_statistic
         self.selection_input = selection_input
         self.presence_filter = presence_filter
@@ -456,13 +480,14 @@ class UnivariateEdgeSelection(BaseEstimator):
         return ParameterGrid(grid_elements)
 
     def fit_transform(self, X, y=None, covariates=None, device=torch.device('cpu')):
-        self.r_edges, self.p_edges = self.statistic.fit_transform(X=X, y=y, covariates=covariates, device=device)
+        self.r_edges, self.t_edges, self.df = self.statistic.fit_transform(
+            X=X, y=y, covariates=covariates, device=device)
         return self
 
     def return_selected_edges(self, thresholds=None):
-        """Edge masks [Features, 2, N_params, *runs] for the fitted r/p values."""
+        """Edge masks [Features, 2, N_params, *runs] for the fitted statistics."""
         selected_edges = self.edge_selection.select(
-            r=self.r_edges, p=self.p_edges, thresholds=thresholds)
+            r=self.r_edges, t=self.t_edges, df=self.df, thresholds=thresholds)
         min_edges = resolve_min_component_size(self.connected_components)
         if min_edges is not None:
             selected_edges = filter_connected_components(selected_edges, min_edges)

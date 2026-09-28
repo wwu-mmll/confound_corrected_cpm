@@ -67,15 +67,15 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
         X_train, X_test, y_train, y_test, cov_train, cov_test = torch_train_test_split(
             train, test, X_dev, y_dev, cov_dev)
 
-        # r/p don't depend on the selection threshold, so they are computed once
-        # per fold and reused across every parameter group below.
-        r_edges, p_edges = edge_selection.statistic.fit_transform(
+        # The statistics don't depend on the selection threshold, so they are
+        # computed once per fold and reused across every parameter group below.
+        r_edges, t_edges, df = edge_selection.statistic.fit_transform(
             X=X_train, y=y_train, covariates=cov_train, device=device)
 
         for group in param_groups:
             selector = group['selector']
             selector.correction = group['correction']
-            selected_edges = selector.select(r=r_edges, p=p_edges,
+            selected_edges = selector.select(r=r_edges, t=t_edges, df=df,
                                              thresholds=group['thresholds'])
             if min_edges is not None:
                 selected_edges = filter_connected_components(selected_edges, min_edges)

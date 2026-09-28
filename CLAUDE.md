@@ -51,7 +51,7 @@ mkdocs build
 | `cpm_analysis.py` | Main `CPMAnalysis` class — entry point and orchestrator |
 | `models/linear_model.py` | `LinearCPM` — PyTorch linear/logistic regression with Cholesky solver |
 | `models/nonlinear_models.py` | `DecisionTreeCPM` / `RandomForestCPM` / `GAMCPM` — alternative CPM model backends |
-| `statistics.py` | The edge statistic itself — one vectorised OLS GLM covering Pearson/Spearman/point-biserial and their partial variants, plus ranks, residualisation and Bonferroni |
+| `statistics.py` | The edge statistic itself — one vectorised OLS GLM covering Pearson/Spearman/point-biserial and their partial variants (t statistic + df), plus ranks, residualisation, exact p-values and the critical t value that `PThreshold` selects on |
 | `edge_selection.py` | `UnivariateEdgeSelection` / `PThreshold` / `EdgeStatistic` — the `selection_statistic` x `selection_input` confound choice, p-value thresholding, presence and connected-component filters, parameter grid |
 | `scoring.py` | `FastCPMMetrics` / `FastCPMClassificationMetrics` — GPU-accelerated metrics |
 | `inner_fold.py` | Inner CV for hyperparameter optimization |
