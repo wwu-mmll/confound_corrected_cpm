@@ -5,9 +5,12 @@ import seaborn as sns
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.patches as mpatches
+import matplotlib.colors as mcolors
 
 from pandas.api.types import is_numeric_dtype
 
+from cccpm.constants import INCREMENTABLE_METRICS
 from cccpm.reporting.plots.figure_style import (
     COLOR_MAP,
     SQUARE,
@@ -16,6 +19,28 @@ from cccpm.reporting.plots.figure_style import (
 )
 
 MODEL_ORDER = ["covariates", "connectome", "full", "increment"]
+
+# Metrics with a fixed, meaningful reference value, drawn as a dashed line.
+# Classification: chance level. Regression: "no relationship".
+_REFERENCE_LINE = {
+    "pearson_score": 0.0,
+    "explained_variance_score": 0.0,
+    "accuracy": 0.5,
+    "balanced_accuracy": 0.5,
+    "roc_auc": 0.5,
+}
+
+# df column name -> bool, is `increment` (full - covariates) defined for this metric.
+_INCREMENTABLE_NAMES = {m.name for m in INCREMENTABLE_METRICS}
+
+
+def _shade(color, amount: float):
+    """Blend *color* toward white (amount > 0) or black (amount < 0)."""
+    r, g, b = mcolors.to_rgb(color)
+    if amount >= 0:
+        return (r + (1 - r) * amount, g + (1 - g) * amount, b + (1 - b) * amount)
+    amount = -amount
+    return (r * (1 - amount), g * (1 - amount), b * (1 - amount))
 
 
 def scatter_plot_main(
@@ -34,7 +59,11 @@ def scatter_plot_main(
     Single square predicted-vs-observed panel for the summary section.
 
     Regression: scatter + identity line + annotated effect size (and p).
-    Classification: predicted probability stripped by true class + 0.5 line.
+    Classification: predicted-probability distribution per true class
+    (overlaid histograms) + 0.5 decision line. A scatter/strip plot puts the
+    binary true label on an axis as if it were continuous; the two classes'
+    probability distributions are the thing that is actually informative
+    here, so they are the plot, with true class as colour instead of an axis.
 
     If *annotate_value* is given it is shown verbatim (e.g. the cross-validated
     mean r reported in the hero verdict, so the two agree); otherwise the pooled
@@ -51,14 +80,24 @@ def scatter_plot_main(
     fig, ax = plt.subplots(figsize=SQUARE)
 
     if task_type == "classification":
-        sns.stripplot(
-            data=sub, x="y_true", y="y_pred",
-            jitter=0.2, alpha=0.7, size=4, edgecolor="white", linewidth=0.3,
-            color=color, ax=ax,
+        classes = sorted(sub["y_true"].dropna().unique())
+        light, dark = _shade(color, 0.7), _shade(color, -0.25)
+        palette = {classes[0]: light, classes[-1]: dark} if len(classes) == 2 else None
+        sns.histplot(
+            data=sub, x="y_pred", hue="y_true", hue_order=classes or None,
+            palette=palette, element="step", stat="count", common_norm=False,
+            alpha=0.65, bins=12, binrange=(0, 1), linewidth=0.8, ax=ax,
         )
-        ax.axhline(y=0.5, color="gray", linewidth=0.5, linestyle="--")
-        ax.set_xlabel(f"true {y_name}")
-        ax.set_ylabel("predicted probability")
+        ax.axvline(x=0.5, color="gray", linewidth=0.5, linestyle="--")
+        ax.set_xlabel("predicted probability")
+        ax.set_ylabel("count")
+        ax.set_xlim(-0.02, 1.02)
+        # Annotations (effect size / p) anchor top-left; keep the legend clear of them.
+        if ax.get_legend() is not None:
+            sns.move_legend(
+                ax, "upper right", title=y_name,
+                fontsize=6, title_fontsize=6, frameon=False,
+            )
     else:
         sns.regplot(
             data=sub, x="y_true", y="y_pred",
@@ -358,50 +397,109 @@ def performance_grid(
     models: list[str] | None = None,
 ) -> str:
     """
-    One faceted small-multiples figure summarising model performance.
+    One small-multiples figure summarising model performance.
 
-    Metrics are columns; models are on the y-axis; network is the hue. This
-    replaces the previous one-figure-per-metric stack with a single panel that
-    makes the model x network x metric comparison legible at a glance.
+    Metrics are columns; models are on the y-axis; network is the hue. When
+    ``increment`` (full - covariates) is one of the models, it gets its own
+    x-axis per metric column, separate from covariates/connectome/full: the
+    increment is a *difference* of the metric and can be negative or exceed
+    the metric's own natural range (e.g. a balanced-accuracy increment can run
+    from -0.2 to 1), while chance-level for the other three models already
+    sits at 0.5 (accuracy/balanced accuracy/ROC AUC) or 0 (Pearson r/explained
+    variance) — sharing one x-axis would force one of the two onto a scale
+    that hides its structure.
     """
     apply_nature_style()
 
     if models is None:
         models = [m for m in MODEL_ORDER if m in df["model"].unique()]
 
-    long = df.melt(
-        id_vars=[c for c in ["model", "network", "fold", "run"] if c in df.columns],
-        value_vars=[m for m in metrics if m in df.columns],
-        var_name="metric",
-        value_name="value",
-    )
-    long = long[long["model"].isin(models)]
-    long["metric"] = long["metric"].str.replace("_", " ")
+    has_increment = "increment" in models
+    main_models = [m for m in models if m != "increment"]
+    hue_order = ["positive", "negative", "both"]
+    n_cols = len(metrics)
 
-    g = sns.catplot(
-        data=long,
-        kind="box",
-        y="model", x="value", hue="network",
-        col="metric",
-        order=models,
-        hue_order=["positive", "negative", "both"],
-        palette=COLOR_MAP,
-        orient="h",
-        fliersize=1.5,
-        linewidth=0.5,
-        width=0.6,
-        height=2.6,
-        aspect=0.7,
-        sharex=False,
-        legend_out=True,
-    )
-    g.set_titles(col_template="{col_name}", size=7)
-    g.set_axis_labels("", "")
-    for ax in g.axes.flat:
-        sns.despine(ax=ax)
-    g.fig.tight_layout(pad=0.3)
+    fig = plt.figure(figsize=(1.75 * n_cols + 0.6, 3.6 if has_increment else 2.4))
+    if has_increment:
+        gs = gridspec.GridSpec(
+            2, n_cols, figure=fig,
+            height_ratios=[max(len(main_models), 1), 1],
+            hspace=0.9,
+        )
+    else:
+        gs = gridspec.GridSpec(1, n_cols, figure=fig)
 
-    return save_figure(g.fig, os.path.join(results_folder, "performance_grid"))
+    for col, metric in enumerate(metrics):
+        ax_main = fig.add_subplot(gs[0, col])
+        sns.boxplot(
+            data=df[df["model"].isin(main_models)],
+            y="model", x=metric, hue="network",
+            order=main_models,
+            hue_order=hue_order,
+            palette=COLOR_MAP,
+            orient="h",
+            fliersize=1.5,
+            linewidth=0.5,
+            width=0.6,
+            legend=False,
+            ax=ax_main,
+        )
+        ax_main.set_title(metric.replace("_", " "), fontsize=7)
+        ax_main.set_xlabel("")
+        ax_main.set_ylabel("")
+        if metric in _REFERENCE_LINE:
+            ax_main.axvline(
+                _REFERENCE_LINE[metric], color="black", linewidth=0.5,
+                linestyle="--", zorder=0,
+            )
+        if col > 0:
+            ax_main.set_yticklabels([])
+        sns.despine(ax=ax_main)
+
+        if has_increment:
+            ax_inc = fig.add_subplot(gs[1, col])
+            if metric in _INCREMENTABLE_NAMES:
+                sns.boxplot(
+                    data=df[df["model"] == "increment"],
+                    y="model", x=metric, hue="network",
+                    order=["increment"],
+                    hue_order=hue_order,
+                    palette=COLOR_MAP,
+                    orient="h",
+                    fliersize=1.5,
+                    linewidth=0.5,
+                    width=0.6,
+                    legend=False,
+                    ax=ax_inc,
+                )
+                ax_inc.axvline(0, color="black", linewidth=0.5, linestyle="--", zorder=0)
+            else:
+                ax_inc.set_xticks([])
+                ax_inc.set_yticks([0])
+                ax_inc.set_yticklabels(["increment"])
+                ax_inc.text(
+                    0.5, 0.5, "not defined", ha="center", va="center",
+                    fontsize=6, color="#888888", transform=ax_inc.transAxes,
+                )
+            ax_inc.set_xlabel("")
+            ax_inc.set_ylabel("")
+            if col > 0:
+                ax_inc.set_yticklabels([])
+            sns.despine(ax=ax_inc)
+
+    handles = [
+        mpatches.Patch(facecolor=COLOR_MAP[net], edgecolor="#404040", linewidth=0.5, label=net)
+        for net in hue_order
+    ]
+    fig.tight_layout(pad=0.3)
+    fig.legend(
+        handles=handles, labels=hue_order, title="",
+        loc="center left", bbox_to_anchor=(1.0, 0.5),
+        frameon=False, handletextpad=0.5,
+    )
+    fig.subplots_adjust(right=0.93)
+
+    return save_figure(fig, os.path.join(results_folder, "performance_grid"))
 
 
 def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
@@ -437,10 +535,24 @@ def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -
 
 
 def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
+    """
+    Pairplot where each cell picks scatter / histogram-by-group / crosstab
+    based on whether the two variables are continuous or categorical.
+
+    A numeric column with only 2 distinct values (e.g. a 0/1 classification
+    target, or a binary covariate like sex) is treated as categorical, not
+    continuous: plotting it on a scatter axis produces two overlapping strips
+    of points with no readable structure, so it is routed to the
+    histogram-by-group / crosstab branches instead, matching how this
+    codebase defines "binary" elsewhere (``validation.detect_task_type``).
+    """
     sns.set_theme(style="white")
     variables = df.columns
     n = len(variables)
     fig, axes = plt.subplots(n, n, figsize=(2.5 * n, 2.5 * n))
+
+    def is_continuous(series: pd.Series) -> bool:
+        return is_numeric_dtype(series) and series.dropna().nunique() > 2
 
     for i, row_var in enumerate(variables):
         for j, col_var in enumerate(variables):
@@ -451,8 +563,8 @@ def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
             x = df[col_var]
             y = df[row_var]
 
-            is_x_cont = is_numeric_dtype(x)
-            is_y_cont = is_numeric_dtype(y)
+            is_x_cont = is_continuous(x)
+            is_y_cont = is_continuous(y)
 
             if i == j:
                 if is_x_cont:
