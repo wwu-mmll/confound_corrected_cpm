@@ -34,6 +34,7 @@ from cccpm.reporting.plots.plots import (
     MODEL_ORDER,
     histograms_network_strengths,
     performance_grid,
+    roc_curve_grid,
     scatter_plot_main,
     scatter_plot_network_strengths,
 )
@@ -359,6 +360,7 @@ def build_performance_context(
     df_full: pd.DataFrame,
     df_mean: pd.DataFrame,
     df_p_values: Optional[pd.DataFrame],
+    df_predictions: pd.DataFrame,
     y_name: str,
     task_type: str,
     plots_dir: str,
@@ -388,9 +390,18 @@ def build_performance_context(
     except Exception:
         pass
 
+    # ROC curves: classification-only, pooled out-of-sample predictions.
+    roc_curves_html = ""
+    if task_type == "classification":
+        try:
+            roc_curves_html = _svg_to_html(roc_curve_grid(df_predictions, plots_dir))
+        except Exception:
+            pass
+
     return {
         "results_table": results_table_html,
         "performance_grid": perf_grid_html,
+        "roc_curves": roc_curves_html,
     }
 
 

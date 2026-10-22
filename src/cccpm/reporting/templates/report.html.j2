@@ -162,6 +162,19 @@
       </div>
       {% endif %}
 
+      {% if roc_curves %}
+      <div class="figure-wrap">
+        {{ roc_curves }}
+        <p class="caption">
+          ROC curve per model (colour: red positive, blue negative, grey both network),
+          pooled across all out-of-sample predictions; legend gives each curve's AUC.
+          The dashed diagonal is chance. Two models can share the same ROC AUC in the
+          table above while trading sensitivity for specificity differently — that
+          trade-off only shows up as curve shape, not as a single number.
+        </p>
+      </div>
+      {% endif %}
+
       {% if results_table %}
       <h3>Results Table</h3>
       <p class="section-intro">

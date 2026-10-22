@@ -502,6 +502,66 @@ def performance_grid(
     return save_figure(fig, os.path.join(results_folder, "performance_grid"))
 
 
+def roc_curve_grid(
+    df_predictions: pd.DataFrame,
+    results_folder: str,
+    models: list[str] | None = None,
+) -> str:
+    """
+    ROC curve per model (columns), one curve per network (colour), from the
+    pooled out-of-sample predictions.
+
+    ``performance_grid`` already shows ROC AUC as a boxplot across folds; this
+    shows the curve that number comes from, pooled across all folds (as the
+    hero scatters do for their effect size) rather than per-fold, since a
+    single fold's 10-20 held-out cases makes for a visually noisy curve. Two
+    models can share the same AUC with different curve shapes (e.g. one
+    trades sensitivity for specificity differently) -- that trade-off is the
+    one thing the boxplot cannot show.
+    """
+    from sklearn.metrics import auc, roc_curve
+
+    apply_nature_style()
+
+    if models is None:
+        models = [m for m in MODEL_ORDER if m != "increment" and m in df_predictions["model"].unique()]
+    hue_order = ["positive", "negative", "both"]
+    n_cols = max(len(models), 1)
+
+    fig, axes = plt.subplots(1, n_cols, figsize=(1.9 * n_cols + 0.4, 2.3), sharex=True, sharey=True)
+    axes = [axes] if n_cols == 1 else list(axes)
+
+    for ax, model in zip(axes, models):
+        # The covariates model doesn't touch the connectome, so its prediction
+        # is identical across "networks" -- one curve, not three overlapping ones.
+        networks = ["both"] if model == "covariates" else hue_order
+        for network in networks:
+            sub = df_predictions[
+                (df_predictions["model"] == model) & (df_predictions["network"] == network)
+            ]
+            if sub.empty or sub["y_true"].nunique() < 2:
+                continue
+            fpr, tpr, _ = roc_curve(sub["y_true"], sub["y_pred"])
+            roc_auc = auc(fpr, tpr)
+            ax.plot(
+                fpr, tpr, color=COLOR_MAP[network], linewidth=1.1,
+                label=f"{network} ({roc_auc:.2f})",
+            )
+        ax.plot([0, 1], [0, 1], color="gray", linewidth=0.5, linestyle="--", zorder=0)
+        ax.set_title(model, fontsize=7)
+        ax.set_xlabel("false positive rate")
+        ax.set_box_aspect(1)
+        ax.legend(
+            fontsize=5, frameon=False, loc="lower right",
+            handlelength=1.2, labelspacing=0.25, borderaxespad=0.2,
+        )
+        sns.despine(ax=ax)
+
+    axes[0].set_ylabel("true positive rate")
+    fig.tight_layout(pad=0.4)
+    return save_figure(fig, os.path.join(results_folder, "roc_curves"))
+
+
 def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
     """
     Generate a strip/swarm plot of predicted probabilities by true class for classification.
