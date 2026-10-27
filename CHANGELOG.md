@@ -6,6 +6,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-27
+
+### Fixed
+- **Covariates on very different scales were not fully regressed out.** The
+  confound regressions in edge selection (`selection_input='residualized'`) and in
+  `model_input='residualized'` use a float32 pseudo-inverse. With covariates on
+  very different scales — intracranial volume in mm³ (~1e6) next to 0/1
+  indicators — its default tolerance truncated the small singular directions of
+  the design, so the intercept and the indicators were silently not removed. On
+  HCP data (TIV next to 12 acquisition-period dummies) the residualised
+  connectome's out-of-fold predictions still correlated .55 with what the
+  covariates alone predicted; in a synthetic test, 41% of edge-selection decisions
+  depended on the units of one covariate. Only 0.7.0 is affected: up to 0.5.0
+  the regression ran in float64, where the same designs are well within
+  tolerance. Results of 0.7.0 runs with unscaled covariates should be
+  recomputed; covariates already on comparable scales (z-scored, or all of
+  order 1) were not affected.
+
+### Added
+- `CPMAnalysis(standardize_covariates=True)`: the covariates are z-scored inside
+  every outer training fold (training mean and sd, applied to the held-out split)
+  before they enter edge selection, residualisation and the covariate models. The
+  inner CV receives the already standardised training covariates. This changes no
+  estimate — OLS residuals are invariant to rescaling the covariates — and is the
+  fix for the problem above. On by default; `False` reproduces 0.7.0. Recorded in
+  `run_config.json` and the log.
+
 ## [0.7.0] — 2026-09-28
 
 ### Changed

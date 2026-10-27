@@ -123,6 +123,20 @@ CPMAnalysis(
 Covariates are always available to the model variants below, so you can quantify
 what the connectome adds *beyond* them.
 
+#### Covariate scaling
+
+`CPMAnalysis(standardize_covariates=True)` (the default since 0.7.1) z-scores the
+covariates inside every outer training fold — with the training split's mean and
+standard deviation, applied to the held-out split — before they enter edge
+selection, residualisation or the covariate models. The inner CV receives the
+already standardised training covariates. This changes no estimate: OLS residuals
+are invariant to rescaling the covariates. It keeps the confound regressions
+numerically sound. In 0.7.0, covariates on very different scales (intracranial
+volume in mm³ next to 0/1 indicators) made the float32 confound regressions
+silently leave part of the covariate variance in place, in edge selection and in
+`model_input="residualized"` alike. Leave it on; `False` exists only to reproduce
+results of cccpm 0.7.0.
+
 #### Running without covariates
 
 `covariates` is optional. Passing none is vanilla CPM: only `connectome` is

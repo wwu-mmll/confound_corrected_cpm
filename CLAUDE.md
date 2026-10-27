@@ -104,6 +104,14 @@ name would mean something different for every backend, and a user could not tell
 connectome produced `full`. Guarded by
 `tests/test_confound_api.py::test_nonlinear_models_are_not_invariant_to_model_input`.
 
+Covariates are z-scored inside every outer training fold
+(`CPMAnalysis(standardize_covariates=True)`, default since 0.7.1) before anything
+regresses on them. It changes no estimate, but the confound regressions
+(`statistics.get_residuals`, `preprocessing.residualize_train_test`) run a float32
+`pinv`, which silently fails to remove the intercept and indicator directions when
+covariates are on very different scales. Guarded by
+`tests/test_covariate_scaling.py`, which fails on 0.7.0.
+
 `edge_statistic` and `CPMAnalysis(calculate_residuals=...)` were removed in 0.7.0
 rather than deprecated — they changed meaning, and code that runs while silently
 producing different numbers is worse than code that stops. Both raise with the

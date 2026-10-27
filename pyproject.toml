@@ -1,6 +1,6 @@
 [project]
 name = "cccpm"
-version = "0.7.0"
+version = "0.7.1"
 description = "Confound-Corrected Connectome-based Predictive Modeling Python Package"
 authors = [
     { name = "Nils Winter", email = "nils.r.winter@uni-muenster.de" },
