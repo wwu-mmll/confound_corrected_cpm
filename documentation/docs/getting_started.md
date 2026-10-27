@@ -167,6 +167,7 @@ cpm = CPMAnalysis(
 - **select_stable_edges**: Whether to select stable edges across folds (True or False).
 - **stability_threshold**: Minimum proportion of folds in which an edge must be selected to be considered stable.
 - **impute_missing_values**: Whether to impute missing values (True or False).
+- **standardize_covariates**: z-score the covariates inside every outer training fold (default `True`). Changes no estimate but keeps the confound regressions numerically sound when covariates have very different scales. See [Covariate scaling](methods.md#covariate-scaling).
 - **n_permutations**: Number of permutations for permutation testing.
 - **stability_significance_method**: How edge-*stability* significance is established from the permutations — `"nbs"` (default, subnetwork-level) or `"tfce"` (per-edge). Not related to the edge-selection p-value on `PThreshold`. See [Edge & Network Significance](#edge-network-significance).
 - **nbs_stability_threshold**: Stability threshold (`>=`) for NBS component forming — a fraction of folds, default `0.5`.

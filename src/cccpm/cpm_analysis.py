@@ -19,7 +19,8 @@ from cccpm.edge_selection import UnivariateEdgeSelection, PThreshold
 from cccpm.results_manager import ResultsManager
 from cccpm.inference import PermutationManager
 from cccpm.preprocessing import (to_device, torch_train_test_split, torch_impute_missing_values,
-                                 residualize_train_test, select_stable_edges)
+                                 residualize_train_test, standardize_train_test,
+                                 select_stable_edges)
 from cccpm.validation import (check_data, detect_task_type, validate_task_type,
                               infer_n_nodes)
 from cccpm.memory import plan_permutation_chunk
@@ -69,6 +70,7 @@ class CPMAnalysis:
                  select_stable_edges: bool = False,
                  stability_threshold: float = 0.8,
                  impute_missing_values: bool = True,
+                 standardize_covariates: bool = True,
                  model_input: str = 'raw',
                  n_permutations: int = 0,
                  stability_significance_method: str = "nbs",
@@ -110,6 +112,18 @@ class CPMAnalysis:
         impute_missing_values: bool, default=True
             Whether to impute missing values in ``X`` and the covariates (NaNs in
             the target ``y`` always raise an error).
+        standardize_covariates: bool, default=True
+            z-score the covariates inside every outer training fold (mean and
+            standard deviation of the training split, applied to the held-out
+            split) before they enter edge selection, residualisation and the
+            covariate models. This changes no estimate -- OLS residuals are
+            invariant to rescaling the covariates -- but it keeps the confound
+            regressions numerically sound. With covariates on very different
+            scales (e.g. intracranial volume in mm^3 next to 0/1 indicators),
+            the float32 regressions otherwise fail to remove part of the
+            covariate variance, silently. The inner CV receives the already
+            standardised training covariates. Set ``False`` only to reproduce
+            results of cccpm 0.7.0.
         model_input: str, default='raw'
             What the predictive models consume. ``'raw'`` uses the connectome as
             given; ``'residualized'`` regresses the covariates out of it first,
@@ -200,6 +214,10 @@ class CPMAnalysis:
         self.select_stable_edges = select_stable_edges
         self.stability_threshold = stability_threshold
         self.impute_missing_values = impute_missing_values
+        if not isinstance(standardize_covariates, bool):
+            raise TypeError(
+                f"standardize_covariates must be True or False, got {standardize_covariates!r}.")
+        self.standardize_covariates = standardize_covariates
         if model_input not in ('raw', 'residualized'):
             raise ValueError(
                 f"model_input must be 'raw' or 'residualized', got {model_input!r}.")
@@ -256,6 +274,7 @@ class CPMAnalysis:
         if self.select_stable_edges:
             self.logger.info(f"Stability threshold:     {self.stability_threshold}")
         self.logger.info(f"Impute Missing Values:   {'Yes' if self.impute_missing_values else 'No'}")
+        self.logger.info(f"Standardize covariates:  {'Yes' if self.standardize_covariates else 'No'}")
         self.logger.info(f"Selection input:         {self.edge_selection.statistic._input}")
         self.logger.info(f"Model input:             {self.model_input}")
         self.logger.info(f"Number of Permutations:  {self.n_permutations}")
@@ -425,6 +444,7 @@ class CPMAnalysis:
                 'selection_statistic': self.edge_selection.statistic._statistic,
                 'selection_input': self.edge_selection.statistic._input,
                 'model_input': self.model_input,
+                'standardize_covariates': self.standardize_covariates,
                 'has_covariates': self.has_covariates,
             }, f)
 
@@ -553,6 +573,11 @@ class CPMAnalysis:
         if self.impute_missing_values:
             X_train, X_test, cov_train, cov_test = torch_impute_missing_values(
                 X_train, X_test, cov_train, cov_test)
+        # Standardise the covariates on this training split (applied to the
+        # test split too) before anything regresses on them. Changes no estimate;
+        # keeps the float32 confound regressions well conditioned.
+        if self.standardize_covariates:
+            cov_train, cov_test = standardize_train_test(cov_train, cov_test)
 
         # edges: [Features, 2, Runs] -- one winning configuration per run.
         # Selection always sees the connectome as supplied; whether it controls

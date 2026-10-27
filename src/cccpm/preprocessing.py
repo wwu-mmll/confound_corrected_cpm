@@ -47,6 +47,32 @@ def torch_impute_missing_values(X_train, X_test, cov_train, cov_test):
     return X_train, X_test, cov_train, cov_test
 
 
+def standardize_train_test(confounds_train, confounds_test):
+    """
+    z-score the covariates with the training set's mean and standard deviation,
+    applied to both sets. A constant column is only centred (its sd is treated
+    as 1), and a zero-width design passes through unchanged.
+
+    OLS residuals are invariant to an affine rescaling of the covariates, so
+    this changes no estimate. It keeps the confound design well conditioned for
+    the float32 pseudo-inverses in :func:`residualize_train_test` and
+    :func:`cccpm.statistics.get_residuals`: with covariates on very different
+    scales (intracranial volume in mm^3 next to 0/1 indicators) their default
+    tolerance truncates the small singular directions, and the intercept and
+    indicators are silently not regressed out.
+
+    Args:
+        confounds_train, confounds_test: [N_train, C], [N_test, C].
+
+    Returns:
+        confounds_train_std, confounds_test_std: same shapes.
+    """
+    mean = confounds_train.mean(dim=0, keepdim=True)
+    sd = confounds_train.std(dim=0, unbiased=False, keepdim=True)
+    sd = torch.where(sd > 0, sd, torch.ones_like(sd))
+    return (confounds_train - mean) / sd, (confounds_test - mean) / sd
+
+
 def residualize_train_test(X_train, X_test, confounds_train, confounds_test):
     """
     Regress X ~ intercept + confounds via OLS on the training set only, then

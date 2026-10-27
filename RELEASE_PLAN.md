@@ -5,7 +5,7 @@ connectome-based predictive modeling (CPM) across macOS / Linux / Windows and
 Python 3.10–3.14, with trustworthy results, modern docs, and a polished HTML
 report.
 
-**Last audited: 2026-09-28** against `0.7.0` (251 tests green locally).
+**Last audited: 2026-10-27** against `0.7.1`.
 This file lists **only open work**. Finished work is not recorded here — the
 record lives in git history and `CHANGELOG.md`. Items are ordered
 most-important-first, both between and within sections.
@@ -14,14 +14,18 @@ Status legend: `[ ]` todo · `[~]` in progress
 
 ---
 
-## 0. Follow-through on 0.7.0
+## 0. Follow-through on 0.7.0 / 0.7.1
 
-0.7.0 is on PyPI (2026-09-28, tag `v0.7.0` on `main` `629ad0a`).
+0.7.1 fixes covariates on very different scales not being regressed out
+(float32 `pinv`; see CHANGELOG) with `standardize_covariates=True`.
 
-- [ ] **Create the GitHub release** from tag `v0.7.0` (Nils — notes drafted
-      from the CHANGELOG section, with an upgrade table from 0.5.x).
-- [ ] **Regenerate the paper numbers** against this release: exact
-      edge-selection p-values change edge sets (`../PAPER_PLAN.md` §1).
+- [ ] **Create the GitHub releases** for `v0.7.0` and `v0.7.1` (Nils — notes
+      from the CHANGELOG sections; 0.7.0 with an upgrade table from 0.5.x).
+- [ ] **Make the confound regressions robust in themselves**, not only via the
+      standardisation in `CPMAnalysis`: `statistics.get_residuals` and
+      `preprocessing.residualize_train_test` are public and still fail on badly
+      scaled covariates when called directly. Standardise inside them, or
+      project in float64 / via QR.
 
 ---
 
@@ -111,7 +115,7 @@ were added — the two modules split out in 0.7.0 had no API reference at all.
 - [ ] **External reference validation** vs Shen MATLAB / GenCPM on ≥1 dataset,
       so paper numbers are defensible. This is what the `cccpm_paper` benchmark
       is for — feed the result back here once numbers agree. See
-      `../PAPER_PLAN.md` §3.
+      `../PAPER2_PLAN.md` Step 3.
 - [ ] **Classification path:** expand tests (probabilities, AUC, class
       imbalance, StratifiedKFold edge cases). Coordinate with §2 — this adds
       tests while §2 removes them; both are about coverage, not count.
