@@ -4,50 +4,29 @@ Confound-inflation demonstration for CPM.
 Shows, on data with an *analytically known* answer, that a connectome model's
 apparent predictive performance is inflated by a common-cause confound, and that
 **partial-correlation edge selection does not fix this** — only residualizing the
-connectome (or otherwise controlling the confound in the model) recovers the true
-brain–behaviour association.
+connectome recovers the true brain-behaviour association.
 
-Design
-------
-The data are generated with ``simulate_data_given_kappa`` (see
-``cccpm.simulation.simulate_sem``). A single latent confound ``Z`` is a common
-cause of both the connectome ``X`` and the outcome ``y``. Two knobs are swept:
+Data come from ``simulate_data_given_kappa`` (``cccpm.simulation.simulate_sem``):
+a latent confound ``Z`` is a common cause of both ``X`` and ``y``. Two knobs are
+swept: brain-outcome strength ``R2(y~X) ∈ {0.09, 0.36, 0.81}`` and spurious
+fraction ``κ ∈ {0, 0.2, …, 1.0}`` (the confound-driven share of the naive R²),
+giving a closed-form true value ``R2(y~X|Z) = (1 − κ)·R2(y~X)``.
 
-* rows  — brain–outcome strength   ``R2(y~X) ∈ {0.09, 0.36, 0.81}``
-* cols  — spurious fraction ``κ ∈ {0, 0.2, …, 1.0}`` — the fraction of the naive
-          R² that is confound-driven. The true, deconfounded value is known in
-          closed form: ``R2(y~X|Z) = (1 − κ)·R2(y~X)``.
+Each connectome has three edge classes (10 each): pure-signal (related to y,
+uncorrelated with the confound), confound-only (related to y only through the
+confound), and mixed (both). This is what exposes partial selection's limit: it
+rejects confound-only edges but keeps mixed edges, whose raw values still leak
+confound variance into the network sum score — so partial selection reduces but
+does not eliminate inflation, landing *between* raw CPM and the true value; only
+residualization recovers the truth.
 
-Each connectome contains three interpretable edge classes (10 each by default):
-
-* **pure-signal** edges — related to y but uncorrelated with the confound,
-* **confound-only** edges — related to y only through the confound,
-* **mixed** edges — carrying *both* genuine signal and confound variance.
-
-This separation is what exposes the limit of partial-correlation selection: it
-rejects confound-only edges (their partial association with y is null) but keeps
-mixed edges (which retain a genuine partial association), and the raw values of
-those mixed edges still leak confound variance into the network sum score. Hence
-partial selection reduces, but does not eliminate, the inflation — the connectome
-model lands **between** raw CPM and the true value; only residualization recovers
-the truth.
-
-For every cell the toolbox is run in three configurations and the connectome
-model's out-of-sample explained variance is compared to the naive and the true
-reference values:
-
-    (a) raw            — selection_input='raw',          model_input='raw'
-    (b) partial        — selection_input='residualized',  model_input='raw'
-    (c) residualized-X — selection_input='residualized',  model_input='residualized'
-
-We also run the fourth cell of that 2x2 (``selection_input='raw'``,
-``model_input='residualized'``) — historically the ``residuals`` model (which
-residualized the aggregate
-strength) as a fourth, alternative deconfounding route.
-
-Expected result: raw ≈ partial ≈ R2(y~X) (flat across κ, inflated), while
-residualized-X and the residuals model track the falling true curve
-(1 − κ)·R2(y~X). The widening gap is the headline.
+Each cell runs the 2x2 of ``selection_input`` x ``model_input`` ('raw' vs
+'residualized') — i.e. raw, partial selection, residualized-X, and the fourth
+cell (raw selection + residualized model, the old "residuals" model) — and
+compares connectome out-of-sample explained variance to the naive and true
+reference values. Expected result: raw ≈ partial ≈ R2(y~X) (flat, inflated),
+while residualized-X and the residuals model track the falling true curve. The
+widening gap is the headline.
 
 Run:  poetry run python scripts/confound_inflation_demo.py
 """
@@ -77,13 +56,12 @@ from cccpm.validation import check_data
 
 warnings.filterwarnings("ignore")
 logging.disable(logging.CRITICAL)
-# The full CPMAnalysis.run() also writes an HTML report per call (~seconds); we
-# only need the cross-validated metrics, so we call the internal _single_run and
-# silence the per-fold progress bar for this batch sweep.
-# Silence the per-fold progress bar. `tqdm` is constructed with keyword-only
-# arguments (`tqdm(total=...)`) and driven with `.update()`/`.close()`, so the
-# stand-in has to be an object, not a pass-through lambda.
+# CPMAnalysis.run() writes an HTML report per call and only exposes CV metrics,
+# so this sweep calls the internal `_single_run` directly and stubs out tqdm
+# (an object, not a lambda, since tqdm is driven via .update()/.close()).
 class _SilentBar:
+    """Stand-in for tqdm's progress bar that does nothing."""
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -102,26 +80,24 @@ class _SilentBar:
 
 _ca.tqdm = _SilentBar
 
-# ── Configuration ───────────────────────────────────────────────────────────
-R2_TARGETS = GRID_R2_X_Y            # (0.09, 0.36, 0.81)
-KAPPAS = GRID_KAPPA                 # (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+R2_TARGETS = GRID_R2_X_Y
+KAPPAS = GRID_KAPPA
 N_SIMS = 10
 N_SAMPLES = 2000
-N_FEATURES = 105                    # 15-node connectome
-N_MIXED = 10                        # mixed edges (signal + confound)
-N_PURE_SIGNAL = 10                  # pure-signal edges (⟂ confound)
-N_CONFOUND_ONLY = 10                # confound-only edges
+N_FEATURES = 105
+N_MIXED = 10
+N_PURE_SIGNAL = 10
+N_CONFOUND_ONLY = 10
 N_CONFOUNDS = 2
 P_THRESHOLD = 0.05
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results", "confound_inflation")
-# Per-run CPM artifacts (edges, predictions, ...) are throwaway; keep them out of
-# RESULTS_DIR so only the figures and CSVs land there.
+# Per-run CPM artifacts are throwaway; kept out of RESULTS_DIR.
 _SCRATCH = tempfile.mkdtemp(prefix="cccpm_confound_demo_")
 
 
-# ── Toolbox helpers ─────────────────────────────────────────────────────────
 def _edge_selection(selection_input):
+    """Build a UnivariateEdgeSelection with a fixed p-threshold."""
     return UnivariateEdgeSelection(
         selection_statistic="pearson",
         selection_input=selection_input,
@@ -130,8 +106,7 @@ def _edge_selection(selection_input):
 
 
 def run_cpm(X, y, Z, selection_input, model_input="raw"):
-    """Run one cell of the confound 2x2 and return the 'both'-network explained
-    variance for every model variant."""
+    """Run one cell of the confound 2x2; return explained variance per model."""
     cpm = CPMAnalysis(
         results_directory=_SCRATCH,
         cv=KFold(n_splits=5, shuffle=True, random_state=42),
@@ -153,7 +128,7 @@ def run_cpm(X, y, Z, selection_input, model_input="raw"):
 
 
 def selected_edge_mask(X, y, Z, selection_input):
-    """Boolean mask (n_features,) of edges selected on the full dataset."""
+    """Select edges on the full dataset; return a boolean (n_features,) mask of kept edges."""
     ue = _edge_selection(selection_input)
     ue.fit_transform(X=X, y=y.reshape(-1, 1), covariates=Z)
     selector = PThreshold(threshold=P_THRESHOLD, correction=None)
@@ -161,8 +136,8 @@ def selected_edge_mask(X, y, Z, selection_input):
     return edges.bool().any(dim=1).squeeze(-1).cpu().numpy().astype(bool)
 
 
-# ── Sweep ───────────────────────────────────────────────────────────────────
 def run_sweep():
+    """Sweep R2/kappa cells across all four confound-control configurations."""
     rng = np.random.default_rng(2024)
     records = []
     edge_records = []
@@ -177,16 +152,14 @@ def run_sweep():
                     sim = simulate_data_given_kappa(
                         R2_X_y=r2, kappa=kappa,
                         n_features=N_FEATURES,
-                        n_features_informative=N_MIXED,          # mixed edges
-                        n_pure_signal_features=N_PURE_SIGNAL,    # pure-signal edges
+                        n_features_informative=N_MIXED,
+                        n_pure_signal_features=N_PURE_SIGNAL,
                         n_confound_only_features=N_CONFOUND_ONLY,
                         n_confounds=N_CONFOUNDS,
                         n_samples=N_SAMPLES,
                         random_state=seed,
                     )
                 X, y, Z, info = sim["X"], sim["y"], sim["Z"], sim["info"]
-
-                # Validate the generated data matches the analytic targets.
                 emp = compute_r2s(sim)
 
                 raw = run_cpm(X, y, Z, "raw", "raw")
@@ -205,7 +178,6 @@ def run_sweep():
                     increment_full=raw["full"] - raw["covariates"],
                 ))
 
-                # Edge-selection composition (raw vs partial) on the full data.
                 classes = {
                     "pure_signal": info["pure_signal_idx"],
                     "mixed": info["mixed_idx"],
@@ -225,7 +197,6 @@ def run_sweep():
     return pd.DataFrame(records), pd.DataFrame(edge_records)
 
 
-# ── Plotting ────────────────────────────────────────────────────────────────
 BAR_METHODS = [
     ("connectome_raw", "Raw", "#4C72B0"),
     ("connectome_partial", "Partial selection", "#DD8452"),
@@ -235,6 +206,7 @@ BAR_METHODS = [
 
 
 def plot_inflation(df, path):
+    """Plot mean connectome R² vs kappa per method, one panel per R² target."""
     agg = (df.groupby(["r2_target", "kappa"])
              .agg(["mean", "std"]))
     fig, axes = plt.subplots(1, len(R2_TARGETS), figsize=(16, 5), sharey=False)
@@ -249,7 +221,6 @@ def plot_inflation(df, path):
                    width=width, color=color, label=label,
                    yerr=sub[(col, "std")], capsize=2,
                    error_kw=dict(elinewidth=0.8, alpha=0.6))
-        # Reference lines: naive (inflated) and true (deconfounded).
         ax.axhline(r2, color="black", lw=1.5, ls="-", label="Naive R²(y~X)")
         ax.plot(x, sub[("true_r2", "mean")], "r--o", lw=1.5, ms=4,
                 label="True R²(y~X|Z)")
@@ -280,6 +251,7 @@ EDGE_CLASSES = [
 
 
 def plot_edge_selection(edf, path):
+    """Plot mean edges selected per class (pure-signal/mixed/confound-only) vs kappa."""
     cols = [c for c, *_ in EDGE_CLASSES]
     agg = (edf.groupby(["r2_target", "kappa", "selection"])
               [cols].mean().reset_index())
@@ -307,7 +279,6 @@ def plot_edge_selection(edf, path):
     plt.close(fig)
 
 
-# ── Main ────────────────────────────────────────────────────────────────────
 def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
     print("Running confound-inflation sweep "
@@ -318,7 +289,6 @@ def main():
     df.to_csv(csv_path, index=False)
     edf.to_csv(os.path.join(RESULTS_DIR, "edge_selection_counts.csv"), index=False)
 
-    # Summary table (mean over sims).
     summary = (df.groupby(["r2_target", "kappa"])[
         ["true_r2", "emp_naive", "connectome_raw", "connectome_partial",
          "connectome_residualizedX", "residuals_model"]].mean())

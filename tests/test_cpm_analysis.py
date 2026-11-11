@@ -1,11 +1,4 @@
-"""
-Tests for the CPMAnalysis pipeline: input handling, repeated k-fold, and
-permutation generation.
-
-Full pipeline correctness (regression + classification) is tested in
-test_ground_truth.py; `check_data` itself, including missing-value handling, in
-test_validation.py.
-"""
+"""Full pipeline correctness: test_ground_truth.py. check_data itself: test_validation.py."""
 
 import numpy as np
 import pandas as pd
@@ -32,8 +25,6 @@ def _make_cpm(results_directory, **kwargs):
     )
 
 
-# --- Input handling ---
-
 def test_input_is_dataframe(cpm_instance, simulated_data):
     X, y, covariates = simulated_data
     cpm_instance.run(
@@ -44,14 +35,9 @@ def test_input_is_dataframe(cpm_instance, simulated_data):
 
 
 def test_device_copy_never_aliases_the_callers_array():
-    """The run's working tensor is a copy, even of float32 CPU input.
-
-    ``torch.as_tensor`` returned a view there, so the pipeline's tensor shared
-    memory with the user's array -- or with a read-only pandas copy-on-write
-    view, which torch flags as undefined behaviour on write. Checked directly
-    rather than through the warning: torch emits that one once per process, so
-    whichever test ran first would have swallowed it.
-    """
+    """Regression: torch.as_tensor returned a view, sharing memory with the
+    caller's array (undefined behaviour on write for a read-only pandas view).
+    Checked directly, not via the warning: torch emits it once per process."""
     X = np.arange(12, dtype=np.float32).reshape(3, 4)
     X.setflags(write=False)
     X_dev = to_device(X, "cpu")
@@ -59,10 +45,7 @@ def test_device_copy_never_aliases_the_callers_array():
     assert not np.shares_memory(X_dev.numpy(), X)
 
 
-# --- Repeated k-fold ---
-
 def test_average_over_repeats_collapses_per_subject():
-    """The helper averages a subject's value over repeats, keeping y_true."""
     df = pd.DataFrame({
         "sample_index": [0, 0, 1, 1],
         "model": "connectome",
@@ -80,8 +63,6 @@ def test_average_over_repeats_collapses_per_subject():
 
 
 def test_repeated_kfold_averages_individual_outputs(tmp_path, simulated_data):
-    """RepeatedKFold must tag predictions with a repeat id and, after the
-    report's per-subject averaging, plot each subject exactly once."""
     X, y, covariates = simulated_data
     n_samples = X.shape[0]
     n_splits, n_repeats = 5, 3
@@ -100,30 +81,20 @@ def test_repeated_kfold_averages_individual_outputs(tmp_path, simulated_data):
     )
     cpm.run(X, y, covariates)
 
-    # Raw CSV keeps every repeat: a repeat id spanning 0..n_repeats-1, and each
-    # subject appears once per repeat for a given model/network.
     preds = pd.read_csv(tmp_path / "cv_predictions.csv")
     assert "repeat" in preds.columns
     assert set(preds["repeat"].unique()) == set(range(n_repeats))
     conn_both = preds[(preds["model"] == "connectome") & (preds["network"] == "both")]
     assert (conn_both["sample_index"].value_counts() == n_repeats).all()
 
-    # After the report's averaging, every subject is represented once.
     averaged = average_over_repeats(conn_both, ["y_pred"])
     assert len(averaged) == n_samples
     assert averaged["sample_index"].nunique() == n_samples
 
-    # Edge stability still pools all folds+repeats (folds axis == n_splits*n_repeats).
     assert cpm.results_manager.dims["folds"] == n_splits * n_repeats
 
 
-# --- Reproducibility ---
-
 def test_pipeline_is_reproducible(tmp_path, simulated_data):
-    """
-    Running the same analysis twice with the same configuration must produce
-    identical results — a basic requirement for reproducible research.
-    """
     X, y, covariates = simulated_data
 
     def run_once(subdir):
@@ -144,21 +115,16 @@ def test_pipeline_is_reproducible(tmp_path, simulated_data):
     run_once("run_a")
     run_once("run_b")
 
-    # Aggregated metrics (loaded from disk) must match exactly across runs
     res_a = pd.read_csv(tmp_path / "run_a" / "cv_results_summary.csv")
     res_b = pd.read_csv(tmp_path / "run_b" / "cv_results_summary.csv")
     pd.testing.assert_frame_equal(res_a, res_b)
 
-    # The same edges must be selected
     edges_a = np.load(tmp_path / "run_a" / "stability_edges.npy")
     edges_b = np.load(tmp_path / "run_b" / "stability_edges.npy")
     np.testing.assert_array_equal(edges_a, edges_b)
 
 
-# --- RNG hygiene ---
-
 def test_construction_does_not_touch_global_rng(tmp_path):
-    """Constructing CPMAnalysis must not mutate the user's global NumPy/torch RNG."""
     np.random.seed(123)
     torch.manual_seed(123)
     np_state = np.random.get_state()
@@ -174,22 +140,17 @@ def test_construction_does_not_touch_global_rng(tmp_path):
 
 
 def test_permutations_reproducible_across_instances(tmp_path):
-    """Same random_state -> identical permutations, without relying on global RNG."""
     y = np.arange(30)
     perm_a = _make_cpm(tmp_path / "a", n_permutations=5)._create_permuted_y(y)
     perm_b = _make_cpm(tmp_path / "b", n_permutations=5)._create_permuted_y(y)
     np.testing.assert_array_equal(perm_a, perm_b)
 
-    # A different random_state should give a different permutation
     perm_c = _make_cpm(tmp_path / "c", n_permutations=5,
                        random_state=7)._create_permuted_y(y)
     assert not np.array_equal(perm_a, perm_c)
 
 
-# --- Permutation generation ---
-
 def test_create_permuted_y_structure(cpm_instance):
-    """Test structural integrity: shape and value conservation."""
     y = np.arange(20)
 
     if cpm_instance.n_permutations < 2:
@@ -198,49 +159,30 @@ def test_create_permuted_y_structure(cpm_instance):
     original_y_copy = y.copy()
     permuted_y = cpm_instance._create_permuted_y(y)
 
-    # Shape Check
     assert permuted_y.shape == (len(y), cpm_instance.n_permutations)
 
-    # Conservation Check (content is preserved)
     for i in range(min(cpm_instance.n_permutations, 5)):
         assert sorted(permuted_y[:, i]) == list(y)
 
-    # Immutability Check (Original y must not change)
     np.testing.assert_array_equal(y, original_y_copy,
                                   err_msg="The function modified the original input array in place!")
 
 
 def test_permutations_are_shuffled(cpm_instance):
-    """Test that the output is actually randomized and not just repeated."""
     y = np.arange(50)
     permuted_y = cpm_instance._create_permuted_y(y)
 
-    # Ensure column 0 is not identical to column 1
     assert not np.array_equal(permuted_y[:, 0], permuted_y[:, 1]), \
         "Columns are identical! The shuffle likely failed (Repeat Bug)."
 
-    # Ensure the first permutation is not identical to the original input
     assert not np.array_equal(permuted_y[:, 0], y), \
         "The permuted vector is identical to the input! (No shuffle occurred)"
 
 
-# --- Permutation chunking (memory valve) --------------------------------------
-
 def test_permutation_chunking_does_not_change_results(tmp_path, monkeypatch):
-    """
-    Chunking permutations is a memory valve, not a change of method: splitting
-    the runs axis must not alter any result.
-
-    Permutations are always vectorised (y is [N_samples, N_runs] and the edge
-    statistic is one matmul over all columns). The chunk size only caps how many
-    columns are in flight so a large parcellation crossed with many permutations
-    degrades in speed rather than running out of memory -- so results computed in
-    chunks must match results computed in one pass.
-
-    Edge selection must agree exactly. Metrics are compared with a tolerance
-    because reducing over a differently-shaped tensor changes float32
-    accumulation order; the observed drift is ~6e-7 on values of order 1.
-    """
+    """Chunking is a memory valve (caps columns in flight), not a change of method:
+    splitting the runs axis must not alter results. Metrics use a tolerance since
+    reducing over a differently-shaped tensor changes float32 accumulation order."""
     import cccpm.cpm_analysis as cpm_analysis_module
     from cccpm.results_manager import ResultsManager
     from cccpm.constants import TaskType

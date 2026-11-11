@@ -1,17 +1,7 @@
-"""
-Every text file the package reads or writes names its encoding.
-
-Without ``encoding=``, ``open()`` uses the locale codec: UTF-8 on Linux and
-macOS, cp1252 on most Windows machines. That is symmetric on one machine, so
-it passes every CI job -- but a results directory written on a cp1252 box is
-not readable on a UTF-8 one, and a non-cp1252 character in a target or
-covariate name raises on write. Nothing at runtime would catch it; this scan
-does.
-
-pandas is exempt: ``read_csv`` / ``to_csv`` default to UTF-8 whatever the
-locale, so only the builtin ``open`` and ``Path.read_text`` / ``write_text``
-are checked. Binary modes carry no encoding and are skipped.
-"""
+"""Scans for text I/O missing encoding='utf-8': without it, open() uses the locale
+codec (UTF-8 on Linux/macOS, cp1252 on Windows) -- symmetric on one machine so it
+passes CI, but a results dir written on a cp1252 box won't read on a UTF-8 one.
+pandas is exempt (read_csv/to_csv always default to UTF-8); binary modes are skipped."""
 import ast
 from pathlib import Path
 
@@ -21,7 +11,7 @@ TEXT_IO_METHODS = {"read_text", "write_text"}
 
 
 def _mode(call):
-    """The mode string of an ``open()`` call, or 'r' when it is not given."""
+    """Mode string of an open() call, or 'r' when not given."""
     if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant):
         return call.args[1].value
     for kw in call.keywords:
@@ -31,7 +21,7 @@ def _mode(call):
 
 
 def _unencoded_text_io(source, filename):
-    """Yield (lineno, spelling) for each text-mode file access without ``encoding=``."""
+    """Yield (lineno, spelling) for each text-mode file access without encoding=."""
     for node in ast.walk(ast.parse(source, filename=filename)):
         if not isinstance(node, ast.Call):
             continue

@@ -1,9 +1,4 @@
-"""
-HTML Report Generator for Confound-Corrected CPM Analysis.
-
-Builds a self-contained single-page HTML report using a Jinja2 template.
-The public interface (HTMLReporter / generate_html_report) is unchanged.
-"""
+"""Builds a self-contained single-page HTML report using a Jinja2 template."""
 
 from __future__ import annotations
 
@@ -32,17 +27,7 @@ from cccpm.reporting.section_builders import (
 
 
 class HTMLReporter:
-    """
-    Generate a self-contained HTML report from CPM analysis results.
-
-    The report is a single scrolling page with a sticky sidebar; it embeds
-    all figures as base64 data URIs so it is fully portable and works offline.
-
-    Args:
-        results_directory: Path to the directory containing CPM results.
-        atlas_labels: Optional path to a CSV file with atlas region labels
-            (enables brain plots and labelled edge tables).
-    """
+    """Generates a self-contained, offline-viewable HTML report (figures embedded as base64) from CPM analysis results."""
 
     def __init__(self, results_directory: str, atlas_labels: str | None = None):
         self.results_directory = results_directory
@@ -55,18 +40,14 @@ class HTMLReporter:
         )
         self.atlas_labels = self.data_loader.atlas_labels
         self.task_type = self.data_loader.load_task_type()
-        # Model variants this run defines; the rest are NaN placeholders and
-        # their sections are omitted rather than rendered blank.
+        # Variants this run doesn't define are NaN; their sections are omitted, not rendered blank.
         self.available_models = self.data_loader.load_available_models()
-        # Which cell of the confound 2x2 this run is; {} for older results.
         self.run_config = self.data_loader.load_run_config()
         self._load_data()
 
     def _load_data(self) -> None:
         self.df, self.df_mean = self.data_loader.load_cv_results()
-        # Average each subject's predictions / network strengths across the
-        # repeats of a RepeatedKFold so every subject is plotted once (no-op for
-        # a plain CV). The raw per-fold CSVs on disk are left intact.
+        # Collapse RepeatedKFold's repeat rows per subject so each is plotted once (no-op for plain CV).
         self.df_predictions = average_over_repeats(
             self.data_loader.load_predictions(), ['y_pred'])
         self.df_p_values = self.data_loader.load_p_values()
@@ -80,7 +61,6 @@ class HTMLReporter:
         edge_stability, edge_stability_sig = self.data_loader.load_edge_stability()
         edge_significance_meta = self.data_loader.load_edge_significance_meta()
 
-        # ── Build template context ──────────────────────────────────────────
         ctx: dict = {
             "y_name": self.y_name,
             "logo_img": self._logo_html(),
@@ -139,15 +119,12 @@ class HTMLReporter:
             plots_dir=self.plots_dir,
         ))
 
-        # ── Render ─────────────────────────────────────────────────────────
         html = self._render(ctx)
 
         out_path = os.path.join(self.results_directory, "report.html")
         Path(out_path).write_text(html, encoding="utf-8")
 
         plt.close("all")
-
-    # ── Private helpers ────────────────────────────────────────────────────
 
     def _logo_html(self) -> str:
         logo_path = Path(__file__).parent / "assets" / "CCCPM.png"
@@ -166,7 +143,6 @@ class HTMLReporter:
 
         template = env.get_template("report.html.j2")
 
-        # Inline the stylesheet
         css_path = template_dir / "styles.css"
         ctx["styles"] = css_path.read_text(encoding="utf-8")
 

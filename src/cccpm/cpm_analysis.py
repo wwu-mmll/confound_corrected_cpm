@@ -1,3 +1,4 @@
+"""`CPMAnalysis`: the main entry point orchestrating the CPM pipeline."""
 import os
 import json
 import logging
@@ -30,15 +31,8 @@ from cccpm.reporting.data_insights import generate_data_insights
 from cccpm.constants import Models, Networks, TaskType
 
 
-# Parameters renamed in 0.7.0, mapped to their replacement.
-#
-# "edge significance" conflated two different questions: the p-value that decides
-# whether an edge is *selected* (set on PThreshold), and whether an edge is
-# selected across folds *more consistently than chance*. These parameters only
-# ever meant the second -- which is what the outputs have always been called
-# (stability_edges_significance.npy). `nbs_threshold` had the same problem one
-# level down: it is a fraction of folds, not a p-value, and it sat in the same
-# call as `PThreshold(threshold=...)` with nothing to tell them apart.
+# Renamed in 0.7.0: "edge significance"/"nbs_threshold" were ambiguous with the
+# PThreshold p-value and with "a fraction of folds, not a p-value" respectively.
 _RENAMED_IN_0_7_0 = {
     'edge_significance_method': (
         'stability_significance_method',
@@ -51,11 +45,7 @@ _RENAMED_IN_0_7_0 = {
 
 
 class CPMAnalysis:
-    """
-    This class handles the process of performing CPM analysis with cross-validation and permutation testing.
-
-    Supports both regression and binary classification tasks.
-    """
+    """Orchestrates CPM analysis with cross-validation and permutation testing."""
     def __init__(self,
                  results_directory: str,
                  task_type: Union[TaskType, str, None] = None,
@@ -79,94 +69,48 @@ class CPMAnalysis:
                  device: str = 'cpu',
                  random_state: int = 42,
                  **removed):
-        """
-        Initialize the CPMAnalysis object.
+        """Configures the CPM pipeline; call ``run()`` to execute it.
 
-        Parameters
-        ----------
-        results_directory: str
-            Directory to which all results, plots, and the HTML report are saved.
-        task_type: TaskType, str, or None, default=None
-            Type of task: ``'regression'`` or ``'classification'``. If ``None``,
-            it is auto-detected from the target variable (a binary target is
-            treated as classification).
-        cpm_model: type, default=LinearCPM
-            The CPM model class to fit each fold. One of ``LinearCPM``,
-            ``DecisionTreeCPM``, ``RandomForestCPM``, or ``GAMCPM``.
-        cv: BaseCrossValidator or BaseShuffleSplit, default=KFold(10, shuffle=True)
-            Outer cross-validation strategy used for performance estimation.
-        inner_cv: BaseCrossValidator or BaseShuffleSplit, default=None
-            Inner cross-validation strategy for hyperparameter tuning (e.g. the
-            p-threshold) and stable-edge selection. If ``None``, no inner loop is
-            run and exactly one edge-selection configuration must be provided.
-        edge_selection: UnivariateEdgeSelection
-            Edge-selection method and its hyperparameter grid.
-        select_stable_edges: bool, default=False
-            If ``True``, keep only edges selected in a sufficient fraction of inner
-            folds (see ``stability_threshold``). Requires an ``inner_cv``.
-        stability_threshold: float, default=0.8
-            Minimum fraction of inner folds in which an edge must be selected to be
-            considered stable. Only used when ``select_stable_edges=True``.
-        impute_missing_values: bool, default=True
-            Whether to impute missing values in ``X`` and the covariates (NaNs in
-            the target ``y`` always raise an error).
-        model_input: str, default='raw'
-            What the predictive models consume. ``'raw'`` uses the connectome as
-            given; ``'residualized'`` regresses the covariates out of it first,
-            fitting the residualiser on each training split and applying it to the
-            held-out split. Independent of ``selection_input``, which controls edge
-            selection: together they are the 2x2 of confound control.
-
-            This is a property of the run, not an extra model. It has to be: OLS
-            is invariant to it once the covariates are in the design -- `full` and
-            `increment` are unchanged -- but a tree, forest or GAM is not. On
-            identical edges, fitting `full` on raw versus residualised connectivity
-            moves predictions by 391% of sd(y) for ``DecisionTreeCPM``, 65% for
-            ``RandomForestCPM`` and 19% for ``GAMCPM``, against 0.0% for
-            ``LinearCPM``. A "residualised" *model* would therefore mean something
-            different for every backend, and the user could not tell from the
-            results which connectome produced `full`.
-        n_permutations: int, default=0
-            Number of label permutations for significance testing. ``0`` disables
-            permutation testing; use 1000+ for publishable p-values.
-        stability_significance_method: str, default='nbs'
-            How edge-*stability* significance is established from the
-            permutations -- that is, whether an edge is selected across folds
-            more consistently than chance. This is a different question from
-            which edges pass the selection threshold in the first place, which
-            is set on :class:`PThreshold`. ``'nbs'`` uses the Network-Based
-            Statistic (connected-component test, subnetwork-level FWER control);
-            ``'tfce'`` uses network Threshold-Free Cluster Enhancement (per-edge
-            FWER control, no primary threshold).
-        nbs_stability_threshold: float, default=0.5
-            **Stability** threshold (``>=``) for NBS component forming -- a
-            fraction of folds, not a p-value. Because stability is discrete over
-            the outer folds, ``0.5`` keeps edges selected in a majority of them.
-            Ignored when the method is ``'tfce'``.
-        nbs_component_stat: str, default='extent'
-            NBS component statistic: ``'extent'`` (number of edges, classic NBS)
-            or ``'intensity'`` (summed supra-threshold stability). Ignored when
-            method is ``'tfce'``.
-        atlas: str, default=None
-            Which atlas to use for the brain plots in the report. Either the name
-            of a built-in atlas (e.g. ``'Schaefer100-17'``; see
-            :func:`cccpm.atlases.list_atlases`) or a path to a custom CSV file
-            with columns ``region``, ``x``, ``y``, ``z`` (MNI coordinates), and
-            optionally ``network``, ``hemisphere``, ``structure``. When a
-            ``network`` column is present, the network-summary matrix and chord
-            diagram are enabled automatically. ``None`` disables the brain plots
-            that require coordinates.
-        atlas_labels: str, default=None
-            .. deprecated::
-                Use ``atlas`` instead. Accepts a path to a custom atlas CSV. If
-                both ``atlas`` and ``atlas_labels`` are given, ``atlas`` wins.
-                This parameter will be removed in a future release.
-        device: str, default='cpu'
-            Compute device: ``'cpu'``, or ``'cuda'``/``'gpu'`` to use an available
-            GPU (falls back to CPU with a warning if CUDA is unavailable).
-        random_state: int, default=42
-            Seed for permutation generation. Uses a local RNG and does not modify
-            the global NumPy/torch random state.
+        Args:
+            task_type: ``'regression'`` or ``'classification'``; auto-detected
+                from ``y`` if ``None``.
+            cpm_model: Backend class, e.g. ``LinearCPM``/``DecisionTreeCPM``/
+                ``RandomForestCPM``/``GAMCPM``.
+            inner_cv: If ``None``, no inner loop runs and exactly one
+                edge-selection configuration must be provided.
+            select_stable_edges: Keep only edges selected in a sufficient
+                fraction of inner folds (``stability_threshold``); requires
+                ``inner_cv``.
+            model_input: ``'raw'`` feeds the connectome as-is to the models;
+                ``'residualized'`` regresses covariates out of it first
+                (fit on train, applied to test), independently of
+                ``selection_input`` on the edge statistic. This is a run-level
+                choice rather than an extra model because OLS backends are
+                invariant to it (`full`/`increment` unchanged) but non-linear
+                backends are not -- on identical edges `full` moves by 391% of
+                sd(y) for ``DecisionTreeCPM``, 65% for ``RandomForestCPM`` and
+                19% for ``GAMCPM``.
+            n_permutations: ``0`` disables permutation testing; use 1000+ for
+                publishable p-values.
+            stability_significance_method: ``'nbs'`` (connected-component
+                test) or ``'tfce'`` (per-edge FWER control) -- how edge
+                *stability* across folds is tested against the permutation
+                null, distinct from the ``PThreshold`` selection cutoff.
+            nbs_stability_threshold: Fraction-of-folds cutoff (not a p-value)
+                for NBS component forming; ignored for ``'tfce'``.
+            nbs_component_stat: ``'extent'`` (edge count) or ``'intensity'``
+                (summed stability) NBS component statistic; ignored for
+                ``'tfce'``.
+            atlas: Built-in atlas name (see :func:`cccpm.atlases.list_atlases`)
+                or a custom CSV with ``region``, ``x``, ``y``, ``z`` and
+                optionally ``network``/``hemisphere``/``structure`` columns;
+                a ``network`` column auto-enables the network-summary plots.
+            atlas_labels: Deprecated alias for ``atlas`` (custom CSV path
+                only); ``atlas`` wins if both are given.
+            device: ``'cpu'``, or ``'cuda'``/``'gpu'`` (falls back to CPU with
+                a warning if unavailable).
+            random_state: Seeds a local RNG for permutations; does not touch
+                the global NumPy/torch RNG.
         """
         for old, (new, why) in _RENAMED_IN_0_7_0.items():
             if old in removed:
@@ -180,12 +124,9 @@ class CPMAnalysis:
 
         self.results_directory = results_directory
 
-        # Convert string to TaskType enum if needed
         if isinstance(task_type, str):
             task_type = TaskType(task_type)
-        self.task_type = task_type  # Will be validated/auto-detected in run()
-        # Use a local seed for permutation generation instead of mutating the
-        # global NumPy/torch RNG (which would silently affect the user's other code).
+        self.task_type = task_type
         self.random_state = random_state
         os.makedirs(self.results_directory, exist_ok=True)
         os.makedirs(os.path.join(self.results_directory, "edges"), exist_ok=True)
@@ -220,10 +161,8 @@ class CPMAnalysis:
         else:
             self.device = torch.device('cpu')
 
-        # Log important configuration details
         self._log_analysis_details()
 
-        # check inner cv and param grid
         if self.inner_cv is None:
             if len(self.edge_selection.param_grid) > 1:
                 raise RuntimeError("Multiple hyperparameter configurations but no inner cv defined. "
@@ -231,18 +170,12 @@ class CPMAnalysis:
             if self.select_stable_edges:
                 raise RuntimeError("Stable edges can only be selected when using an inner cv.")
 
-        # Resolve the atlas (built-in name or custom CSV path) to a DataFrame,
-        # then persist it alongside the results so the report is self-contained.
         self.atlas = self._resolve_atlas(atlas, atlas_labels)
         self.atlas_labels = self._save_atlas(self.atlas)
 
-        # results are saved to the results manager instance
         self.results_manager = None
 
     def _log_analysis_details(self):
-        """
-        Log important information about the analysis in a structured format.
-        """
         task_name = "CPM Classification" if self.task_type == TaskType.classification else "CPM Regression"
         self.logger.info(f"Starting {task_name} Analysis")
         self.logger.info("="*50)
@@ -263,12 +196,7 @@ class CPMAnalysis:
         self.logger.info("="*50)
 
     def _resolve_atlas(self, atlas, atlas_labels):
-        """
-        Resolve the ``atlas`` / ``atlas_labels`` arguments to a validated
-        DataFrame (or ``None``). ``atlas`` may be a built-in atlas name or a
-        path to a custom CSV. ``atlas_labels`` is deprecated: it is accepted as
-        a custom CSV path but ``atlas`` takes precedence when both are given.
-        """
+        """Resolves ``atlas``/deprecated ``atlas_labels`` to a validated DataFrame (or ``None``)."""
         if atlas_labels is not None:
             warnings.warn(
                 "`atlas_labels` is deprecated and will be removed in a future "
@@ -291,10 +219,7 @@ class CPMAnalysis:
         return atlas_df
 
     def _save_atlas(self, atlas_df):
-        """
-        Persist the resolved atlas to ``<results_directory>/edges/atlas.csv`` so
-        the HTML report is self-contained. Returns the saved path (or ``None``).
-        """
+        """Persists the resolved atlas to ``<results_directory>/edges/atlas.csv``; returns the path or ``None``."""
         if atlas_df is None:
             return None
         dest_path = os.path.join(self.results_directory, "edges", "atlas.csv")
@@ -303,11 +228,7 @@ class CPMAnalysis:
         return dest_path
 
     def _validate_atlas_node_count(self, n_features):
-        """
-        Ensure the atlas region count matches the connectome node count implied
-        by the number of edge features. A mismatched atlas would silently
-        mislabel regions and misplace nodes in the brain plots.
-        """
+        """Raises if the atlas region count doesn't match the implied node count (would silently mislabel plots)."""
         if self.atlas is None:
             return
         n_nodes = infer_n_nodes(n_features)
@@ -320,27 +241,17 @@ class CPMAnalysis:
             )
 
     def _available_models(self):
-        """
-        Which model variants this run defines. Without covariates only
-        ``connectome`` is meaningful: ``covariates`` has an empty design,
-        ``full`` collapses onto ``connectome``, and ``increment`` would be
-        identically zero.
-        """
+        """Without covariates only ``connectome`` is meaningful (``full``/``increment`` would be degenerate)."""
         if getattr(self, 'has_covariates', True):
             return [m.name for m in Models]
         return [Models.connectome.name]
 
     def _validate_covariate_requirements(self, covariates):
-        """
-        Fail up front when an option that needs covariates was combined with no
-        covariates, naming the offending parameter.
+        """Raises if an option needing covariates was passed with none.
 
-        Without this the run would not crash -- it would quietly degrade. A
-        ``*_partial`` statistic with an empty confound design is just the plain
-        statistic with an empty confound design is just the plain statistic, so
-        the run would produce a full set of plausible numbers that silently
-        answer a different question -- the failure mode this package has been
-        bitten by before.
+        Without this the run would quietly degrade instead of crashing: a
+        ``*_partial`` statistic with an empty confound design is just the
+        plain statistic, silently answering a different question.
         """
         if covariates is not None:
             return
@@ -365,27 +276,19 @@ class CPMAnalysis:
             X: Union[pd.DataFrame, np.ndarray],
             y: Union[pd.Series, pd.DataFrame, np.ndarray],
             covariates: Union[pd.Series, pd.DataFrame, np.ndarray, None] = None):
-        """
-        Estimates a model using the provided data and conducts permutation testing. This method first fits the model to the actual data and subsequently performs estimation on permuted data for a specified number of permutations. Finally, it calculates permutation results.
+        """Fits the model, then (if ``n_permutations > 0``) runs permutation testing.
 
-        Parameters
-        ----------
-        X: Feature data used for the model. Can be a pandas DataFrame or a NumPy array.
-        y: Target variable used in the estimation process. Can be a pandas Series, DataFrame, or a NumPy array.
-        covariates: Additional covariate data to include in the model. Can be a pandas Series, DataFrame, or a NumPy array.
-            Omit it (or pass ``None``) for vanilla CPM with no confound control. In that
-            mode only the ``connectome`` model is defined -- ``covariates``, ``full``,
-            ``full`` and ``increment`` need covariates and are reported as NaN,
-            and the models that do exist are listed in ``available_models.json``.
-            Options that presuppose covariates (a ``*_partial`` edge statistic,
-            ``model_input='residualized'``) then raise up front.
-
+        Args:
+            covariates: Omit (``None``) for vanilla CPM with no confound
+                control -- only ``connectome`` is defined, the rest are NaN
+                (see ``available_models.json``), and options presupposing
+                covariates (a ``*_partial`` statistic, ``model_input=
+                'residualized'``) raise up front.
         """
         self.logger.info("Starting CPM estimation.")
 
         self._validate_covariate_requirements(covariates)
 
-        # check data and convert to numpy
         generate_data_insights(X=X, y=y, covariates=covariates, results_directory=self.results_directory)
         X, y, covariates = check_data(X, y, covariates, impute_missings=self.impute_missing_values)
 
@@ -395,15 +298,12 @@ class CPMAnalysis:
                 "No covariates supplied: running vanilla CPM. Only the "
                 "'connectome' model is defined; covariates/full/"
                 "increment are reported as NaN.")
-            # A zero-width design keeps every tensor operation downstream valid
-            # without a `None` check in each of them. LinearCPM reads the width,
-            # not this flag, to decide which variants exist.
+            # Zero-width design keeps downstream tensor ops valid without a
+            # None check in each of them.
             covariates = np.empty((X.shape[0], 0), dtype=np.float64)
 
-        # Guard against an atlas that doesn't match the connectome size.
         self._validate_atlas_node_count(X.shape[1])
 
-        # Detect or validate task type
         if self.task_type is None:
             self.task_type = detect_task_type(y)
             self.logger.info(f"Auto-detected task type: {self.task_type.value}")
@@ -411,15 +311,11 @@ class CPMAnalysis:
             validate_task_type(y, self.task_type)
             self.logger.info(f"Using specified task type: {self.task_type.value}")
 
-        # Save task type to results directory for HTML report
         with open(os.path.join(self.results_directory, 'task_type.txt'), 'w', encoding='utf-8') as f:
             f.write(self.task_type.value)
 
-        # Same, for the confound configuration. The report has to be able to say
-        # which cell of the selection_input x model_input 2x2 produced it --
-        # otherwise a naive run and a fully controlled one are indistinguishable
-        # to anyone who is handed the HTML. Written as a file rather than parsed
-        # back out of the log, so it survives a run with logging turned down.
+        # Written to disk (not just logged) so the report can show which
+        # confound-control cell produced it even if logging is turned down.
         with open(os.path.join(self.results_directory, 'run_config.json'), 'w', encoding='utf-8') as f:
             json.dump({
                 'selection_statistic': self.edge_selection.statistic._statistic,
@@ -428,11 +324,9 @@ class CPMAnalysis:
                 'has_covariates': self.has_covariates,
             }, f)
 
-        # Estimate models on actual data
         self._single_run(X=X, y=y.reshape(-1, 1), covariates=covariates, perm_run=False)
         self.logger.info("=" * 50)
 
-        # Estimate models on permuted data
         if self.n_permutations > 0:
             self.logger.info(f"Running {self.n_permutations} permutations.")
             y_perms = self._create_permuted_y(y)
@@ -450,71 +344,50 @@ class CPMAnalysis:
         reporter.generate_html_report()
 
     def generate_html_report(self):
+        """(re)generates the HTML report from the results already on disk."""
         self.logger.info("Generating HTML report.")
         reporter = HTMLReporter(results_directory=self.results_directory, atlas_labels=self.atlas_labels)
         reporter.generate_html_report()
 
     def _create_permuted_y(self, y):
-        # 1. Create a matrix of the repeat vector
+        """Builds ``n_permutations`` row-wise permutations of `y` as a [N_samples, N_perms] array."""
         y_tensor = to_device(y, "cpu")
         y_matrix = y_tensor.unsqueeze(0).expand(self.n_permutations, -1)
 
-        # 2. Create random noise and get sorting indices (random permutation per row).
-        # Use a local generator seeded from random_state so results are reproducible
-        # without touching the global torch RNG.
         generator = torch.Generator(device=y_matrix.device).manual_seed(self.random_state)
         noise = torch.rand(y_matrix.shape, generator=generator,
                            dtype=y_matrix.dtype, device=y_matrix.device)
         indices = noise.argsort(dim=1)
 
-        # 3. Apply these indices to permute each row
         permuted = y_matrix.gather(1, indices)
-
-        # 4. Return as numpy [N_samples, N_perms] (boundary: this feeds into the pipeline)
         return permuted.t().numpy()
 
     def _single_run(self, X, y, covariates, perm_run: bool = False):
-        """
-        Perform a full cross-validation run (real data or permuted targets).
-
-        Sets up the ResultsManager, iterates over outer folds, then aggregates
-        and saves results.
-        """
+        """Runs cross-validation over all outer folds (real data or permuted targets) and aggregates results."""
         if perm_run:
             results_directory = os.path.join(self.results_directory, "permutation")
         else:
             results_directory = self.results_directory
 
-        # Retain per-fold edge masks (for edges.npy) only on the real run; the
-        # permutation pass keeps just the fold-sum for the stability null, which
-        # avoids a [Features, 2, Folds, n_permutations] tensor (huge for big
-        # parcellations x many folds x many permutations).
+        # store_fold_edges=False on permutation runs: keeping per-fold masks
+        # there would be a [Features, 2, Folds, n_permutations] tensor.
         results_manager = ResultsManager(output_dir=results_directory, n_runs=y.shape[1],
                                          n_folds=self.cv.get_n_splits(), n_features=X.shape[1],
                                          device=self.device, store_fold_edges=not perm_run,
                                          available_models=self._available_models())
 
-        # For a RepeatedKFold the outer split index runs 0..(n_splits*n_repeats-1)
-        # with all folds of repeat 0 first, then repeat 1, etc. Derive the repeat
-        # id so individual-level outputs can be averaged across repeats; plain
-        # (non-repeated) CVs have n_repeats == 1, so every fold is repeat 0.
+        # RepeatedKFold enumerates all folds of repeat 0, then repeat 1, etc.
         n_repeats = getattr(self.cv, 'n_repeats', 1)
         splits_per_repeat = max(self.cv.get_n_splits() // n_repeats, 1)
 
-        # Move the full dataset to the compute device once, rather than
-        # re-uploading each fold's slice on every downstream torch.as_tensor
-        # call. Pure data placement; touches no statistic. (self.cv.split still
-        # runs on the original CPU X/y: sklearn splitters only derive index
-        # arrays from it, and some -- e.g. StratifiedKFold -- are not guaranteed
-        # to accept a CUDA tensor.) A copy, never a view of the caller's data.
+        # self.cv.split still runs on the original CPU X/y -- some splitters
+        # (e.g. StratifiedKFold) aren't guaranteed to accept a CUDA tensor.
         X_dev = to_device(X, self.device)
         y_dev = to_device(y, self.device)
         cov_dev = to_device(covariates, self.device)
 
-        # Permutations stay fully vectorised; this only caps how many columns are
-        # in flight so a large parcellation x many permutations degrades in speed
-        # rather than running out of memory. For a real (non-permutation) run
-        # n_runs == 1, so it never engages.
+        # Caps in-flight permutation columns so memory degrades to slower
+        # chunking instead of OOM; real runs have n_runs == 1 and never engage.
         n_runs = y.shape[1]
         chunk = plan_permutation_chunk(n_features=X.shape[1], n_samples=X.shape[0],
                                        n_runs=n_runs, device=self.device)
@@ -536,7 +409,6 @@ class CPMAnalysis:
                 iterator.update(1)
         iterator.close()
 
-        # Aggregate across folds
         results_manager.calculate_final_cv_results(task_type=self.task_type)
         results_manager.calculate_edge_stability()
 
@@ -548,22 +420,20 @@ class CPMAnalysis:
 
     def _run_outer_fold(self, outer_fold, repeat, train, test, X, y, covariates,
                         results_manager, perm_run, run_idx=slice(None)):
+        """Runs edge selection, model fit, and scoring for one outer fold, storing the results."""
         X_train, X_test, y_train, y_test, cov_train, cov_test = torch_train_test_split(
             train, test, X, y, covariates)
         if self.impute_missing_values:
             X_train, X_test, cov_train, cov_test = torch_impute_missing_values(
                 X_train, X_test, cov_train, cov_test)
 
-        # edges: [Features, 2, Runs] -- one winning configuration per run.
-        # Selection always sees the connectome as supplied; whether it controls
-        # for the covariates is decided inside the statistic by selection_input.
+        # Selection always sees the connectome as supplied; selection_input
+        # (inside the statistic) decides whether it controls for covariates.
         edges = self._select_edges(X_train, y_train, cov_train, results_manager, outer_fold)
         results_manager.store_edges(param_idx=0, fold_idx=outer_fold, edges_tensor=edges,
                                     run_idx=run_idx)
 
-        # Deconfound the features the models consume, if asked. Fitted on train
-        # and applied to test, and deliberately *after* selection so the two
-        # choices stay independent.
+        # Deliberately after selection, so selection_input and model_input stay independent.
         if self.model_input == 'residualized':
             X_train, X_test = residualize_train_test(
                 X_train, X_test, cov_train, cov_test)
@@ -588,15 +458,7 @@ class CPMAnalysis:
                                       metrics_tensor=metrics, run_idx=run_idx)
 
     def _select_edges(self, X_train, y_train, cov_train, results_manager, outer_fold):
-        """
-        Determine edge masks for this fold, either via inner CV hyperparameter
-        search (with optional stability selection) or directly from the single
-        configured edge-selection threshold.
-
-        Returns
-        -------
-        edges : torch.Tensor [N_features, 2, N_runs]
-        """
+        """Returns the [N_features, 2, N_runs] edge mask for this fold, via inner-CV search or the fixed threshold."""
         if self.inner_cv:
             best_params, stability_edges = run_inner_folds(
                 cpm_model=self.cpm_model,

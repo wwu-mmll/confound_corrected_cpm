@@ -1,18 +1,9 @@
-"""
-Vectorised CPM metrics.
+"""Vectorised CPM metrics, one implementation per task type, shape-generic over the batch axes between samples and runs.
 
-One implementation per task type, shape-generic over whatever batch axes sit
-between the samples axis and the runs axis. `y_pred` is
-``[N_samples, *batch, N_runs]`` -- in practice ``[N, Models, Networks, N_runs]``
-or, when an inner CV evaluates several hyperparameter configurations at once,
-``[N, Models, Networks, N_params, N_runs]``. `y_true` is always
-``[N_samples, N_runs]`` and is broadcast across the batch axes.
-
-There used to be a second, `*_batched` copy of every function here, carrying an
-extra folds axis and a per-fold validity mask for zero-padded ragged fold
-batches. Fold batching was measured (scripts/benchmark_batching.py) to buy 1.09x
-on GPU at 7.2x the VRAM and to be 1.85x *slower* on CPU, so it was removed along
-with the padding it required -- and with it the need for two implementations.
+``y_pred`` is [N_samples, *batch, N_runs]; ``y_true`` is always [N_samples,
+N_runs] and broadcasts across the batch axes. A fold-batched variant was
+removed: measured (scripts/benchmark_batching.py) at 1.09x GPU speed for 7.2x
+VRAM, and 1.85x *slower* on CPU.
 """
 import torch
 
@@ -26,15 +17,11 @@ def _broadcast_truth(y_true, y_pred):
 
 
 def _average_ranks(x, dim=0):
-    """
-    1-based ranks along ``dim``, with tied values sharing their mean rank
-    (scipy.stats.rankdata's 'average' method), computed without materialising
-    any pairwise tensor.
+    """1-based ranks along `dim`, tied values sharing their mean rank (matches scipy.stats.rankdata's 'average' method).
 
-    Tie groups are located by comparing each sorted element with its
-    neighbours and running a cummax/cummin over the positions, which gives the
-    first and last index of the run each element belongs to; their midpoint is
-    the average rank.
+    Avoids materialising a pairwise tensor: a cummax/cummin over sorted
+    positions gives each tie run's first/last index; their midpoint is the
+    average rank.
     """
     n = x.shape[dim]
     sorted_x, sort_idx = torch.sort(x, dim=dim)
@@ -43,14 +30,14 @@ def _average_ranks(x, dim=0):
     shape[dim] = n
     pos = torch.arange(n, device=x.device, dtype=x.dtype).view(shape).expand_as(x)
 
-    # First index of each tie run: mark run starts, then carry forward.
+    # First index of each tie run: mark run starts, carry forward via cummax.
     starts_run = torch.ones_like(sorted_x, dtype=torch.bool)
     starts_run.narrow(dim, 1, n - 1).copy_(
         sorted_x.narrow(dim, 1, n - 1) != sorted_x.narrow(dim, 0, n - 1))
     first_src = torch.where(starts_run, pos, torch.full_like(pos, -1.0))
     first = torch.cummax(first_src, dim=dim)[0]
 
-    # Last index of each tie run: same idea scanning backwards.
+    # Last index: same, scanning backwards.
     ends_run = torch.ones_like(sorted_x, dtype=torch.bool)
     ends_run.narrow(dim, 0, n - 1).copy_(
         sorted_x.narrow(dim, 0, n - 1) != sorted_x.narrow(dim, 1, n - 1))
@@ -70,19 +57,11 @@ class FastCPMMetrics:
         self.device = device
 
     def score(self, y_true, y_pred):
-        """
-        Args:
-            y_true: [N_samples, N_runs]
-            y_pred: [N_samples, *batch, N_runs]
-
-        Returns:
-            scores: [N_metrics, *batch, N_runs]
-        """
+        """Scores every regression model variant at once; y_true [N_samples, N_runs], y_pred [N_samples, *batch, N_runs] -> [N_metrics, *batch, N_runs]."""
         y_true = torch.as_tensor(y_true, device=self.device, dtype=torch.float32)
         y_pred = torch.as_tensor(y_pred, device=self.device, dtype=torch.float32)
         truth = _broadcast_truth(y_true, y_pred)
 
-        # Each reduction is over the samples axis (dim 0).
         mse = torch.mean((truth - y_pred) ** 2, dim=0)
         mae = torch.mean(torch.abs(truth - y_pred), dim=0)
 
@@ -93,8 +72,7 @@ class FastCPMMetrics:
 
         pearson = self._pearson_vectorized(truth, y_pred)
 
-        # Order must match the integer values in constants.Metrics; slots
-        # belonging to the other task type stay zero.
+        # Order matches constants.Metrics; slots for the other task type stay zero.
         zero = torch.zeros_like(mse)
         metrics_list = [zero] * len(Metrics)
         metrics_list[Metrics.explained_variance_score] = expl_var
@@ -120,14 +98,7 @@ class FastCPMClassificationMetrics:
         self.device = device
 
     def score(self, y_true, y_pred_proba):
-        """
-        Args:
-            y_true: [N_samples, N_runs] -- binary labels (0 or 1)
-            y_pred_proba: [N_samples, *batch, N_runs] -- predicted probabilities
-
-        Returns:
-            scores: [N_metrics, *batch, N_runs]
-        """
+        """Scores every classification model variant at once; y_true [N_samples, N_runs] (0/1), y_pred_proba [N_samples, *batch, N_runs] -> [N_metrics, *batch, N_runs]."""
         y_true = torch.as_tensor(y_true, device=self.device, dtype=torch.float32)
         y_pred_proba = torch.as_tensor(y_pred_proba, device=self.device, dtype=torch.float32)
         truth = _broadcast_truth(y_true, y_pred_proba)
@@ -147,12 +118,10 @@ class FastCPMClassificationMetrics:
         f1_score = 2 * (precision * tpr) / (precision + tpr + 1e-8)
         roc_auc = self._fast_roc_auc(truth, y_pred_proba)
 
-        # Every classification metric above is built from comparisons, and a
-        # comparison against NaN is silently False: an undefined prediction
-        # column would score as "predicted class 0 for everyone" -- a real
-        # number, around the base rate, with nothing marking it as meaningless.
-        # (The regression metrics need no such guard; means and variances
-        # propagate NaN on their own.) Undefined in, undefined out.
+        # Comparisons against NaN are silently False, so an undefined column
+        # would otherwise score as "predicted class 0 for everyone" -- a
+        # plausible number instead of a flag. (Regression needs no such guard;
+        # means/variances propagate NaN on their own.)
         undefined = torch.isnan(y_pred_proba).any(dim=0)
         nan = torch.full_like(accuracy, float('nan'))
         accuracy = torch.where(undefined, nan, accuracy)
@@ -170,27 +139,13 @@ class FastCPMClassificationMetrics:
         return torch.stack(metrics_list, dim=0)
 
     def _fast_roc_auc(self, truth, y_pred_proba):
-        """
-        ROC AUC via the Mann-Whitney U statistic, computed from rank sums:
-
-            AUC = (sum of ranks of positives - n_pos(n_pos+1)/2) / (n_pos * n_neg)
+        """ROC AUC via the Mann-Whitney U statistic from rank sums: AUC = (sum of ranks of positives - n_pos(n_pos+1)/2) / (n_pos * n_neg).
 
         Average ranks make ties contribute exactly 0.5 each, matching
-        sklearn.metrics.roc_auc_score.
-
-        This replaces an earlier pairwise formulation that built an
-        [N, N, *batch] comparison tensor -- quadratic in the test-set size, and
-        measured at 9.7 GB for 200 test samples x 1000 permutations, which is
-        what made classification runs OOM on large folds. Ranking is O(N log N)
-        in time and linear in memory, so scoring now scales like the regression
-        path.
-
-        Args:
-            truth: [N, *ones, N_runs] -- broadcastable against y_pred_proba.
-            y_pred_proba: [N, *batch, N_runs]
-
-        Returns:
-            [*batch, N_runs]
+        sklearn.metrics.roc_auc_score. Replaces an earlier pairwise [N, N,
+        *batch] formulation that measured 9.7 GB for 200 samples x 1000
+        permutations and OOMed on large folds; ranking is O(N log N) and
+        linear in memory. Returns shape [*batch, N_runs].
         """
         ranks = _average_ranks(y_pred_proba, dim=0)          # [N, *batch, R]
 
@@ -205,19 +160,7 @@ class FastCPMClassificationMetrics:
 
 
 def score_models(y_true, y_pred, task_type, device='cpu', **kwargs):
-    """
-    Score every CPM model variant at once.
-
-    Args:
-        y_true: [N_samples, N_runs]
-        y_pred: [N_samples, *batch, N_runs]. For classification these must be
-                probabilities, not class labels.
-        task_type: TaskType.regression or TaskType.classification
-        device: device for the computation
-
-    Returns:
-        [N_metrics, *batch, N_runs]
-    """
+    """Scores every CPM model variant at once, dispatching on task type (y_pred must be probabilities for classification)."""
     if task_type == TaskType.regression:
         evaluator = FastCPMMetrics(device=device)
     elif task_type == TaskType.classification:

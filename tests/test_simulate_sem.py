@@ -55,14 +55,9 @@ def test_simulated_r2s_match_targets():
 
 
 def test_rejects_invalid_arguments():
-    """Every rejected argument combination, and *which* error each produces.
-
-    These were seven test functions asserting only that some ValueError came
-    out -- which an unrelated typo raising ValueError would also satisfy. Each
-    case now pins the message, so the test fails if the wrong guard fires.
-    """
+    """Pins the message per case, not just ValueError -- these used to be seven
+    tests that an unrelated typo raising ValueError would also satisfy."""
     cases = [
-        # (kwargs, expected message fragment)
         (dict(R2_X_y=-0.1, R2_X_y_given_Z=0.0, R2_Z_y=0.0),
          "R2_X_y must be in"),
         (dict(R2_X_y=1.1, R2_X_y_given_Z=0.0, R2_Z_y=0.0),

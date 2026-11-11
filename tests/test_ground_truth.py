@@ -1,12 +1,5 @@
-"""
-Ground-truth end-to-end tests for the CPM pipeline.
-
-These tests use synthetic data with known structure so we can verify:
-1. The correct edges are selected (high stability for informative edges)
-2. Predictive performance meets expected thresholds
-3. Non-informative edges are not selected
-4. The full pipeline produces correct statistical results
-"""
+"""Synthetic data with known signal edges: verifies correct edges are selected,
+predictive performance meets thresholds, and noise edges are not selected."""
 
 import numpy as np
 import pytest
@@ -24,29 +17,11 @@ def generate_regression_data_known_edges(
     n_samples=200, n_features=45, n_positive=3, n_negative=3,
     signal_strength=1.0, noise_level=0.3, seed=42
 ):
-    """
-    Generate regression data where we know exactly which edges are informative.
-
-    The target y is constructed as:
-        y = sum(positive_edges) - sum(negative_edges) + noise
-
-    Args:
-        n_samples: Number of samples
-        n_features: Total number of features (edges)
-        n_positive: Number of edges positively correlated with y
-        n_negative: Number of edges negatively correlated with y
-        signal_strength: Coefficient for informative edges
-        noise_level: Standard deviation of noise added to y
-
-    Returns:
-        X, y, covariates, positive_edge_indices, negative_edge_indices
-    """
+    """y = sum(positive_edges) - sum(negative_edges) + noise; covariates are
+    uncorrelated noise. Returns (X, y, covariates, positive_idx, negative_idx)."""
     rng = np.random.RandomState(seed)
-
-    # Features: all random noise initially
     X = rng.randn(n_samples, n_features).astype(np.float32)
 
-    # Target: constructed from specific edges
     pos_indices = list(range(n_positive))
     neg_indices = list(range(n_positive, n_positive + n_negative))
 
@@ -54,7 +29,6 @@ def generate_regression_data_known_edges(
          - signal_strength * X[:, neg_indices].sum(axis=1)
          + rng.randn(n_samples) * noise_level).astype(np.float32)
 
-    # Covariates: random noise (uncorrelated with y)
     covariates = rng.randn(n_samples, 2).astype(np.float32)
 
     return X, y, covariates, pos_indices, neg_indices
@@ -64,11 +38,7 @@ def generate_classification_data_known_edges(
     n_samples=200, n_features=45, n_positive=3, n_negative=3,
     signal_strength=1.0, seed=42
 ):
-    """
-    Generate binary classification data with known informative edges.
-
-    The latent score is computed from specific edges, then binarized at the median.
-    """
+    """Like generate_regression_data_known_edges, with y binarized at the median."""
     X, y_cont, covariates, pos_indices, neg_indices = generate_regression_data_known_edges(
         n_samples=n_samples, n_features=n_features,
         n_positive=n_positive, n_negative=n_negative,
@@ -79,8 +49,6 @@ def generate_classification_data_known_edges(
 
 
 class TestRegressionGroundTruth:
-    """End-to-end test with known ground truth for regression."""
-
     @pytest.fixture
     def regression_data(self):
         return generate_regression_data_known_edges(
@@ -90,7 +58,6 @@ class TestRegressionGroundTruth:
 
     @pytest.fixture
     def cpm_result(self, tmp_path, regression_data):
-        """Run the full CPM pipeline and return the instance."""
         X, y, covariates, pos_idx, neg_idx = regression_data
 
         edge_selection = UnivariateEdgeSelection(
@@ -110,14 +77,9 @@ class TestRegressionGroundTruth:
         return cpm, pos_idx, neg_idx
 
     def test_positive_performance(self, cpm_result):
-        """
-        With strong signal edges, the connectome model should achieve
-        meaningful predictive performance (Pearson r > 0.5).
-        """
         cpm, _, _ = cpm_result
         agg = cpm.results_manager.agg_results
 
-        # Get mean Pearson r for connectome/both model
         pearson_col = ('pearson_score', 'mean')
         r = agg.loc[('connectome', 'both', 0), pearson_col]
 
@@ -125,10 +87,6 @@ class TestRegressionGroundTruth:
         assert r > 0.5, f"Pearson r too low: {r:.4f}. Expected > 0.5 with strong signal."
 
     def test_connectome_outperforms_covariates(self, cpm_result):
-        """
-        Since covariates are random noise, the connectome model should
-        outperform the covariates-only model.
-        """
         cpm, _, _ = cpm_result
         agg = cpm.results_manager.agg_results
 
@@ -142,16 +100,11 @@ class TestRegressionGroundTruth:
         )
 
     def test_informative_edges_have_high_stability(self, cpm_result):
-        """
-        Edges that are truly correlated with y should be selected in most folds
-        (high stability), while noise edges should have low stability.
-        """
         cpm, pos_idx, neg_idx = cpm_result
 
-        # stability shape: [N_Features, 2, Runs] after calculate_edge_stability
+        # stability shape: [N_Features, 2, Runs]
         stability = cpm.results_manager.calculate_edge_stability(write=False)
 
-        # Check stability of positive edges (should be high)
         for idx in pos_idx:
             stab = stability[idx, Networks.positive, 0].item()
             print(f"Feature {idx} (positive signal): stability = {stab:.2f}")
@@ -159,7 +112,6 @@ class TestRegressionGroundTruth:
                 f"Positive edge {idx} stability too low: {stab:.2f}"
             )
 
-        # Check stability of negative edges (should be high)
         for idx in neg_idx:
             stab = stability[idx, Networks.negative, 0].item()
             print(f"Feature {idx} (negative signal): stability = {stab:.2f}")
@@ -168,9 +120,6 @@ class TestRegressionGroundTruth:
             )
 
     def test_noise_edges_have_low_stability(self, cpm_result):
-        """
-        Noise edges (not in the signal set) should have low average stability.
-        """
         cpm, pos_idx, neg_idx = cpm_result
         informative_idx = set(pos_idx + neg_idx)
         n_features = cpm.results_manager.n_features
@@ -180,16 +129,14 @@ class TestRegressionGroundTruth:
         noise_stabilities = []
         for idx in range(n_features):
             if idx not in informative_idx:
-                # Sum stability across pos and neg networks
-                stab = stability[idx, :, 0].sum().item()
+                stab = stability[idx, :, 0].sum().item()  # sum over pos/neg networks
                 noise_stabilities.append(stab)
 
         mean_noise_stability = np.mean(noise_stabilities)
         print(f"\nMean noise edge stability: {mean_noise_stability:.4f}")
 
-        # Most noise edges should not be consistently selected
-        # With p<0.05 threshold and 45 features, ~2 noise edges may pass by chance
-        # But average stability should be well below 0.5
+        # With p<0.05 and 45 features, ~2 noise edges may pass by chance, but
+        # the average should stay well below 0.5.
         assert mean_noise_stability < 0.3, (
             f"Noise edge stability too high: {mean_noise_stability:.4f}"
         )
@@ -206,7 +153,6 @@ class TestRegressionGroundTruth:
         assert os.path.exists(os.path.join(results_dir, 'task_type.txt'))
 
     def test_csv_contains_only_regression_metrics(self, cpm_result):
-        """Verify CSV output only has regression metric columns."""
         import pandas as pd
         cpm, _, _ = cpm_result
         df = pd.read_csv(os.path.join(cpm.results_directory, 'cv_results_full.csv'))
@@ -222,8 +168,6 @@ class TestRegressionGroundTruth:
 
 
 class TestClassificationGroundTruth:
-    """End-to-end test with known ground truth for classification."""
-
     @pytest.fixture
     def classification_data(self):
         return generate_classification_data_known_edges(
@@ -252,7 +196,6 @@ class TestClassificationGroundTruth:
         return cpm, pos_idx, neg_idx
 
     def test_above_chance_accuracy(self, cpm_result):
-        """With informative edges, accuracy should be well above chance (0.5)."""
         cpm, _, _ = cpm_result
         agg = cpm.results_manager.agg_results
 
@@ -265,7 +208,6 @@ class TestClassificationGroundTruth:
         )
 
     def test_auc_above_chance(self, cpm_result):
-        """ROC AUC should be well above 0.5 with informative edges."""
         cpm, _, _ = cpm_result
         agg = cpm.results_manager.agg_results
 
@@ -276,7 +218,6 @@ class TestClassificationGroundTruth:
         assert auc > 0.65, f"AUC too low: {auc:.4f}. Expected > 0.65 with signal."
 
     def test_informative_edges_selected(self, cpm_result):
-        """Signal edges should be frequently selected across folds."""
         cpm, pos_idx, neg_idx = cpm_result
         stability = cpm.results_manager.calculate_edge_stability(write=False)
 
@@ -306,15 +247,9 @@ class TestClassificationGroundTruth:
 
 
 class TestModelFitting:
-    """Test that the linear model produces correct fits on simple data."""
-
     def test_ols_with_positive_and_negative_edges(self):
-        """
-        CPM aggregates features into positive/negative network strengths.
-        When positive edges contribute positively and negative edges contribute
-        negatively, the 'both' network (using both strengths) should yield
-        a strong prediction.
-        """
+        """The 'both' network (combining positive and negative strengths) should
+        yield a strong prediction when the generative process matches it."""
         from cccpm.models.linear_model import LinearCPM
 
         rng = np.random.RandomState(42)
@@ -324,10 +259,8 @@ class TestModelFitting:
         n_features = n_pos + n_neg
 
         X = rng.randn(n_samples, n_features).astype(np.float32)
-        # y = sum(positive features) - sum(negative features)
         y = (X[:, :n_pos].sum(axis=1) - X[:, n_pos:].sum(axis=1)).astype(np.float32).reshape(-1, 1)
 
-        # Set up edges: first n_pos are positive, rest are negative
         edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
         edges[:n_pos, Networks.positive, 0] = True
         edges[n_pos:, Networks.negative, 0] = True
@@ -337,26 +270,20 @@ class TestModelFitting:
         model.fit(X, y, cov)
 
         preds = model.predict(X, cov)
-        # The "both" network uses both positive and negative strengths
-        y_pred = preds[:, Models.connectome, Networks.both, 0].numpy()
+        y_pred = preds[:, Models.connectome, Networks.both, 0].numpy()  # uses both strengths
 
         from scipy.stats import pearsonr
         r, _ = pearsonr(y.ravel(), y_pred)
         print(f"\nPearson r with pos+neg edges: {r:.6f}")
-        # Should be perfect since the generative process matches the model
+        # Should be perfect: the generative process matches the model exactly.
         assert r > 0.999, f"Should be near-perfect fit: r={r:.6f}"
 
     def test_logistic_regression_recovers_separation(self):
-        """
-        With linearly separable data, logistic regression should achieve
-        near-perfect classification.
-        """
         from cccpm.models.linear_model import LinearCPM
 
         rng = np.random.RandomState(42)
         n_samples = 100
 
-        # 1D feature with clear separation
         X = np.concatenate([
             rng.randn(50, 1) - 2,
             rng.randn(50, 1) + 2

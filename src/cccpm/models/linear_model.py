@@ -1,3 +1,4 @@
+"""PyTorch linear CPM backend (OLS / logistic regression)."""
 import numpy as np
 import torch
 
@@ -5,43 +6,21 @@ from cccpm.constants import Networks, Models, TaskType
 
 
 class LinearCPM:
-    """
-    PyTorch CPM model: OLS for regression, logistic regression (IRLS) for
-    binary classification.
+    """PyTorch CPM model: OLS for regression, logistic regression (IRLS) for binary classification.
 
-    Every model variant, hyperparameter configuration and permutation is fitted
-    in one batched linear-algebra pass rather than a Python loop.
-
-    Shapes
-    ------
-    X          : [N_samples, N_features]
-    y          : [N_samples, N_runs]          (one column per permutation)
-    covariates : [N_samples, N_cov], or None for vanilla CPM
-    edges      : [N_features, 2, N_runs]      dim 1 = [positive, negative]
-
-    Predictions come back as [N_samples, N_models, N_networks, N_runs].
-
-    Whether the covariate variance has been taken out of ``X`` is decided by the
-    caller (``CPMAnalysis(model_input=...)``), not here: this class fits whatever
-    connectivity it is given. That is what makes deconfounding a property of the
-    run rather than an extra model, and it is the only form that generalises --
-    the non-linear backends are not invariant to it, and a multivariate model
-    computes no network strength to residualise at all.
-
-    Without covariates only the ``connectome`` model is defined -- ``covariates``
-    is an empty design, ``full`` collapses to ``connectome``, and ``increment``
-    would be identically zero. Those slots are filled with NaN rather than a
-    number that looks meaningful; see ``available_models``.
+    Every model variant, hyperparameter configuration, and permutation run is
+    fit in one batched linear-algebra pass rather than a Python loop.
+    Whether the covariate variance has been taken out of ``X`` is decided by
+    the caller (``CPMAnalysis(model_input=...)``), not here -- this class
+    fits whatever connectivity it is given, which is what keeps deconfounding
+    a property of the run rather than an extra model. Without covariates only
+    ``connectome`` is defined; ``covariates``/``full``/``increment`` are
+    filled with NaN rather than a number that looks meaningful (see
+    ``available_models``).
     """
     name = "LinearCPM"
 
     def __init__(self, edges, device='cpu', task_type=TaskType.regression):
-        """
-        Args:
-            edges: [N_features, 2, N_runs] boolean mask tensor.
-            device: 'cpu' or 'cuda'
-            task_type: TaskType.regression or TaskType.classification
-        """
         self.device = torch.device(device)
         self.task_type = task_type
 
@@ -51,10 +30,8 @@ class LinearCPM:
                 f"edges must be [N_features, 2, N_runs], got shape {tuple(edges.shape)}")
         self.edges = edges
 
-        self.coefs = {}         # fitted coefficients per model variant
-        self.has_covariates = None   # set by fit()
-
-    # --- covariate handling ------------------------------------------------
+        self.coefs = {}
+        self.has_covariates = None
 
     @staticmethod
     def _covariates_present(covariates):
@@ -70,8 +47,6 @@ class LinearCPM:
             return [Models.connectome.name]
         return [m.name for m in Models]
 
-    # --- shape helpers ----------------------------------------------------
-
     def _network_strengths(self, X):
         """X [N, F] + edges [F, 2, R] -> (pos, neg), each [R, N]."""
         pos = torch.einsum('nf,fr->rn', X, self.edges[:, Networks.positive].float())
@@ -82,8 +57,6 @@ class LinearCPM:
         """cov [N, C] -> [R, N, C], broadcast across runs."""
         n_samples, n_cov = cov.shape
         return cov.view(1, n_samples, n_cov).expand(n_runs, n_samples, n_cov)
-
-    # --- fit / predict ----------------------------------------------------
 
     def fit(self, X, y, covariates=None):
         """Fit all CPM variants for every hyperparameter configuration and run."""
@@ -96,13 +69,13 @@ class LinearCPM:
             raise ValueError(f"y has {y.shape[1]} runs but edges has {n_runs}")
         R = n_runs
 
-        pos_str, neg_str = self._network_strengths(X)          # [R, N]
+        pos_str, neg_str = self._network_strengths(X)
 
         solve = (self._solve_logistic if self.task_type == TaskType.classification
                  else self._solve_ols)
 
-        y_runs = y.t()                                         # [R, N]
-        y_batch = y_runs.unsqueeze(-1)                         # [R, N, 1]
+        y_runs = y.t()
+        y_batch = y_runs.unsqueeze(-1)
 
         conn = {
             'positive': pos_str.unsqueeze(-1),
@@ -111,15 +84,14 @@ class LinearCPM:
         }
 
         if not self.has_covariates:
-            # Vanilla CPM: the connectome model is the only one defined.
             for net, X_conn in conn.items():
                 self.coefs[f'connectome_{net}'] = solve(X_conn, y_batch)
             return self
 
         cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
-        cov_b = self._expand_covariates(cov, R)                # [R, N, C]
+        cov_b = self._expand_covariates(cov, R)
 
-        self.coefs['covariates'] = solve(cov_b, y_runs.unsqueeze(-1))  # [R, C+1, 1]
+        self.coefs['covariates'] = solve(cov_b, y_runs.unsqueeze(-1))
 
         for net, X_conn in conn.items():
             X_full = torch.cat([X_conn, cov_b], dim=-1)
@@ -129,12 +101,7 @@ class LinearCPM:
         return self
 
     def predict(self, X, covariates=None, return_proba=False):
-        """
-        Predict with every fitted variant.
-
-        Returns [N_samples, N_models, N_networks, N_params, N_runs]. For
-        classification, probabilities when ``return_proba`` else 0/1 labels.
-        """
+        """Predicts with every fitted variant -> [N_samples, N_models, N_networks, N_runs]."""
         X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
         R, N = self.edges.shape[2], X.shape[0]
 
@@ -150,8 +117,7 @@ class LinearCPM:
         ]
 
         if not self.has_covariates:
-            # Every covariate-dependent variant is undefined here. NaN, not a
-            # number that would read as a real (and terrible) model score.
+            # Undefined variants get NaN, not a number that would read as a real model score.
             for model in (Models.covariates, Models.full, Models.increment):
                 predictions[:, model] = float('nan')
             for net_idx, X_conn in conn:
@@ -161,15 +127,13 @@ class LinearCPM:
             cov = torch.as_tensor(covariates, device=self.device, dtype=torch.float32)
             cov_b = self._expand_covariates(cov, R)
 
-            # Covariates model: same for every network.
-            cov_pred = self._predict_linear(cov_b, self.coefs['covariates'])   # [R, N, 1]
-            cov_pred = cov_pred.squeeze(-1).t()                                # [N, R]
+            cov_pred = self._predict_linear(cov_b, self.coefs['covariates'])
+            cov_pred = cov_pred.squeeze(-1).t()
             predictions[:, Models.covariates] = cov_pred.unsqueeze(1).expand(N, len(Networks), R)
 
             for net_idx, X_conn in conn:
                 X_full = torch.cat([X_conn, cov_b], dim=-1)
                 name = net_idx.name
-                # each _predict_linear -> [R, N, 1]; reorder to [N, R]
                 predictions[:, Models.connectome, net_idx] = self._predict_linear(
                     X_conn, self.coefs[f'connectome_{name}']).squeeze(-1).t()
                 predictions[:, Models.full, net_idx] = self._predict_linear(
@@ -178,8 +142,7 @@ class LinearCPM:
         if self.task_type == TaskType.classification:
             predictions = torch.sigmoid(predictions)
             if not return_proba:
-                # `nan > 0.5` is False, which would turn an undefined prediction
-                # into a confident class 0. Keep NaN NaN.
+                # `nan > 0.5` is False, which would read as a confident class 0; keep NaN NaN.
                 labels = (predictions > 0.5).float()
                 predictions = torch.where(torch.isnan(predictions),
                                           predictions, labels)
@@ -193,11 +156,6 @@ class LinearCPM:
     def predict_class(self, X, covariates=None):
         """Class labels for classification; identical to predict() for regression."""
         return self.predict(X, covariates, return_proba=False)
-
-    # --- solvers ----------------------------------------------------------
-    #
-    # All operate on [..., N, F] designs with arbitrary leading batch axes, and
-    # prepend an intercept column. Returned coefficients are [..., F+1, 1].
 
     @staticmethod
     def _add_intercept(X):
@@ -243,22 +201,12 @@ class LinearCPM:
         """X [..., N, F], beta [..., F+1, 1] -> [..., N, 1]."""
         return torch.matmul(self._add_intercept(X), beta)
 
-    # --- reporting --------------------------------------------------------
-
     def get_network_strengths(self, X: np.ndarray, covariates: np.ndarray = None):
-        """
-        Per-subject positive/negative network strengths for the HTML report.
-
-        These are the strengths of whatever connectivity the model was given --
-        under ``model_input='residualized'`` that is the deconfounded
-        connectome, so no separate residualised entry is needed or wanted.
-
-        Returns a dict of [N_samples, N_runs] tensors.
-        """
+        """Per-subject positive/negative network strengths of X, for the HTML report."""
         X = torch.as_tensor(X, device=self.device, dtype=torch.float32)
 
-        pos_str, neg_str = self._network_strengths(X)        # [R, N]
-        pos_str, neg_str = pos_str.t(), neg_str.t()          # [N, R]
+        pos_str, neg_str = self._network_strengths(X)
+        pos_str, neg_str = pos_str.t(), neg_str.t()
 
         return {
             "connectome": {

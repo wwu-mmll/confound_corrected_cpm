@@ -1,12 +1,6 @@
-"""
-Connectome / atlas utilities for the brain-figure module.
+"""Connectome / atlas utilities for the brain-figure module.
 
-These helpers are deliberately self-contained (they operate on plain numpy
-matrices and a pandas atlas table) so the whole brain-figure layer can later be
-lifted into the shared ``wwu-mmll/brainplots`` toolbox with minimal change.
-
-The network colour scheme and ``upper_tri_to_matrix`` are adapted from that
-toolbox's ``brainchord`` package (Juri Howe) to keep the two consistent.
+Network colours and ``upper_tri_to_matrix`` are adapted from brainchord to keep the two consistent.
 """
 
 from __future__ import annotations
@@ -17,8 +11,6 @@ import numpy as np
 import pandas as pd
 
 
-# ── Network colours (Yeo-7 / Schaefer / HCP inspired) ─────────────────────────
-# Adapted from brainchord.atlas.DEFAULT_NETWORK_COLORS.
 DEFAULT_NETWORK_COLORS: dict[str, str] = {
     "Vis":          "#781286",
     "SomMot":       "#4682b4",
@@ -61,8 +53,6 @@ def get_network_color(name: str, custom: dict[str, str] | None = None) -> str:
     return _fallback_map[name]
 
 
-# ── Matrix helpers ────────────────────────────────────────────────────────────
-
 def upper_tri_to_matrix(n_nodes: int, edge_values: np.ndarray) -> np.ndarray:
     """Reconstruct a symmetric ``n_nodes × n_nodes`` matrix from an upper-tri vector."""
     mat = np.zeros((n_nodes, n_nodes))
@@ -73,14 +63,8 @@ def upper_tri_to_matrix(n_nodes: int, edge_values: np.ndarray) -> np.ndarray:
 
 
 def signed_stability_matrix(edge_stability: np.ndarray) -> np.ndarray:
-    """
-    Collapse a ``[n_nodes, n_nodes, 2(, runs)]`` stability array into one signed
-    matrix: positive-network stability as ``+value``, negative as ``-value``.
-
-    An edge belongs to at most one network, so the two layers do not overlap.
-    """
+    """Collapse a ``[n_nodes, n_nodes, 2(, runs)]`` stability array into one signed (+pos/-neg) matrix."""
     arr = np.asarray(edge_stability, dtype=float)
-    # squeeze any trailing run dimension(s) down to [n, n, 2]
     while arr.ndim > 3:
         arr = arr[..., 0]
     pos = arr[:, :, 0]
@@ -95,30 +79,15 @@ def masked_signed_stability_matrix(
     mode: str = "significant",
     alpha: float = 0.05,
 ) -> np.ndarray:
-    """
-    Signed node×node stability matrix keeping only the edges selected by *mode*.
+    """Signed node x node stability matrix keeping only the edges selected by *mode*.
 
-    Positive-network edges appear as ``+stability`` and negative as
-    ``-stability`` (an edge belongs to at most one network, so the layers never
-    overlap). Non-selected edges are set to ``0``. This drives every brain/edge
-    figure so the report can offer the same edge set across views.
-
-    Modes
-    -----
-    ``"all"``
-        Every selected (stable) edge.
-    ``"significant"``
-        Edges whose stability p-value is below *alpha*. Requires
-        *edge_significance*; if it is missing, or if the filter empties a network
-        that had stable edges, fall back to all stable edges for that network
-        (so the figure still renders — e.g. few permutations push p-values just
-        above the threshold).
-    ``"top5"`` / ``"top10"``
-        The top 5% / 10% of stable edges by stability, per network layer.
+    mode: "all" keeps every stable edge; "significant" keeps p < alpha (falls back to
+    all stable edges for a network if that would empty it, e.g. too few permutations);
+    "top5"/"top10" keep the top 5%/10% by stability per network layer.
     """
     arr = np.asarray(edge_stability, dtype=float)
     while arr.ndim > 3:
-        arr = arr[..., 0]  # drop trailing run dim(s) -> [n, n, 2]
+        arr = arr[..., 0]
 
     sig = None
     if edge_significance is not None:
@@ -153,19 +122,7 @@ def aggregate_matrix_by_group(
     *,
     signed: bool = True,
 ) -> pd.DataFrame:
-    """
-    Aggregate a node×node *matrix* into a region×region DataFrame by averaging
-    over the off-diagonal node pairs that fall in each (group_i, group_j) block.
-
-    Parameters
-    ----------
-    matrix : np.ndarray, shape (n_nodes, n_nodes)
-        Symmetric node-level matrix (e.g. signed stability).
-    groups : list[str], length n_nodes
-        Group/network label for each node.
-    signed : bool
-        If False, aggregate absolute values.
-    """
+    """Aggregate a node x node *matrix* into a region x region DataFrame by averaging each (group_i, group_j) block."""
     n_nodes = matrix.shape[0]
     if len(groups) != n_nodes:
         raise ValueError(f"groups has {len(groups)} entries but matrix has {n_nodes} nodes.")

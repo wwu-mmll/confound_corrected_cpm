@@ -1,28 +1,11 @@
-"""
-End-to-end coverage of every combination of the optional pipeline features.
+"""End-to-end coverage of every combination of the optional pipeline features.
 
-Why this file exists: twice now, a feature has been silently inert in one code
-path while working in another, with no crash and no failing test.
-
-  - `presence_filter` was a no-op under the batched pipeline, because the
-    feature was added to the unbatched edge-selection path only.
-  - `connected_components` was skipped inside the inner CV whenever the model
-    supported batching, so hyperparameters were tuned on UNFILTERED edges while
-    the outer loop fitted on filtered ones.
-
-Both were invisible to a suite that tested each feature on its own. The features
-interact -- an option can be honoured alone and dropped in combination -- so the
-combinations are what need covering.
-
-The old batched/unbatched split that produced both bugs is gone, and with it
-`can_batch_outer_folds`, the gate that decided which features were allowed on
-the fast path. These tests exist so that a future optimisation cannot quietly
-reintroduce a path where a requested option stops taking effect.
-
-Each case asserts the run completes, produces well-formed output, and -- where
-the option has an observable signature -- that the option actually did something.
-Data is deliberately tiny; this is about wiring, not statistics.
-"""
+Why: twice now a feature was silently inert on one code path while working on
+another, invisible to a suite that tested each feature alone -- presence_filter
+was a no-op under the batched pipeline (added to the unbatched path only), and
+connected_components was skipped inside batched inner CV, tuning hyperparameters
+on unfiltered edges while the outer loop fit on filtered ones. Data is
+deliberately tiny; this is about wiring, not statistics."""
 import itertools
 
 import numpy as np
@@ -37,7 +20,6 @@ from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
 @pytest.fixture(scope="module")
 def tiny_data():
-    """Small connectome with a real signal: 45 features == 10 nodes."""
     X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=60, n_features=45)
     return X, np.asarray(y).ravel(), covariates
 
@@ -79,11 +61,9 @@ def test_feature_combinations_run_and_produce_results(
     results = cpm.results_manager
     assert results is not None
 
-    # Aggregated metrics must be finite -- a silently broken combination tends to
-    # surface as NaN rather than as an exception. The one exception is by design:
-    # `increment` is NaN for metrics whose difference is not a statistic (see
-    # constants.INCREMENTABLE_METRICS), so drop those cells rather than weaken
-    # the guard everywhere else.
+    # Aggregated metrics must be finite -- a broken combination tends to surface as
+    # NaN, not an exception. Exception: increment is NaN by design for metrics
+    # whose difference is not a statistic (constants.INCREMENTABLE_METRICS).
     agg = results.agg_results
     suppressed = [m.name for m in Metrics if m not in INCREMENTABLE_METRICS]
     checked = agg.drop(index="increment", level="model")
@@ -95,8 +75,7 @@ def test_feature_combinations_run_and_produce_results(
     dropped = increment.loc[:, [c for c in increment.columns if c[0] in suppressed]]
     assert dropped.isna().all().all(), "increment should be NaN for these metrics"
 
-    # Edge stability is a fraction of folds, so it must lie in [0, 1].
-    stability = results.calculate_edge_stability(write=False)
+    stability = results.calculate_edge_stability(write=False)  # fraction of folds
     assert torch.isfinite(stability).all()
     assert (stability >= 0).all() and (stability <= 1).all()
 
@@ -105,22 +84,12 @@ def test_feature_combinations_run_and_produce_results(
 
 
 def test_connected_components_survives_stable_edge_selection(tmp_path, tiny_data):
-    """
-    Regression guard for the inner-CV bug, pinned to its observable consequence.
-
-    `run_inner_folds` used to have two branches, and only the unbatched one
-    applied the component filter -- the batched branch called the selector
-    directly. Because `select_stable_edges=True` builds the FINAL edge mask from
-    the inner loop's accumulated stability, `connected_components` was silently
-    ignored for the fitted model whenever both options were combined.
-
-    Verified against the pre-refactor tree: with connected_components=999, which
-    must drop every edge, the old code reported total stability 45.0 (filter
-    ignored) and the current code reports 0.0 (filter applied). An earlier
-    version of this test read the OUTER loop's stability instead, which applied
-    the filter in both versions and so passed on the buggy code -- it proved
-    nothing. This one discriminates.
-    """
+    """Regression: run_inner_folds' batched branch called the selector directly,
+    skipping the component filter, so connected_components was silently ignored
+    whenever select_stable_edges built the final mask from inner-loop stability.
+    Verified against the pre-refactor tree: connected_components=999 (drops every
+    edge) gave total stability 45.0 there vs 0.0 now. Must read the INNER loop's
+    stability -- the outer loop's passed on the buggy code too."""
     X, y, covariates = tiny_data
 
     def total_stability(connected_components, subdir):
@@ -148,17 +117,9 @@ def test_connected_components_survives_stable_edge_selection(tmp_path, tiny_data
 
 
 def test_presence_filter_is_applied_end_to_end(tmp_path):
-    """
-    Regression guard for the presence_filter no-op.
-
-    That bug was fixed before this refactor (the filter had been added to the
-    unbatched path only), so unlike the connected_components guard above this
-    one does not fail on the pre-refactor tree -- it exists to keep the fix from
-    being lost again, not to catch a live defect.
-
-    Half the edges are structurally zero in most subjects. With
-    presence_filter=0.9 they must never be selected, in any fold.
-    """
+    """Keeps the presence_filter no-op fix (already made before this refactor)
+    from being lost again -- does not fail on the pre-refactor tree. Half the
+    edges are structurally zero in most subjects and must never be selected."""
     rng = np.random.default_rng(0)
     n_samples, n_features = 60, 45
     X = rng.normal(size=(n_samples, n_features)).astype(np.float32)

@@ -1,16 +1,6 @@
-"""
-Vanilla CPM: running without covariates.
-
-`covariates` used to be a required argument, and omitting it crashed deep inside
-`check_data`. It is now optional, which makes exactly one model meaningful --
-`connectome`. The others (`covariates`, `full`, `increment`) all
-need a confound design and are reported as NaN rather than as a number that
-would read as a real, terrible model score.
-
-The results tensor keeps its full shape: undefined variants are NaN-filled, not
-reshaped away, and `available_models.json` tells the report which rows mean
-something.
-"""
+"""Vanilla CPM (no covariates): only `connectome` is meaningful; `covariates`,
+`full`, `increment` are NaN-filled rather than reported as real scores.
+`available_models.json` tells the report which rows mean something."""
 import json
 import os
 import re
@@ -32,11 +22,7 @@ COVARIATE_DEPENDENT = (Models.covariates, Models.full, Models.increment)
 
 
 def _says_nan(results_directory):
-    """Does the reader actually see the word "nan" anywhere in the report?
-
-    Anchored, and over flattened text rather than raw HTML -- see
-    ``conftest.report_text`` for why both halves of that matter.
-    """
+    """Word-anchored check over flattened report text (see conftest.report_text)."""
     return re.search(r"\bnan\b", report_text(results_directory), re.I) is not None
 
 
@@ -61,10 +47,6 @@ def _analysis(tmp_path, selection_input="raw", **kwargs):
         edge_selection=ue, n_permutations=0, **kwargs)
 
 
-# ---------------------------------------------------------------------------
-# Input validation
-# ---------------------------------------------------------------------------
-
 def test_check_data_returns_none_for_absent_covariates():
     X, y, _ = _data()
     X_checked, y_checked, cov = check_data(X, y, None)
@@ -79,10 +61,7 @@ def test_get_variable_names_without_covariates():
     assert covar_names == []
 
 
-# ---------------------------------------------------------------------------
-# Options that presuppose covariates must fail up front, not degrade silently
-# ---------------------------------------------------------------------------
-
+# Must fail up front, not degrade silently.
 def test_residualized_selection_without_covariates_raises(tmp_path):
     X, y, _ = _data()
     cpm = _analysis(tmp_path, selection_input="residualized", task_type="regression")
@@ -91,17 +70,12 @@ def test_residualized_selection_without_covariates_raises(tmp_path):
 
 
 def test_error_names_the_offending_parameter(tmp_path):
-    """A user has to be able to tell which argument to change."""
     X, y, _ = _data()
     cpm = _analysis(tmp_path, selection_input="residualized", task_type="regression")
     with pytest.raises(ValueError) as excinfo:
         cpm.run(X=X, y=y)
     assert "selection_input='residualized'" in str(excinfo.value)
 
-
-# ---------------------------------------------------------------------------
-# The model itself
-# ---------------------------------------------------------------------------
 
 def test_model_nan_fills_covariate_dependent_variants():
     X, y, _ = _data()
@@ -120,8 +94,6 @@ def test_model_nan_fills_covariate_dependent_variants():
 
 
 def test_connectome_model_is_unaffected_by_dropping_covariates():
-    """Given the same edges, the connectome model never touches the covariate
-    design, so its predictions must be identical either way."""
     X, y, Z = _data()
     n_features = X.shape[1]
     edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
@@ -138,9 +110,8 @@ def test_connectome_model_is_unaffected_by_dropping_covariates():
 
 
 def test_classification_metrics_are_nan_not_a_plausible_score():
-    """`nan > 0.5` is False, so an undefined prediction column would otherwise
-    score as "class 0 for everyone" -- an accuracy near the base rate, with
-    nothing marking it as meaningless."""
+    # `nan > 0.5` is False, so an undefined column would otherwise score as
+    # "class 0 for everyone" -- a plausible accuracy, not a visible error.
     from cccpm.scoring import score_models
     from cccpm.constants import Metrics, TaskType
 
@@ -158,10 +129,6 @@ def test_classification_metrics_are_nan_not_a_plausible_score():
         assert torch.isnan(scores[metric, Models.covariates]).all(), metric.name
         assert torch.isfinite(scores[metric, Models.connectome]).all(), metric.name
 
-
-# ---------------------------------------------------------------------------
-# End to end
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("binary", [False, True])
 def test_run_without_covariates_end_to_end(tmp_path, binary):
@@ -182,9 +149,7 @@ def test_run_without_covariates_end_to_end(tmp_path, binary):
     for name in ("covariates", "full", "increment"):
         assert np.isnan(np.ravel(ag.loc[(name, "both"), (metric, "mean")])).all(), name
 
-    # NaN means "not applicable" and must never reach the reader as "nan":
-    # the same formatting path also carries the suppressed Pearson increment.
-    # The report renders, and says nothing about models that do not exist.
+    # Must never leak as the literal text "nan" in the report.
     assert os.path.exists(os.path.join(str(tmp_path), 'report.html'))
     text = report_text(tmp_path)
     assert "Covariates only" not in text
@@ -192,14 +157,9 @@ def test_run_without_covariates_end_to_end(tmp_path, binary):
 
 
 def test_permutation_p_values_are_nan_for_undefined_models(tmp_path):
-    """The permutation test must not report the non-existent models as the most
-    significant result in the table.
-
-    p_values.csv is produced from cv_results_summary.csv, where the undefined
-    variants are NaN placeholders. Without a guard every comparison against NaN
-    is False, the count is 0, and the +1 correction reports the permutation
-    floor -- 1/(n_perms+1) -- which reads as "highly significant".
-    """
+    # Without a guard, every comparison against a NaN placeholder is False,
+    # so the count is 0 and the +1 correction reports the permutation floor
+    # (1/(n_perms+1)) -- which reads as "highly significant".
     import pandas as pd
 
     X, y, _ = _data()
@@ -221,7 +181,6 @@ def test_permutation_p_values_are_nan_for_undefined_models(tmp_path):
         value = p_values.loc[('both', name), metric]
         assert np.isnan(value), f"{name} got p={value}, but the model does not exist"
 
-    # And the report shows none of them.
     assert not _says_nan(tmp_path)
 
 

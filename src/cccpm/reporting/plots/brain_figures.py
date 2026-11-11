@@ -1,20 +1,14 @@
-"""
-Neuroscience figures for the CCCPM HTML report.
-
-Each function takes a node-level connectome matrix (and, where needed, an atlas
-DataFrame) and returns the path to a saved SVG figure. The functions are kept
-self-contained — input = numpy matrix / atlas, output = matplotlib Figure — so
-they can later be moved into the shared ``wwu-mmll/brainplots`` toolbox.
+"""Neuroscience figures for the CCCPM HTML report.
 
 Atlas convention (matches brainchord): one row per node, columns include
-``region``, ``network``, ``hemisphere``, ``x``, ``y``, ``z``. Only ``network``
-is required for the network-summary and chord figures.
+``region``, ``network``, ``hemisphere``, ``x``, ``y``, ``z``.
 """
 
 from __future__ import annotations
 
 import os
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -33,8 +27,6 @@ from cccpm.reporting.plots.figure_style import (
 )
 
 
-# ── 1. Connectivity matrix ─────────────────────────────────────────────────────
-
 def connectivity_matrix(
     matrix: np.ndarray,
     results_folder: str,
@@ -42,13 +34,7 @@ def connectivity_matrix(
     *,
     name: str = "connectivity_matrix",
 ) -> str:
-    """
-    Node×node heatmap of (signed) edge stability.
-
-    Red = positive-network edges, blue = negative-network edges. If *atlas* has
-    a ``network`` column, nodes are ordered by network and dividers are drawn,
-    so within/between-network structure is visible (the classic CPM matrix view).
-    """
+    """Node x node heatmap of (signed) edge stability, ordered by network if available."""
     apply_nature_style()
     mat = np.asarray(matrix, dtype=float)
     n = mat.shape[0]
@@ -62,7 +48,6 @@ def connectivity_matrix(
         order = np.argsort(nets, kind="stable")
         nets_sorted = nets[order]
         mat = mat[np.ix_(order, order)]
-        # network block boundaries + centered labels
         start = 0
         for i in range(1, n + 1):
             if i == n or nets_sorted[i] != nets_sorted[start]:
@@ -99,8 +84,6 @@ def connectivity_matrix(
     return save_figure(fig, os.path.join(results_folder, name))
 
 
-# ── 2. Network-summary matrix ──────────────────────────────────────────────────
-
 def network_summary_matrix(
     matrix: np.ndarray,
     atlas: pd.DataFrame,
@@ -109,12 +92,7 @@ def network_summary_matrix(
     groupby: str = "network",
     name: str = "network_summary_matrix",
 ) -> str | None:
-    """
-    Region×region matrix: edges aggregated by canonical network.
-
-    Returns ``None`` if the atlas lacks the *groupby* column (caller shows a
-    graceful "needs network labels" message).
-    """
+    """Region x region matrix of edges aggregated by canonical network; ``None`` if atlas lacks *groupby*."""
     if atlas is None or groupby not in atlas.columns or len(atlas) != matrix.shape[0]:
         return None
 
@@ -132,7 +110,6 @@ def network_summary_matrix(
     ax.set_yticks(range(len(region_df.index)))
     ax.set_yticklabels(region_df.index, fontsize=6)
 
-    # annotate cells
     for i in range(region_df.shape[0]):
         for j in range(region_df.shape[1]):
             v = region_df.values[i, j]
@@ -147,8 +124,6 @@ def network_summary_matrix(
     return save_figure(fig, os.path.join(results_folder, name))
 
 
-# ── 3. Chord diagram ───────────────────────────────────────────────────────────
-
 def chord_diagram(
     matrix: np.ndarray,
     atlas: pd.DataFrame,
@@ -158,13 +133,7 @@ def chord_diagram(
     name: str = "chord_diagram",
     link_alpha: float = 0.55,
 ) -> str | None:
-    """
-    Network-level chord diagram (pycirclize). Sectors = canonical networks,
-    link colour = sign (red positive, blue negative), arc width = |stability|.
-
-    Returns ``None`` if the atlas lacks the *groupby* column or pycirclize is
-    unavailable.
-    """
+    """Network-level chord diagram (pycirclize); ``None`` if atlas lacks *groupby* or pycirclize is missing."""
     if atlas is None or groupby not in atlas.columns or len(atlas) != matrix.shape[0]:
         return None
     try:
@@ -175,7 +144,6 @@ def chord_diagram(
     groups = atlas[groupby].astype(str).tolist()
     region_df = aggregate_matrix_by_group(np.asarray(matrix, dtype=float), groups, signed=True)
 
-    # drop empty sectors
     active = region_df.abs().sum(axis=1) > 1e-9
     region_df = region_df.loc[active, active]
     if region_df.empty or region_df.shape[0] < 2:
@@ -205,8 +173,6 @@ def chord_diagram(
     return save_figure(fig, os.path.join(results_folder, name), formats=("svg",))
 
 
-# ── 4. Node-degree / hub plot ──────────────────────────────────────────────────
-
 def node_degree_plot(
     matrix: np.ndarray,
     results_folder: str,
@@ -215,10 +181,7 @@ def node_degree_plot(
     top_k: int = 15,
     name: str = "node_degree",
 ) -> str:
-    """
-    Horizontal bar of the most-connected nodes (hubs): number of stable edges
-    per node, split into positive (red) and negative (blue) contributions.
-    """
+    """Horizontal bar of the most-connected nodes (hubs), split by positive/negative edges."""
     apply_nature_style()
     mat = np.asarray(matrix, dtype=float)
     n = mat.shape[0]
@@ -253,12 +216,9 @@ def node_degree_plot(
 
 
 def sns_despine(ax) -> None:
-    """Local despine to avoid importing seaborn just for this."""
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
 
-
-# ── 5. Glass brain (netplotbrain) ──────────────────────────────────────────────
 
 def glass_brain(
     matrix: np.ndarray,
@@ -267,18 +227,14 @@ def glass_brain(
     *,
     edge_color: str = POS,
     name: str = "glass_brain",
+    top_n: int | None = 10,
 ) -> str | None:
-    """
-    Anatomical glass-brain rendering of a set of edges via netplotbrain.
+    """Anatomical brain-surface rendering of non-zero *matrix* edges via netplotbrain.
 
-    *matrix* is a node×node matrix whose non-zero off-diagonal entries are the
-    edges to draw. The atlas must provide node coordinates (``x``, ``y``, ``z``).
-    Returns the PNG path, or ``None`` if there is nothing to draw / no coordinates
-    / netplotbrain is unavailable.
-
-    This supersedes the file-based ``cpm_chord_plot.plot_netplotbrain`` (which
-    expected ``sig_stability_*`` .npy files the pipeline no longer writes): the
-    edges are passed in directly so it works from the stability matrices.
+    Keeps only the *top_n* edges by |weight| (``None`` keeps all) -- with a few
+    hundred to a few thousand stable edges, drawing everything collapses into an
+    unreadable hairball with no anatomical information left. ``None`` if
+    netplotbrain or the required atlas columns (x, y, z) are unavailable.
     """
     if atlas is None or not {"x", "y", "z"}.issubset(atlas.columns):
         return None
@@ -292,6 +248,10 @@ def glass_brain(
     if len(i_idx) == 0:
         return None
 
+    if top_n is not None and len(weights) > top_n:
+        keep = np.argsort(np.abs(weights))[::-1][:top_n]
+        i_idx, j_idx, weights = i_idx[keep], j_idx[keep], weights[keep]
+
     try:
         import netplotbrain
     except Exception:
@@ -299,22 +259,27 @@ def glass_brain(
 
     edges_df = pd.DataFrame({"i": i_idx, "j": j_idx, "weights": weights})
     try:
-        fig, _ = netplotbrain.plot(
-            template="MNI152NLin2009cAsym",
-            template_style="glass",
-            nodes=atlas,
-            edges=edges_df,
-            view=["LSR"],
-            highlight_edges=True,
-            highlight_nodes=None,
-            node_type="circles",
-            edge_color=edge_color,
-            node_color="#332f2c",
-        )
+        # The report's global nature-style rcParams (apply_nature_style, applied
+        # before every other figure) make netplotbrain's 3D surface mesh render
+        # blank -- some seaborn "white"-theme rcParam leaves the Poly3DCollection
+        # invisible. Reset to matplotlib defaults for just this call.
+        with mpl.rc_context(rc=mpl.rcParamsDefault):
+            fig, _ = netplotbrain.plot(
+                template="MNI152NLin2009cAsym",
+                template_style="surface",
+                nodes=atlas,
+                edges=edges_df,
+                view=["LSR"],
+                highlight_edges=True,
+                highlight_nodes=None,
+                node_type="circles",
+                edge_color=edge_color,
+                node_color="#332f2c",
+            )
+            out = os.path.join(results_folder, f"{name}.png")
+            fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
     except Exception:
         return None
 
-    out = os.path.join(results_folder, f"{name}.png")
-    fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return out

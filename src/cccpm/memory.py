@@ -1,9 +1,4 @@
-"""
-Memory planning for the permutation loop.
-
-Permutations are always vectorised -- see `plan_permutation_chunk` for why this
-only caps how many columns are in flight and never falls back to a loop.
-"""
+"""Memory planning for the permutation loop (always vectorised; see `plan_permutation_chunk`)."""
 import torch
 
 
@@ -19,32 +14,13 @@ def available_memory_bytes(device) -> int:
 
 def plan_permutation_chunk(n_features, n_samples, n_runs, device,
                            safety_factor: float = 0.4) -> int:
-    """
-    How many permutation columns can be processed at once without running out
-    of memory.
+    """Caps how many permutation columns (of n_runs) are processed at once, so memory degrades to more chunks instead of OOM.
 
-    Permutations are always *vectorised* -- y is [N_samples, N_runs] and the
-    edge statistic is one matrix product over all columns, which is where the
-    GPU speedup comes from (measured 433x versus looping over columns). This
-    function does not change that; it only caps how many columns are in flight,
-    so a large parcellation crossed with many permutations degrades in speed
-    instead of crashing.
-
-    The per-column cost is dominated by the ~10 [N_features, N_runs] float32
-    temporaries inside `edge_statistics` (residualised X and y, cross
-    products, r, t, z, p, ...). Measured directly at ~40 bytes per
-    (run x feature), stable across n_features from 4,950 to 35,778; the
-    n_samples term covers the prediction and rank tensors, which are much
-    smaller.
-
-    The estimate is deliberately conservative (`safety_factor` keeps well clear
-    of the free-memory figure). The predecessor of this function, the
-    `batch_planning.estimate_bytes` cost model, under-counted -- it modelled
-    neither the imputation intermediates nor the O(N^2) ROC-AUC term -- and
-    planned batches that then OOMed. Under-counting is worse than not
-    estimating at all, so this errs low and accepts extra chunks.
-
-    Returns a chunk size in [1, n_runs].
+    bytes_per_run (40*n_features + 240*n_samples) comes from measuring the
+    ~10 [N_features, N_runs] float32 temporaries inside `edge_statistics`
+    (~40 bytes per run x feature, stable across n_features 4,950-35,778).
+    Deliberately conservative: the predecessor cost model under-counted
+    (missed imputation intermediates and the O(N^2) ROC-AUC term) and OOMed.
     """
     bytes_per_run = 40 * n_features + 240 * n_samples
     budget = available_memory_bytes(device) * safety_factor

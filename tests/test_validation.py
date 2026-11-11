@@ -10,35 +10,27 @@ from cccpm.validation import (
 
 
 def test_infer_n_nodes():
-    # Valid upper-triangular edge counts
     assert infer_n_nodes(1) == 2      # 2 nodes -> 1 edge
     assert infer_n_nodes(6) == 4      # 4 nodes -> 6 edges
     assert infer_n_nodes(45) == 10    # 10 nodes -> 45 edges
     assert infer_n_nodes(1225) == 50  # 50 nodes -> 1225 edges
-    # Invalid counts return None
     assert infer_n_nodes(5) is None
     assert infer_n_nodes(400) is None
     assert infer_n_nodes(0) is None
 
 
 def test_check_data_rejects_non_triangular_n_features(small_data_setup):
-    """A non-connectome number of features should fail fast with a clear error."""
     _, y1d, cov2d, _, _, _ = small_data_setup
     n_samples = 30
     X_bad = np.random.randn(n_samples, 400)  # 400 is not n*(n-1)/2 for any n
     with pytest.raises(ValueError, match="not a valid connectome size"):
         check_data(X_bad, y1d[:n_samples], cov2d[:n_samples])
 
-# We create a local fixture for the specific small dataset used in these tests
+
 @pytest.fixture
 def small_data_setup(simulated_data):
-    """
-    Creates the specific data shapes used in the original TestUtils.setUp
-    """
-    # n_features must be a valid connectome size (n_nodes*(n_nodes-1)/2);
-    # 6 corresponds to a 4-node connectome.
     X, y, cov = simulated_data
-    n_samples, n_features = 50, 6
+    n_samples, n_features = 50, 6  # 6 features = valid 4-node connectome
 
     X2d = X[:n_samples, :n_features]
     y1d = y[:n_samples]
@@ -49,7 +41,6 @@ def small_data_setup(simulated_data):
     cov_2d_array = np.vstack([np.arange(n_samples), np.arange(n_samples)]).T
 
     return X2d, y1d, cov2d, cov_series, cov_1d_array, cov_2d_array
-
 
 
 def test_accepts_3d_X(small_data_setup):
@@ -95,11 +86,7 @@ def test_error_on_invalid_y_dim(small_data_setup):
 ])
 def test_covariates_are_coerced_to_two_dimensions(small_data_setup, kind,
                                                   expected_shape):
-    """Every accepted covariate spelling ends up as [n_samples, n_covariates].
-
-    One behaviour, one test: these were four near-identical test functions
-    differing only in the input type and the expected width.
-    """
+    """One test, not four near-identical ones differing only in input type."""
     X2d, y1d, _, cov_series, cov_1d_array, cov_2d_array = small_data_setup
     covariates = {
         "series": cov_series,

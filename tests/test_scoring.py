@@ -22,21 +22,16 @@ N_METRICS = len(Metrics)
 
 @pytest.fixture
 def device():
-    """Returns 'cuda' if available, else 'cpu'."""
     return 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 @pytest.fixture
 def simple_data():
-    """Creates simple synthetic data for testing.
-    Returns (y_true, y_pred) as tensors with the current API shapes.
-    """
     np.random.seed(42)
     N_samples = 50
     N_runs = 3
 
     y_true = np.random.randn(N_samples, N_runs).astype(np.float32)
-    # y_pred: [N_samples, N_models, N_networks, N_runs]
     y_pred = np.random.randn(N_samples, N_MODELS, N_NETWORKS, N_runs).astype(np.float32)
 
     return y_true, y_pred
@@ -45,7 +40,6 @@ def simple_data():
 class TestFastCPMMetrics:
 
     def test_score_output_shape(self, simple_data, device):
-        """Test that score returns correct output shape."""
         y_true, y_pred = simple_data
         evaluator = FastCPMMetrics(device=device)
         scores = evaluator.score(y_true, y_pred)
@@ -55,12 +49,10 @@ class TestFastCPMMetrics:
         assert scores.shape == expected_shape, f"Expected {expected_shape}, got {scores.shape}"
 
     def test_covariates_shared_across_networks(self, device):
-        """Test that when covariates preds are identical across networks, scores match."""
         np.random.seed(42)
         N, P = 20, 2
         y_true = np.random.randn(N, P).astype(np.float32)
 
-        # Build y_pred where covariates model has same predictions across all networks
         y_pred = np.random.randn(N, N_MODELS, N_NETWORKS, P).astype(np.float32)
         cov_pred = np.random.randn(N, P).astype(np.float32)
         for net in Networks:
@@ -78,7 +70,6 @@ class TestFastCPMMetrics:
             )
 
     def test_handles_torch_and_numpy_input(self, device):
-        """Test that the method handles both torch.Tensor and numpy.ndarray inputs."""
         np.random.seed(42)
         N, P = 15, 2
         y_true_np = np.random.randn(N, P).astype(np.float32)
@@ -94,7 +85,6 @@ class TestFastCPMMetrics:
         assert torch.allclose(scores_np, scores_torch, atol=1e-5)
 
     def test_score_models_wrapper(self, simple_data, device):
-        """Test the score_models wrapper function for regression."""
         y_true, y_pred = simple_data
         scores = score_models(y_true, y_pred, task_type=TaskType.regression, device=device)
 
@@ -104,14 +94,10 @@ class TestFastCPMMetrics:
         assert isinstance(scores, torch.Tensor)
 
     def test_metrics_ordering(self, device):
-        """Each row of the score tensor is the metric its `Metrics` member names.
-
-        The previous version of this test asserted `scores[metric].shape`, which
-        holds for any index in range and so said nothing about ordering. If the
-        enum and the tensor's rows ever disagreed, every reported number would be
-        silently mislabelled -- so compare against an independent reference per
-        row, with predictions good enough that the metrics take distinct values.
-        """
+        """Regression guard: an earlier version asserted `scores[metric].shape`,
+        which holds for any index and so caught nothing if the `Metrics` enum
+        and the tensor's rows ever disagreed (every number silently mislabelled).
+        Compares against an independent reference per row instead."""
         rng = np.random.RandomState(0)
         N = 200
         y_true = rng.randn(N, 1).astype(np.float32)
@@ -140,15 +126,12 @@ class TestFastCPMMetrics:
 
 
 class TestFastCPMMetricsVsSklearn:
-    """Test that FastCPMMetrics produces the same results as scikit-learn."""
 
     def test_all_metrics_vs_sklearn_random_data(self, device):
-        """Comprehensive test with varying prediction quality."""
         np.random.seed(42)
         N, P = 100, 4
         y_true = np.random.randn(N, P).astype(np.float32)
 
-        # Create predictions with varying noise levels per model/network
         y_pred = np.zeros((N, N_MODELS, N_NETWORKS, P), dtype=np.float32)
         for model in Models:
             for network in Networks:
@@ -180,7 +163,6 @@ class TestFastCPMMetricsVsSklearn:
                         r, rtol=1e-4)
 
     def test_edge_cases_vs_sklearn(self, device):
-        """Test edge case: constant predictions."""
         np.random.seed(42)
         N, P = 50, 2
         y_true = np.random.randn(N, P).astype(np.float32)
@@ -202,7 +184,6 @@ class TestFastCPMMetricsVsSklearn:
 
 
 class TestFastCPMClassificationMetricsVsSklearn:
-    """Test that FastCPMClassificationMetrics matches sklearn."""
 
     def test_perfect_classification_vs_sklearn(self):
         N = 50
@@ -216,14 +197,12 @@ class TestFastCPMClassificationMetricsVsSklearn:
         evaluator = FastCPMClassificationMetrics(device='cpu')
         scores = evaluator.score(y_true, y_pred)
 
-        # All classification metrics should be 1.0 for perfect predictions
         assert torch.allclose(scores[Metrics.accuracy], torch.ones(N_MODELS, N_NETWORKS, 1), atol=1e-5)
         assert torch.allclose(scores[Metrics.balanced_accuracy], torch.ones(N_MODELS, N_NETWORKS, 1), atol=1e-5)
         assert torch.allclose(scores[Metrics.f1_score], torch.ones(N_MODELS, N_NETWORKS, 1), atol=1e-5)
         assert torch.allclose(scores[Metrics.roc_auc], torch.ones(N_MODELS, N_NETWORKS, 1), atol=1e-5)
 
     def test_classification_metrics_vs_sklearn(self):
-        """Compare classification metrics against sklearn for random predictions."""
         np.random.seed(42)
         N = 100
         y_true = np.random.randint(0, 2, (N, 1)).astype(np.float32)
@@ -253,7 +232,6 @@ class TestFastCPMClassificationMetricsVsSklearn:
                     f"ROC AUC mismatch for {model.name}/{network.name}"
 
     def test_score_models_routes_classification(self):
-        """Test that score_models routes correctly for classification."""
         np.random.seed(42)
         N = 40
         y_true = np.random.randint(0, 2, (N, 1)).astype(np.float32)
@@ -262,7 +240,6 @@ class TestFastCPMClassificationMetricsVsSklearn:
         scores = score_models(y_true, y_pred, task_type=TaskType.classification, device='cpu')
         assert scores.shape == (N_METRICS, N_MODELS, N_NETWORKS, 1)
 
-        # Classification metrics should be in [0, 1]
         for metric in [Metrics.accuracy, Metrics.balanced_accuracy, Metrics.f1_score, Metrics.roc_auc]:
             vals = scores[metric]
             assert (vals >= 0).all() and (vals <= 1).all()

@@ -429,6 +429,22 @@ a.download-link:hover { background: var(--accent-strong); color: #fff; }
 .figure-grid > .figure-wrap > svg,
 .figure-grid > .figure-wrap > img { margin: 0 auto; }
 
+/* One figure per row, full width -- for wide multi-panel images (glass brain)
+   that get cramped at the figure-grid's card width. */
+.figure-stack { display: flex; flex-direction: column; gap: var(--sp-5); margin: var(--sp-4) 0; }
+
+.figure-stack > .figure-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: var(--sp-4);
+  margin: 0;
+}
+
+.figure-stack > .figure-wrap > svg,
+.figure-stack > .figure-wrap > img { margin: 0 auto; }
+
 /* ============================================================================
    Misc
    ========================================================================== */
@@ -470,5 +486,5 @@ footer {
   .report-section h2 { page-break-after: avoid; }
   .kpi { box-shadow: none; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   details.info { display: none; }
-  .figure-grid > .figure-wrap, .card { box-shadow: none; }
+  .figure-grid > .figure-wrap, .figure-stack > .figure-wrap, .card { box-shadow: none; }
 }

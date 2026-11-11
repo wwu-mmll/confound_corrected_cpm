@@ -1,17 +1,4 @@
-"""Registry and resolver for built-in and custom atlases.
-
-The public entry point is :func:`resolve_atlas`, which turns the user-facing
-``atlas`` argument into a validated :class:`pandas.DataFrame`. The argument is
-interpreted as:
-
-* a **path to a CSV file** (existing file, or a string ending in ``.csv``) →
-  loaded and validated as a custom atlas, or
-* a **built-in name** (e.g. ``"Schaefer100-17"``) → loaded from the bundled
-  tables, or
-* ``None`` → no atlas (returns ``None``).
-
-Names are matched case-insensitively.
-"""
+"""Registry and resolver for built-in and custom (CSV) atlases."""
 
 from __future__ import annotations
 
@@ -24,10 +11,7 @@ import pandas as pd
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
-#: Columns every atlas table must provide.
 REQUIRED_COLUMNS = ("region", "x", "y", "z")
-
-#: Optional grouping columns used by the report when present.
 OPTIONAL_COLUMNS = ("network", "hemisphere", "structure")
 
 
@@ -73,18 +57,7 @@ def _looks_like_path(value: str) -> bool:
 
 
 def load_atlas(name: str) -> pd.DataFrame:
-    """Load a built-in atlas by name.
-
-    Parameters
-    ----------
-    name : str
-        A built-in atlas name (case-insensitive), e.g. ``"Schaefer100-17"``.
-
-    Raises
-    ------
-    AtlasError
-        If ``name`` is not a known built-in atlas.
-    """
+    """Load a built-in atlas by name (case-insensitive)."""
     index = _bundled_index()
     path = index.get(name.lower())
     if path is None:
@@ -98,18 +71,7 @@ def load_atlas(name: str) -> pd.DataFrame:
 
 
 def resolve_atlas(atlas: Optional[str]) -> Optional[pd.DataFrame]:
-    """Resolve the user-facing ``atlas`` argument to a validated DataFrame.
-
-    Parameters
-    ----------
-    atlas : str or None
-        A path to a custom atlas CSV, a built-in atlas name, or ``None``.
-
-    Returns
-    -------
-    pandas.DataFrame or None
-        The atlas table, or ``None`` when ``atlas`` is ``None``.
-    """
+    """Resolve ``atlas``: a CSV path, a built-in atlas name, or ``None``."""
     if atlas is None:
         return None
     if not isinstance(atlas, str):
@@ -124,7 +86,7 @@ def resolve_atlas(atlas: Optional[str]) -> Optional[pd.DataFrame]:
             raise AtlasError(f"Atlas CSV file does not exist: {path}")
         try:
             df = pd.read_csv(path)
-        except Exception as e:  # noqa: BLE001 — surface a clean message
+        except Exception as e:  # noqa: BLE001
             raise AtlasError(f"Error reading atlas CSV '{path}': {e}") from e
         return _validate(df, path)
 

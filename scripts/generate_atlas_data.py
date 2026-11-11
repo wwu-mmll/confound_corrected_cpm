@@ -1,27 +1,15 @@
-"""Generate bundled atlas coordinate CSVs from authentic public sources.
+"""Regenerate the bundled atlas coordinate CSVs in ``src/cccpm/atlases/data/``
+from authentic public sources (CBIG/Yeo, nilearn) — never invented coordinates.
+Provenance is written to ``SOURCES.md``. Requires network access + ``nilearn``;
+unreachable sources are skipped with a warning, leaving existing bundled files
+untouched so a partial run never corrupts the bundle.
 
-This script regenerates the coordinate tables shipped in
-``src/cccpm/atlases/data/``. It never invents coordinates: every table is
-derived from a published source (CBIG/Yeo for Schaefer, nilearn for the
-coordinate-defined atlases). Provenance for each file is written to
-``src/cccpm/atlases/data/SOURCES.md``.
-
-Run from the repo root::
-
-    poetry run python scripts/generate_atlas_data.py
-
-Requires network access and ``nilearn``. Files that cannot be reached (e.g. a
-source host that is temporarily down) are skipped with a warning; existing
-bundled files are left untouched so a partial run never corrupts the bundle.
-
-Output schema (per row = one connectome node), columns:
-
-    region, x, y, z, network, hemisphere, structure
-
-``network`` is omitted for atlases that do not define a functional partition.
-``hemisphere`` is ``L``/``R`` (or ``M`` for midline); ``structure`` is
-``cortical``/``subcortical``/``cerebellum``. See
+Output columns per row (one connectome node): region, x, y, z, network,
+hemisphere, structure. ``network`` is omitted where undefined; ``hemisphere``
+is L/R/M; ``structure`` is cortical/subcortical/cerebellum. See
 ``examples/atlas_coordinates_design.md`` for the rationale.
+
+Run from the repo root: ``poetry run python scripts/generate_atlas_data.py``
 """
 
 from __future__ import annotations
@@ -41,13 +29,9 @@ import requests
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "src" / "cccpm" / "atlases" / "data"
 
-# Collected provenance records: (atlas_name, n_nodes, source_url, citation)
+# (atlas_name, n_nodes, source_url, citation)
 _PROVENANCE: list[tuple[str, int, str, str]] = []
 
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
 
 def _hemisphere_from_x(x: float, tol: float = 1.0) -> str:
     """L/R/M from an MNI x coordinate (x < 0 is left)."""
@@ -59,16 +43,17 @@ def _hemisphere_from_x(x: float, tol: float = 1.0) -> str:
 
 
 def _looks_like_html(content: bytes) -> bool:
-    """Heuristic: a redirect/error page served instead of the real binary."""
+    """True if a redirect/error page was served instead of the real binary."""
     head = content[:200].lstrip().lower()
     return head.startswith(b"<!doctype") or head.startswith(b"<html")
 
 
 def _download(url: str, dest: Path) -> bool:
-    """Download ``url`` to ``dest``. Falls back to curl when requests fails or
-    returns an HTML redirect/error page instead of the real content — some atlas
-    hosts ship an incomplete TLS chain (or an inconsistent redirect) that curl
-    tolerates but urllib/requests do not."""
+    """Download ``url`` to ``dest`` via requests, falling back to curl.
+
+    Some atlas hosts have a TLS/redirect quirk curl tolerates but requests
+    does not, so a failed or HTML-page response retries via curl.
+    """
     try:
         r = requests.get(url, timeout=90)
         r.raise_for_status()
@@ -88,11 +73,11 @@ def _download(url: str, dest: Path) -> bool:
 
 
 def _volume_centroids(img):
-    """Return (label_values, mm_coords) for a labelled volume: one centre-of-mass
-    per non-zero label, converted from voxel to MNI mm via the image affine.
+    """Return (label_values, mm_coords) centroids per non-zero label.
 
-    Centre-of-mass is used instead of ``find_parcellation_cut_coords`` because the
-    latter is prohibitively slow for fine parcellations (e.g. Glasser's 360 ROIs)."""
+    Uses centre-of-mass rather than ``find_parcellation_cut_coords``, which
+    is prohibitively slow for fine parcellations (e.g. Glasser's 360 ROIs).
+    """
     from scipy import ndimage
     from nilearn import image as nimage
     data = np.asarray(img.dataobj).astype(int)
@@ -121,10 +106,6 @@ def _write(name: str, df: pd.DataFrame, source_url: str, citation: str) -> None:
     print(f"  wrote {name}.csv ({len(df)} nodes)")
 
 
-# ---------------------------------------------------------------------------
-# Schaefer (CBIG/Yeo) — flagship, ships functional networks
-# ---------------------------------------------------------------------------
-
 # 7- and 17-network short names appear verbatim in the ROI name, so we parse
 # the network directly from the label rather than hard-coding a mapping.
 _SCHAEFER_URL = (
@@ -137,6 +118,7 @@ _SCHAEFER_CITE = "Schaefer et al. (2018), Cereb Cortex; Yeo et al. (2011), J Neu
 
 
 def generate_schaefer(parcels=(100, 200, 300, 400), networks=(7, 17)) -> None:
+    """Fetch Schaefer parcellation centroids for each requested parcel/network size."""
     print("Schaefer:")
     for n in parcels:
         for nets in networks:
@@ -148,7 +130,6 @@ def generate_schaefer(parcels=(100, 200, 300, 400), networks=(7, 17)) -> None:
                 print(f"  SKIP Schaefer{n}-{nets}: {e}")
                 continue
             src = pd.read_csv(io.StringIO(resp.text))
-            # Columns: ROI Label, ROI Name, R, A, S  (RAS ≈ MNI x/y/z)
             names = src["ROI Name"]
             # e.g. "7Networks_LH_Vis_1" -> hemi=LH, network=Vis
             parts = names.str.split("_", expand=True)
@@ -159,16 +140,13 @@ def generate_schaefer(parcels=(100, 200, 300, 400), networks=(7, 17)) -> None:
                 "x": src["R"], "y": src["A"], "z": src["S"],
                 "network": network,
                 "hemisphere": hemi,
-                "structure": "cortical",  # Schaefer is a cortical parcellation
+                "structure": "cortical",
             })
             _write(f"Schaefer{n}-{nets}", df, url, _SCHAEFER_CITE)
 
 
-# ---------------------------------------------------------------------------
-# Coordinate-defined atlases via nilearn
-# ---------------------------------------------------------------------------
-
 def generate_power264() -> None:
+    """Fetch the Power 2011 coordinate atlas centroids via nilearn."""
     from nilearn import datasets as nds
     print("Power264:")
     try:
@@ -189,6 +167,7 @@ def generate_power264() -> None:
 
 
 def generate_dosenbach160() -> None:
+    """Fetch the Dosenbach 2010 coordinate atlas centroids via nilearn."""
     from nilearn import datasets as nds
     print("Dosenbach160:")
     try:
@@ -213,6 +192,7 @@ def generate_dosenbach160() -> None:
 
 
 def generate_seitzman300() -> None:
+    """Fetch the Seitzman 2018 coordinate atlas centroids via nilearn."""
     from nilearn import datasets as nds
     print("Seitzman300:")
     try:
@@ -222,8 +202,7 @@ def generate_seitzman300() -> None:
         return
     rois = s["rois"]
     x, y, z = rois["x"].to_numpy(), rois["y"].to_numpy(), rois["z"].to_numpy()
-    # `regions` is e.g. cortexL / cortexR / subcortical / cerebellum
-    regions = np.asarray(s["regions"])
+    regions = np.asarray(s["regions"])  # e.g. cortexL / cortexR / subcortical / cerebellum
     struct = np.where(np.char.startswith(regions.astype(str), "cortex"), "cortical",
                       np.where(regions.astype(str) == "cerebellum", "cerebellum",
                                "subcortical"))
@@ -247,16 +226,12 @@ def generate_seitzman300() -> None:
            "Seitzman et al. (2018), NeuroImage.")
 
 
-# ---------------------------------------------------------------------------
-# Volumetric parcellations via nilearn -> MNI centroids
-#
-# These are atlases whose "native" form is often a FreeSurfer surface
-# annotation (Destrieux == aparc.a2009s) or a bilateral volume (Harvard-Oxford).
-# We use their published *volumetric MNI* versions and compute one centroid per
-# parcel with nilearn — the reliable way to get MNI coordinates for such atlases.
-# ---------------------------------------------------------------------------
+# Destrieux/Harvard-Oxford are natively a FreeSurfer surface annotation or a
+# bilateral volume; we use their published volumetric-MNI versions and compute
+# one centroid per parcel with nilearn, the reliable way to get MNI coords.
 
 def generate_destrieux148() -> None:
+    """Fetch the volumetric-MNI Destrieux 2009 atlas and compute per-parcel centroids."""
     from nilearn import datasets as nds
     from nilearn.plotting import find_parcellation_cut_coords
     print("Destrieux148:")
@@ -284,11 +259,12 @@ def generate_destrieux148() -> None:
 
 
 def generate_harvard_oxford() -> None:
+    """Fetch the volumetric-MNI Harvard-Oxford cortical atlas and compute per-parcel centroids."""
     from nilearn import datasets as nds
     from nilearn.plotting import find_parcellation_cut_coords
     print("HarvardOxfordCortical:")
     try:
-        # symmetric_split gives separate left/right parcels (one node per side).
+        # symmetric_split: separate left/right parcels, one node per side.
         ho = nds.fetch_atlas_harvard_oxford(
             "cort-maxprob-thr25-2mm", symmetric_split=True)
     except Exception as e:  # noqa: BLE001
@@ -311,12 +287,9 @@ def generate_harvard_oxford() -> None:
            "Desikan et al. (2006) / Makris et al. (2006), Harvard-Oxford atlas.")
 
 
-# ---------------------------------------------------------------------------
-# AAL and Glasser — volumetric MNI atlases with per-region XML label names.
-# Fetched directly (nilearn's AAL fetch fails on the host's broken TLS chain;
-# the Glasser MMP is not distributed via nilearn/templateflow as the 360-parcel
-# volume), then centroids are computed from the label volume.
-# ---------------------------------------------------------------------------
+# AAL/Glasser are fetched directly rather than via nilearn (AAL fetch fails on
+# the host's broken TLS chain; Glasser MMP isn't distributed as this volume),
+# then centroids are computed from the label volume.
 
 def _xml_index_to_name(xml_path: Path) -> dict[int, str]:
     """Parse an FSL-style atlas XML into {integer label index -> region name}."""
@@ -336,6 +309,7 @@ def _xml_index_to_name(xml_path: Path) -> dict[int, str]:
 
 
 def _aal_structure(name: str) -> str:
+    """Classify an AAL region name as cerebellum/subcortical/cortical."""
     n = name.lower()
     if n.startswith("cerebel") or n.startswith("vermis"):
         return "cerebellum"
@@ -347,6 +321,7 @@ def _aal_structure(name: str) -> str:
 
 
 def generate_aal116() -> None:
+    """Download the AAL116 atlas and compute per-region MNI centroids from its label volume."""
     from nilearn import image
     print("AAL116:")
     url = "https://www.gin.cnrs.fr/AAL_files/aal_for_SPM12.tar.gz"
@@ -383,6 +358,7 @@ def generate_aal116() -> None:
 
 
 def generate_glasser360() -> None:
+    """Download the Glasser360 (HCP-MMP1.0) atlas volume and compute per-region MNI centroids."""
     from nilearn import image
     print("Glasser360:")
     base = ("https://raw.githubusercontent.com/mbedini/"
@@ -414,21 +390,18 @@ def generate_glasser360() -> None:
            "Bedini et al. (2023), Brain Struct Funct.")
 
 
-# ---------------------------------------------------------------------------
-# Desikan-Killiany — a FreeSurfer *surface* atlas. The ENIGMA toolbox ships the
-# DK labels resampled onto the conte69 (fs_LR 32k) surface as a per-vertex label
-# vector; we average vertex coordinates per parcel to get centroids in conte69
-# space (which is close to MNI152 — validated at ~3 mm against the volumetric
-# Glasser). ENIGMA gives numeric parcel ids, not names, and its id ordering has
-# a medial-wall gap, so region names are assigned by matching each parcel to the
-# nearest published DK centroid (Hungarian assignment) and asserting the fit is
-# tight — this is robust to the exact id convention and self-checks.
-# ---------------------------------------------------------------------------
+# Desikan-Killiany is a FreeSurfer *surface* atlas. ENIGMA ships DK labels
+# resampled onto the conte69 surface as per-vertex ids; we average vertex
+# coords per parcel to get centroids in conte69 space (close to MNI152,
+# validated ~3mm against volumetric Glasser). ENIGMA's ids are numeric, not
+# names, with a medial-wall gap, so names are assigned by matching each
+# parcel to the nearest published DK centroid (Hungarian assignment),
+# asserting the fit is tight — robust to the exact id convention, self-checks.
 
-# Approximate published left-hemisphere DK centroids (MNI mm). Used only to map
-# parcels -> names by proximity; the *shipped* coordinates are the conte69
-# centroids. Right hemisphere is the mirror (x -> -x). Values need only be
-# closer to the right region than to any other (DK parcels are >~15 mm apart).
+# Approximate published left-hemisphere DK centroids (MNI mm), used only to
+# map parcels -> names by proximity; shipped coordinates are the conte69
+# centroids. Right hemisphere is the mirror (x -> -x); DK parcels are
+# >~15mm apart so values need only be closer to the right region than any other.
 _DK_LH_REF = {
     "bankssts": (-52, -44, 6), "caudalanteriorcingulate": (-5, 18, 27),
     "caudalmiddlefrontal": (-35, 12, 44), "cuneus": (-6, -80, 27),
@@ -451,9 +424,7 @@ _DK_LH_REF = {
 
 
 def _assign_dk_names(centroids, ref_names, ref_xyz):
-    """Match parcel centroids to reference DK regions by Hungarian assignment.
-    Returns (name_per_parcel, max_residual_mm). The one leftover parcel (medial
-    wall) is named ``None``."""
+    """Match parcel centroids to reference DK regions by Hungarian assignment; returns (names, max_residual_mm)."""
     from scipy.optimize import linear_sum_assignment
     cost = np.linalg.norm(ref_xyz[:, None, :] - centroids[None, :, :], axis=2)
     rows, cols = linear_sum_assignment(cost)
@@ -466,6 +437,7 @@ def _assign_dk_names(centroids, ref_names, ref_xyz):
 
 
 def generate_desikan_killiany() -> None:
+    """Download ENIGMA's conte69 Desikan-Killiany surface parcellation and compute MNI centroids."""
     import nibabel as nib
     print("DesikanKilliany68:")
     base = ("https://raw.githubusercontent.com/MICA-MNI/ENIGMA/master/"
@@ -496,8 +468,8 @@ def generate_desikan_killiany() -> None:
         ids = [p for p in np.unique(lab[vmask]) if p != 0]
         cent = np.array([coords[lab == p].mean(0) for p in ids])
         names, resid = _assign_dk_names(cent, ref_names, ref)
-        # A clean DK match is a few mm; a large residual means the id convention
-        # or source changed and names can no longer be trusted -> refuse to ship.
+        # A clean match is a few mm; a large residual means the id convention
+        # changed and names can't be trusted -> refuse to ship.
         if resid > 15.0:
             print(f"  SKIP DesikanKilliany68: {side} name match residual "
                   f"{resid:.1f} mm exceeds 15 mm — cannot trust region names")
@@ -515,16 +487,11 @@ def generate_desikan_killiany() -> None:
            "(Larivière et al. 2021).")
 
 
-# ---------------------------------------------------------------------------
-# Whole-brain variants — cortical atlas + the standard subcortical structures.
-#
-# The subcortical gray-matter structures (the FreeSurfer aseg / ENIGMA "sctx"
-# set: accumbens, amygdala, caudate, hippocampus, pallidum, putamen, thalamus
-# x L/R) are the same regardless of the cortical parcellation they accompany, so
-# we compute them once from the volumetric-MNI Harvard-Oxford subcortical atlas
-# and append them to each cortical atlas to form a *WholeBrain variant. The
-# cortical-only atlases are kept as-is.
-# ---------------------------------------------------------------------------
+# Whole-brain variants: the standard subcortical GM structures (FreeSurfer
+# aseg / ENIGMA "sctx" set) are the same regardless of cortical parcellation,
+# so compute them once from Harvard-Oxford subcortical and append to each
+# cortical atlas to form a *WholeBrain variant; cortical-only atlases are
+# kept as-is.
 
 _HO_SUBCORTICAL_KEEP = (
     "Thalamus", "Caudate", "Putamen", "Pallidum",
@@ -533,10 +500,7 @@ _HO_SUBCORTICAL_KEEP = (
 
 
 def _harvard_oxford_subcortical():
-    """The 14 standard subcortical GM structures as MNI centroids (or None).
-
-    Non-gray-matter Harvard-Oxford labels (white matter, ventricle, cortex,
-    brain-stem) are excluded so this is a clean, standard subcortical set."""
+    """Return the 14 standard subcortical GM structures as MNI centroids, or None if the fetch fails."""
     from nilearn import datasets as nds
     from nilearn.plotting import find_parcellation_cut_coords
     try:
@@ -558,6 +522,7 @@ def _harvard_oxford_subcortical():
 
 
 def generate_wholebrain_variants() -> None:
+    """Append the shared subcortical centroids to each cortical atlas to build *WholeBrain variants."""
     print("Whole-brain variants (cortical + subcortical):")
     sub = _harvard_oxford_subcortical()
     if sub is None or len(sub) != 14:
@@ -590,11 +555,8 @@ def generate_wholebrain_variants() -> None:
                cite + "Harvard-Oxford subcortical structures.")
 
 
-# ---------------------------------------------------------------------------
-# Provenance sidecar
-# ---------------------------------------------------------------------------
-
 def write_sources() -> None:
+    """Write SOURCES.md documenting the provenance of every generated atlas."""
     lines = [
         "# Bundled atlas coordinate sources",
         "",
@@ -612,6 +574,7 @@ def write_sources() -> None:
 
 
 def main() -> int:
+    """Generate all bundled atlases and write the provenance sidecar."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     generate_schaefer()
     generate_power264()

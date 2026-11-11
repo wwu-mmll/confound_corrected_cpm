@@ -1,12 +1,6 @@
-"""
-Structural guards on the package layout.
-
-These do not test behaviour; they protect the dependency direction established
-when `utils.py` was split up. The numeric core used to import
-`cccpm.reporting.plots.plots`, which dragged matplotlib and seaborn into every
-module that touched the maths. Splitting the file fixed it once -- this test
-keeps it fixed.
-"""
+"""Guards the dependency direction from a past split: the numeric core used to
+import `cccpm.reporting.plots.plots`, dragging matplotlib/seaborn into every
+module that touched the maths. This keeps it from regressing."""
 import ast
 from pathlib import Path
 
@@ -32,14 +26,8 @@ def _imported_modules(path):
 
 
 def _offenders(predicate):
-    """Report every core module whose imports match ``predicate``.
-
-    One test, not one per file: a per-module parametrisation turned two checks
-    into 42 collected tests without telling a failure anything the message below
-    does not already say.
-    """
-    # Collapsing the old per-file parametrisation means an empty CORE_MODULES
-    # would now pass silently instead of collecting zero tests.
+    """Core modules whose imports match ``predicate``."""
+    # Guards against CORE_MODULES silently ending up empty (e.g. a path typo).
     assert CORE_MODULES, f"no core modules found under {SRC}"
 
     found = {}
@@ -51,7 +39,6 @@ def _offenders(predicate):
 
 
 def test_numeric_core_does_not_import_reporting():
-    """The dependency arrow points core -> reporting, never the other way."""
     offenders = _offenders(
         lambda m: m == "cccpm.reporting" or m.startswith("cccpm.reporting."))
     assert not offenders, (
@@ -62,7 +49,6 @@ def test_numeric_core_does_not_import_reporting():
 
 
 def test_numeric_core_does_not_import_plotting_stack():
-    """Nor may it import matplotlib/seaborn directly."""
     stack = {"matplotlib", "seaborn", "netplotbrain", "pycirclize", "plotly"}
     offenders = _offenders(lambda m: m.split(".")[0] in stack)
     assert not offenders, f"these modules import the plotting stack: {offenders}."

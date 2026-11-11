@@ -1,14 +1,6 @@
-"""
-A report must say which analysis produced it.
-
-Confound control is two run-level choices (`selection_input`, `model_input`), so
-one report is one cell of that 2x2 and there is nothing to compare side by side
-inside it. That makes it the report's job to say which cell it is. Before this,
-a naive run and a fully confound-controlled run opened with the *identical*
-sentence -- "The connectome model predicted target: r = ..." -- and the
-configuration was only in a table at the bottom of the appendix. Anyone handed
-the HTML could not tell them apart.
-"""
+"""A report must say which analysis produced it: before this, a naive run and
+a fully confound-controlled run opened with the identical headline sentence,
+and the configuration was buried in an appendix table."""
 import contextlib
 import io
 import itertools
@@ -54,14 +46,8 @@ def _run(results_dir, selection_input, model_input, covariates=True, n_permutati
 
 @pytest.fixture(scope="module")
 def run_dir(tmp_path_factory):
-    """Run each configuration at most once, and share its results directory.
-
-    The tests in this file need five distinct configurations and between them
-    used to ask for seventeen analyses -- the four 2x2 cells alone were run
-    three times over. Every test here only ever *reads* from the directory
-    (run_config.json, report.html, cpm_log.txt), so one run per configuration
-    is enough.
-    """
+    """Caches one run per configuration; tests only ever read the directory,
+    and used to re-run the same 2x2 cells redundantly across the file."""
     cache = {}
 
     def get(selection_input, model_input, covariates=True):
@@ -76,36 +62,23 @@ def run_dir(tmp_path_factory):
 
 
 def _rendered_text(results_dir):
-    """Report text with markup and embedded figures stripped.
-
-    Thin alias for ``conftest.report_text`` -- base64 is not prose, and the
-    report is UTF-8 whatever the runner's locale.
-    """
     return report_text(results_dir)
 
 
 def _headline(results_dir):
-    """Just the headline callout.
-
-    Deliberately not the flattened page text: the confound configuration is also
-    explained in a panel further down, so searching the whole document would
-    pass even with the headline saying nothing -- which is exactly what this
-    test is for. (Checked: it does pass that way if you are not careful.)
-    """
+    """Only the headline callout -- not the flattened page text, since the
+    configuration is also explained in a panel further down, which would let
+    a silent headline pass undetected."""
     html = Path(results_dir, 'report.html').read_text(encoding='utf-8')
     match = re.search(r'<div class="headline-callout">(.*?)</div>', html, re.S)
     assert match, "headline callout not found in the report"
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip()
 
 
-# ---------------------------------------------------------------------------
-# The configuration is recorded, and recorded independently of the log
-# ---------------------------------------------------------------------------
-
 @pytest.mark.parametrize("selection_input,model_input", CELLS)
 def test_run_config_is_persisted(run_dir, selection_input, model_input):
-    """Written as a file, not parsed back out of cpm_log.txt: a run with logging
-    turned down must still produce a report that knows its own configuration."""
+    """A run with logging turned down must still produce a report that knows
+    its own configuration (not parsed back out of cpm_log.txt)."""
     d = run_dir(selection_input, model_input)
     with open(os.path.join(d, 'run_config.json'), encoding='utf-8') as f:
         cfg = json.load(f)
@@ -115,15 +88,11 @@ def test_run_config_is_persisted(run_dir, selection_input, model_input):
 
 
 def test_unknown_configuration_says_nothing_rather_than_guessing():
-    """An old results directory has no run_config.json. Claiming "none" for a
+    """An old results directory has no run_config.json; claiming "none" for a
     run that was in fact controlled would be worse than staying silent."""
     assert describe_confound_control({}) == (None, None)
     assert describe_confound_control(None) == (None, None)
 
-
-# ---------------------------------------------------------------------------
-# ...and it reaches the reader
-# ---------------------------------------------------------------------------
 
 def test_the_four_cells_produce_four_distinguishable_headlines(run_dir):
     headlines = {}
@@ -147,13 +116,12 @@ def test_confound_control_is_explained_in_the_body(run_dir, selection_input, mod
         {'selection_input': selection_input, 'model_input': model_input,
          'has_covariates': True})
     assert label and explanation
-    # The explanation is prose; check a distinctive fragment survived rendering.
-    assert explanation.split(" -- ")[0][:45] in text
+    assert explanation.split(" -- ")[0][:45] in text  # fragment survived rendering
 
 
 def test_glossary_describes_the_connectome_model_this_run_produced(run_dir):
-    """`connectome` means different things under the two model_input settings,
-    and carries the same row label either way."""
+    """`connectome` means different things under the two model_input settings
+    but carries the same row label either way."""
     raw = _rendered_text(run_dir("residualized", "raw"))
     residualized = _rendered_text(run_dir("residualized", "residualized"))
     assert "deconfounded network strengths" in residualized
@@ -161,8 +129,7 @@ def test_glossary_describes_the_connectome_model_this_run_produced(run_dir):
 
 
 def test_suppressed_increment_is_explained(run_dir):
-    """The em dash in the Pearson column is deliberate; say so, or it reads as a
-    failed computation."""
+    """The em dash in the Pearson column is deliberate, not a failed computation."""
     text = _rendered_text(run_dir("residualized", "residualized"))
     assert "Fisher" in text and "Steiger" in text
 
@@ -174,14 +141,10 @@ def test_report_without_covariates_says_so(run_dir):
     assert "no covariates" in _rendered_text(d)
 
 
-# ---------------------------------------------------------------------------
-# The configuration table
-# ---------------------------------------------------------------------------
-
 def test_wrapped_config_values_do_not_become_their_own_rows(run_dir):
-    """An estimator repr is logged over several indented lines. Treating the
-    continuations as new keys produced rows like "threshold=[0.05])]," with an
-    empty value."""
+    """An estimator repr is logged over several indented lines; treating the
+    continuations as new keys produced rows like "threshold=[0.05])]," with
+    an empty value."""
     d = run_dir("residualized", "residualized")
     pairs = parse_config_block(os.path.join(d, 'cpm_log.txt'))
 

@@ -7,17 +7,11 @@ import pandas as pd
 
 
 def average_over_repeats(df, value_cols):
-    """
-    Collapse a per-fold individual-level frame to one row per subject.
+    """Collapse a per-fold frame to one row per (subject, model, network), averaging value_cols.
 
-    With a ``RepeatedKFold`` outer CV, each subject is a test case once per
-    repeat, so the raw predictions / network-strength frames contain
-    ``n_repeats`` rows per (subject, model, network). Averaging the value
-    column(s) over the repeats yields the single per-subject value that the
-    report plots expect; ``y_true`` is constant per subject and kept as-is. For
-    a plain (non-repeated) CV this is a no-op (one row per group already).
-
-    Returns ``df`` unchanged if it lacks the grouping keys (e.g. an empty frame).
+    A RepeatedKFold outer CV tests each subject once per repeat, so this is a
+    no-op for plain CV but collapses repeat-duplicates otherwise. Returned
+    unchanged if ``df`` lacks the grouping keys.
     """
     keys = ['sample_index', 'model', 'network']
     if df is None or df.empty or not set(keys).issubset(df.columns):
@@ -29,12 +23,7 @@ def average_over_repeats(df, value_cols):
 
 
 def format_results_table(df, precision=2):
-    """
-    Format a MultiIndex DataFrame:
-    - Merge 'mean' and 'std' into 'summary'
-    - Format p-values: add * / ** and highlight in bold using CSS
-    - Return a styled Pandas DataFrame with APA style
-    """
+    """Format a MultiIndex results frame into an APA-style table: merges mean/std into "mean [sd]", bolds significant p-values."""
     formatted = {}
     metrics = df.columns.get_level_values(0).unique()
 
@@ -43,10 +32,8 @@ def format_results_table(df, precision=2):
         std = df[(metric, "std")]
         p = df[(metric, "p")]
 
-        # Format mean [std]. NaN means "not applicable", not "missing": the
-        # increment of a metric whose difference is not a statistic (Pearson r,
-        # F1) is deliberately not computed, and a model variant that a run does
-        # not define is NaN-filled. An em dash says that; "nan" does not.
+        # NaN means "not applicable" (non-incrementable metric, or an undefined
+        # model variant), not "missing" -- an em dash says that, "nan" does not.
         def summary_string(row):
             if pd.isna(row["mean"]):
                 return "\u2014"
@@ -57,7 +44,6 @@ def format_results_table(df, precision=2):
         summary_col = pd.DataFrame({"mean": mean, "std": std}).apply(
             summary_string, axis=1)
 
-        # Annotate p-values with asterisks (we'll apply bold via styling)
         def p_string(val):
             if pd.isna(val):
                 return ""
@@ -76,10 +62,8 @@ def format_results_table(df, precision=2):
     combined = pd.DataFrame(formatted, index=df.index)
     combined.columns = pd.MultiIndex.from_tuples(combined.columns)
 
-    # Column sort: summary → p
     combined = combined.loc[:, sorted(combined.columns, key=lambda x: (x[0], ["mean [sd]", "p"].index(x[1])))]
 
-    # Build Styler
     styler = combined.style.set_properties(
         **{
             'font-size': '10px',
@@ -100,18 +84,17 @@ def format_results_table(df, precision=2):
                    ('padding', '2px 4px')]}
     ])
 
-    # Apply bold to significant p-values via CSS
     def bold_sig(val):
         if isinstance(val, str) and val.endswith("**") or val.endswith("*"):
             return 'font-weight: bold'
         return ''
 
-    # Apply only to p-value columns
     for col in combined.columns:
         if col[1] == "p":
             styler = styler.map(bold_sig, subset=[col])
-    # Add thick horizontal lines between top-level index groups
+
     def thick_divider_rows(df):
+        """Border above each row where the top-level ('model') index changes."""
         styles = pd.DataFrame("", index=df.index, columns=df.columns)
         previous_group = None
         for i, idx in enumerate(df.index):
@@ -126,25 +109,24 @@ def format_results_table(df, precision=2):
 
 
 def extract_log_block(filepath):
+    """Extract the text between the first two "=" separator lines of a log file."""
     with open(filepath, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
-    # Find all indices of separator lines (e.g. "=======")
     sep_indices = [i for i, line in enumerate(lines) if line.strip().startswith("=")]
 
     if len(sep_indices) >= 2:
-        # Take everything between the first two separator lines
         start = sep_indices[0] + 1
         end = sep_indices[1]
         content = lines[start:end]
     else:
-        content = []  # or raise an error, depending on your expectations
+        content = []
 
     return "".join(content).strip()
 
 
-# Function to read CSV file from the given folder path
 def load_data_from_folder(folder_path, filename):
+    """Read a CSV file from a results folder; raises RuntimeError if missing."""
     csv_path = os.path.join(folder_path, filename)
     if os.path.exists(csv_path):
         return pd.read_csv(csv_path)
@@ -170,20 +152,15 @@ def embed_image_base64(path: str, mime: str = "image/png") -> str:
 
 
 def parse_config_block(log_path: str) -> list[tuple[str, str]]:
-    """
-    Parse the configuration block from cpm_log.txt.
-
-    Returns a list of (key, value) pairs in log order.
-    """
+    """Parse cpm_log.txt's configuration block into (key, value) pairs, in log order."""
     raw = extract_log_block(log_path)
     pairs = []
     for line in raw.splitlines():
         if not line.strip():
             continue
-        # Values can wrap: an estimator repr is logged over several lines, and
-        # its continuations are indented. Treating them as new keys produced
-        # rows like "threshold=[0.05])]," with an empty value in the report's
-        # configuration table.
+        # Indented continuation of a multi-line value (e.g. an estimator repr),
+        # not a new key -- else it produces rows like "threshold=[0.05])]," with
+        # an empty value.
         is_continuation = line[:1].isspace() and pairs
         line = line.strip()
         m = re.match(r"^([^:]+):\s*(.*)$", line)
@@ -203,6 +180,7 @@ def styler_to_html(styler) -> str:
 
 
 def load_results_from_folder(folder_path, filename):
+    """Read a two-level-header, three-level-index summary CSV; raises RuntimeError if missing."""
     csv_path = os.path.join(folder_path, filename)
     if os.path.exists(csv_path):
         return pd.read_csv(csv_path, header=[0, 1], index_col=[0, 1, 2])

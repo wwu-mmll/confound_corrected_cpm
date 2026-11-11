@@ -53,6 +53,7 @@ nav:
     - Regression: 'examples/regression.md'
     - Classification: 'examples/classification.md'
     - Simulated Data: 'examples/simulated_data.md'
+    - ABIDE Negative Control: 'examples/abide_negative_control.md'
 - API:
     - CPM Analysis: api/cpm_regression.md
     - Edge Selection: api/edge_selection.md
@@ -72,7 +73,7 @@ plugins:
       handlers:
         python:
           options:
-            docstring_style: numpy
+            docstring_style: google
             show_source: False
           paths:
             [src]

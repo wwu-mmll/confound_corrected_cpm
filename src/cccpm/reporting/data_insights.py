@@ -1,9 +1,7 @@
-"""
-Diagnostic summary of the input data, written before the analysis runs.
+"""Diagnostic summary of the input data, written before the analysis runs.
 
-This lives in `reporting/` rather than next to the validation helpers because
-it draws figures. Keeping it here is what allows the numeric core to be
-imported without matplotlib and seaborn.
+Lives in `reporting/` (not next to the validation helpers) so the numeric
+core can be imported without matplotlib/seaborn.
 """
 import os
 
@@ -19,13 +17,7 @@ from cccpm.validation import get_variable_names
 
 
 def generate_data_insights(X, y, covariates, results_directory):
-    """
-    Generate summary statistics and diagnostic plots about the input data.
-    Saves outputs to a subfolder in results_directory.
-
-    Handles both pandas DataFrames and NumPy arrays.
-    """
-    # Create output folder
+    """Generate summary statistics and diagnostic plots about the input data; handles both DataFrames and NumPy arrays."""
     output_dir = os.path.join(results_directory, "data_insights")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -34,11 +26,9 @@ def generate_data_insights(X, y, covariates, results_directory):
     pd.Series([y_name]).to_csv(os.path.join(output_dir, "y_name.csv"), index=False, header=False)
     pd.Series(covariates_names).to_csv(os.path.join(output_dir, "covariate_names.csv"), index=False, header=False)
 
-    # Convert X to DataFrame if needed
     if isinstance(X, np.ndarray):
         X = pd.DataFrame(X, columns=[f"feature {i + 1}" for i in range(X.shape[1])])
 
-    # Convert y to Series
     if isinstance(y, np.ndarray):
         y = pd.Series(np.squeeze(y), name="target")
     elif isinstance(y, pd.DataFrame):
@@ -47,7 +37,6 @@ def generate_data_insights(X, y, covariates, results_directory):
     elif isinstance(y, pd.Series):
         y.name = y.name or "target"
 
-    # Convert covariates to DataFrame
     if covariates is not None:
         if isinstance(covariates, np.ndarray):
             if len(covariates.shape) == 1:
@@ -59,7 +48,6 @@ def generate_data_insights(X, y, covariates, results_directory):
             if covariates.columns[0] is None:
                 covariates.columns = ["covariate 1"]
 
-    # --- Combine all data to check for missing values ---
     if isinstance(X, torch.Tensor):
         X = pd.DataFrame(X.detach().cpu().numpy())
     if isinstance(y, torch.Tensor):
@@ -72,7 +60,6 @@ def generate_data_insights(X, y, covariates, results_directory):
     full_data = pd.concat(parts, axis=1)
     missing_total = full_data.isnull().sum().sum()
 
-    # --- Summary ---
     summary = {
         "Number of samples": len(X),
         "Number of features (connectivity values)": X.shape[1],
@@ -82,7 +69,6 @@ def generate_data_insights(X, y, covariates, results_directory):
     summary_df = pd.DataFrame.from_dict(summary, orient="index", columns=["Value"])
     summary_df.to_csv(os.path.join(output_dir, "summary.csv"))
 
-    # --- Target Histogram ---
     plt.figure(figsize=(4, 3))
     sns.histplot(y, bins=30, color="gray", edgecolor="white")
     plt.title("Distribution of Target Variable")
@@ -92,12 +78,10 @@ def generate_data_insights(X, y, covariates, results_directory):
     plt.savefig(os.path.join(output_dir, "target_distribution.png"), dpi=300)
     plt.close()
 
-    # --- Scatter Matrix: Covariates and Target ---
     if covariates is not None and not covariates.empty:
         cov_y = pd.concat([covariates, y.rename("target")], axis=1)
         pairplot_flexible(cov_y, os.path.join(output_dir, "scatter_matrix.png"))
 
-    # --- Optional: Missing Values Heatmap ---
     if missing_total > 0:
         plt.figure(figsize=(10, 6))
         sns.heatmap(full_data.isnull(), cbar=False, yticklabels=False)

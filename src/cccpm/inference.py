@@ -1,18 +1,7 @@
-"""
-Permutation inference.
+"""Turns a null distribution into a p-value: model-level CV-metric permutation test, plus NBS/TFCE edge-stability correction.
 
-Everything that turns a null distribution into a p-value: the model-level
-permutation test over CV metrics, and the two cluster-based corrections for the
-edge-level stability map -- NBS (network-based statistic: suprathreshold
-connected components) and TFCE (threshold-free cluster enhancement).
-
-This is the most statistically delicate code in the package. It used to sit in
-`results_manager.py` behind ~375 lines of unrelated accumulator, which is a bad
-place for it to be hard to find.
-
-The permutation *results* are produced upstream -- `CPMAnalysis` runs the model
-on shuffled targets, vectorised over the runs axis. This module only reads the
-true-vs-null arrays back off disk and does the statistics.
+The permutation *results* are produced upstream by `CPMAnalysis`; this module
+only reads the true-vs-null arrays back off disk and does the statistics.
 """
 import os
 import json
@@ -27,15 +16,11 @@ from cccpm.results_manager import ResultsManager
 
 
 class PermutationManager:
+    """Permutation-based significance testing for CV metrics and edge stability."""
+
     @staticmethod
     def calculate_p_values(true_results, perms):
-        """
-        Calculate p-values based on true results and permutation results.
-
-        :param true_results: DataFrame with the true results.
-        :param perms: DataFrame with the permutation results.
-        :return: DataFrame with the calculated p-values.
-        """
+        """Returns a (network, model)-indexed DataFrame of p-values from true vs. permutation CV results."""
         grouped_true = true_results.groupby(['network', 'model'])
         grouped_perms = perms.groupby(['network', 'model'])
 
@@ -48,12 +33,10 @@ class PermutationManager:
         p_values_df = p_values_df.set_index(['network', 'model'])
         return p_values_df
 
-    # Metrics where lower is better (p-value: true < perm)
     LOWER_IS_BETTER = {'mean_squared_error', 'mean_absolute_error'}
 
     @staticmethod
     def _is_lower_better(column_name):
-        """Check if a metric is one where lower values are better."""
         if column_name in PermutationManager.LOWER_IS_BETTER:
             return True
         if column_name.endswith('error'):
@@ -62,24 +45,15 @@ class PermutationManager:
 
     @staticmethod
     def _calculate_group_p_value(true_group, perms_group):
-        """
-        Calculate p-value for a group of metrics.
-
-        :param true_group: DataFrame with the true results.
-        :param perms_group: DataFrame with the permutation results.
-        :return: Series with calculated p-values.
-        """
+        """Returns a Series of p-values for one (network, model) group of metrics."""
         result_dict = {}
         for column in true_group.columns:
             observed = true_group[column].values[0]
             null = perms_group[column].astype(float)
 
-            # An undefined statistic has no null to compare against. Every
-            # comparison with NaN is False, so the count would come out 0 and
-            # the +1 correction would report the *floor* -- 1/(n_perms+1), the
-            # most significant p-value the test can produce -- for a model that
-            # does not exist. (This is what a run without covariates hits: the
-            # covariates/full/connectome_residualized/increment rows are NaN.)
+            # NaN compares False everywhere, so skipping this would floor the
+            # p-value at 1/(n_perms+1) for a model that doesn't exist (e.g.
+            # covariates/full/increment rows in a run without covariates).
             if pd.isna(observed) or null.isna().all():
                 result_dict[column] = float('nan')
                 continue
@@ -87,12 +61,10 @@ class PermutationManager:
             if PermutationManager._is_lower_better(column):
                 condition_count = (observed > null).sum()
             else:
-                # Higher is better: score, accuracy, balanced_accuracy, f1_score, roc_auc, etc.
                 condition_count = (observed < null).sum()
 
-            # Standard permutation p-value (Phipson & Smyth, 2010): the +1 in both
-            # numerator and denominator counts the observed statistic itself and
-            # guarantees a valid p-value in (0, 1].
+            # Phipson & Smyth (2010): +1 in both terms counts the observed
+            # statistic itself and guarantees a valid p-value in (0, 1].
             result_dict[column] = (condition_count + 1) / (len(null) + 1)
 
         return pd.Series(result_dict)
@@ -101,23 +73,12 @@ class PermutationManager:
     def calculate_permutation_results(results_directory, logger, method="nbs",
                                       nbs_stability_threshold=0.5,
                                       nbs_component_stat="extent"):
-        """
-        Calculate and save the permutation test results.
+        """Computes and saves model-level metric p-values and NBS/TFCE edge-stability significance to disk.
 
-        Model-level metric p-values are always computed. Edge-stability
-        significance is established at the *subnetwork* level via a
-        Network-Based Statistic (``method='nbs'``) or, threshold-free, via
-        network TFCE (``method='tfce'``); both control the family-wise error
-        rate through a permutation max-statistic and write a per-edge p-value
-        matrix (edges belonging to a significant subnetwork carry that
-        subnetwork's p-value) to ``stability_edges_significance.npy``.
-
-        :param results_directory: Directory where the results are saved.
-        :param logger: Logger for progress messages.
-        :param method: Edge-significance method, ``'nbs'`` (default) or ``'tfce'``.
-        :param nbs_stability_threshold: Stability threshold (a fraction of folds,
-            not a p-value) for NBS component forming.
-        :param nbs_component_stat: NBS component statistic, ``'extent'`` or ``'intensity'``.
+        Both edge methods control the family-wise error rate via a
+        permutation max-statistic and write a per-edge p-value matrix to
+        ``stability_edges_significance.npy`` (NBS: subnetwork-level, edges
+        inherit their component's p-value; TFCE: per-edge).
         """
         true_results = ResultsManager.load_cv_results(results_directory)
 
@@ -154,19 +115,14 @@ class PermutationManager:
 
     @staticmethod
     def _layer_arrays(true_stability, permutation_stability, layer):
-        """Extract the observed ``[n_nodes, n_nodes]`` matrix and the
-        ``[n_nodes, n_nodes, n_perms]`` null stack for one network *layer*
-        (``0`` = positive, ``1`` = negative) from the stored stability arrays,
-        which have shape ``[n_nodes, n_nodes, 2, runs]``."""
+        """Returns (observed [n_nodes, n_nodes], null [n_nodes, n_nodes, n_perms]) for one network layer (0=pos, 1=neg)."""
         true_layer = true_stability[:, :, layer, 0]
         perm_layer = permutation_stability[:, :, layer, :]
         return true_layer, perm_layer
 
     @staticmethod
     def _connected_components(supra):
-        """Yield the edge lists of the connected components (each with at least
-        one edge) of a symmetric boolean adjacency matrix, using its upper
-        triangle only. Isolated nodes are skipped."""
+        """Yields edge lists of each connected component of a boolean adjacency matrix (upper triangle only)."""
         graph = nx.from_numpy_array(np.triu(supra, k=1))
         for nodes in nx.connected_components(graph):
             if len(nodes) < 2:
@@ -179,51 +135,22 @@ class PermutationManager:
     def calculate_p_values_edges_nbs(true_stability, permutation_stability,
                                      threshold=0.5, component_stat="extent",
                                      alpha=0.05, return_diagnostics=False):
-        """
-        Network-Based Statistic (Zalesky et al., 2010) for edge-stability
-        significance.
+        """Network-Based Statistic (Zalesky et al., 2010) for edge-stability significance.
 
         Edges whose stability meets ``threshold`` form a graph; its connected
         components are the candidate subnetworks. A permutation null of the
-        **largest component statistic** controls the family-wise error rate, so
-        an observed component is significant if it is larger/stronger than the
-        biggest component seen in (almost) any permutation. Each component's
-        p-value is broadcast onto all of its member edges; every other edge is
-        assigned ``p = 1``.
+        **largest component statistic** controls the FWER, so a component is
+        significant if larger/stronger than the biggest seen in (almost) any
+        permutation; its p-value is broadcast onto its member edges (p=1
+        elsewhere). Inference is at the *subnetwork* level, not per-edge.
 
-        Inference is at the *subnetwork* level: a significant result licenses
-        "this connected subnetwork is selected more consistently than chance",
-        not per-edge claims.
+        Stability over K outer folds is discrete ({0, 1/K, ..., 1}), so
+        ``threshold=0.5`` keeps edges selected in a majority of folds and
+        thresholding is coarse for few folds.
 
-        Note on discreteness: stability over ``K`` outer folds takes only the
-        values ``{0, 1/K, ..., 1}``, so ``threshold=0.5`` keeps edges selected
-        in a majority of folds and the effective thresholding is coarse for few
-        folds. A continuous edge statistic (deferred) would sharpen this.
-
-        Parameters
-        ----------
-        true_stability : ndarray of shape (n_nodes, n_nodes, 2, 1)
-            Observed edge stability; dim 2 is the positive/negative network.
-        permutation_stability : ndarray of shape (n_nodes, n_nodes, 2, n_perms)
-            Edge stability from each permutation run.
-        threshold : float, default=0.5
-            Stability threshold (``>=``) for component forming.
-        component_stat : {'extent', 'intensity'}, default='extent'
-            ``'extent'`` = number of edges in the component (classic NBS);
-            ``'intensity'`` = sum of ``(stability - threshold)`` over its edges.
-        alpha : float, default=0.05
-            Significance level recorded in the diagnostics.
-        return_diagnostics : bool, default=False
-            If ``True``, also return a JSON-serialisable diagnostics dict with
-            the per-network max-component null distribution, the observed
-            components (size / statistic / p-value) and the largest component.
-
-        Returns
-        -------
-        sig_stability : ndarray of shape (n_nodes, n_nodes, 2)
-            Per-edge p-values (member edges carry their component's p-value).
-        diagnostics : dict, optional
-            Returned only when ``return_diagnostics=True``.
+        Args:
+            component_stat: ``'extent'`` = edge count (classic NBS);
+                ``'intensity'`` = sum of ``(stability - threshold)`` over its edges.
         """
         true_stability = np.asarray(true_stability, dtype=float)
         permutation_stability = np.asarray(permutation_stability, dtype=float)
@@ -260,13 +187,11 @@ class PermutationManager:
             true_layer, perm_layer = PermutationManager._layer_arrays(
                 true_stability, permutation_stability, layer)
 
-            # Null distribution of the largest component statistic.
             max_null = np.zeros(n_perms)
             for p in range(n_perms):
                 comps = components_with_stats(perm_layer[:, :, p])
                 max_null[p] = max((s for _, s in comps), default=0.0)
 
-            # Observed components -> component p-value on every member edge.
             components = []
             for edges, stat in components_with_stats(true_layer):
                 p_value = (np.sum(max_null >= stat) + 1) / (n_perms + 1)
@@ -299,17 +224,12 @@ class PermutationManager:
 
     @staticmethod
     def _tfce_map(layer_matrix, heights, E, H, dh):
-        """Threshold-Free Cluster Enhancement score per edge for one network
-        layer: integrate ``extent(component)^E * h^H * dh`` over the threshold
-        sweep *heights* (extent = number of edges in the component the edge
-        belongs to at height ``h``)."""
+        """Integrates extent(component)^E * h^H * dh over the threshold sweep `heights`, per edge."""
         n_nodes = layer_matrix.shape[0]
         tfce = np.zeros((n_nodes, n_nodes))
-        # Tolerance so an edge whose stability lands exactly on a sweep height is
-        # reliably included there. ``heights`` comes from ``np.arange``, whose
-        # accumulated rounding can place a gridpoint a hair above the intended
-        # value (e.g. 0.8 -> 0.8000000000000001); without this, an edge at that
-        # value would non-deterministically drop its top contribution.
+        # np.arange's rounding can put a gridpoint a hair above the intended
+        # value (e.g. 0.8 -> 0.8000000000000001); without this tolerance an
+        # edge at that value would non-deterministically drop its top contribution.
         tol = dh * 1e-6
         for h in heights:
             for edges in PermutationManager._connected_components(layer_matrix >= h - tol):
@@ -323,39 +243,13 @@ class PermutationManager:
     def calculate_p_values_edges_tfce(true_stability, permutation_stability,
                                       E=0.5, H=2.0, dh=0.1, alpha=0.05,
                                       return_diagnostics=False):
-        """
-        Threshold-Free Cluster Enhancement (Smith & Nichols, 2009) adapted to
-        networks, for per-edge stability significance without an arbitrary
-        primary threshold.
+        """Threshold-Free Cluster Enhancement (Smith & Nichols, 2009) adapted to networks.
 
         Each edge's TFCE score integrates the support of the components it
-        belongs to across a sweep of stability thresholds. A permutation
-        **max-TFCE** null across edges controls the family-wise error rate, so
-        this yields genuine per-edge FWER-corrected p-values (unlike NBS, which
-        is subnetwork-level).
-
-        Parameters
-        ----------
-        true_stability : ndarray of shape (n_nodes, n_nodes, 2, 1)
-            Observed edge stability; dim 2 is the positive/negative network.
-        permutation_stability : ndarray of shape (n_nodes, n_nodes, 2, n_perms)
-            Edge stability from each permutation run.
-        E, H : float
-            TFCE extent/height exponents (field-standard defaults 0.5 / 2.0).
-        dh : float, default=0.1
-            Step of the stability-threshold sweep over ``(0, 1]``.
-        alpha : float, default=0.05
-            Significance level recorded in the diagnostics.
-        return_diagnostics : bool, default=False
-            If ``True``, also return a JSON-serialisable diagnostics dict with
-            the per-network max-TFCE null distribution and observed maximum.
-
-        Returns
-        -------
-        sig_stability : ndarray of shape (n_nodes, n_nodes, 2)
-            Per-edge FWER-corrected p-values.
-        diagnostics : dict, optional
-            Returned only when ``return_diagnostics=True``.
+        belongs to across a sweep of stability thresholds; a permutation
+        **max-TFCE** null across edges gives genuine per-edge FWER-corrected
+        p-values (unlike NBS, which is subnetwork-level). E/H are the
+        field-standard extent/height exponents.
         """
         true_stability = np.asarray(true_stability, dtype=float)
         permutation_stability = np.asarray(permutation_stability, dtype=float)

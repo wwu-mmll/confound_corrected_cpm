@@ -1,22 +1,6 @@
-"""
-Equivalence tests: the toolbox's (torch/CUDA) GLM edge selection and CPM model
-solvers must agree with an independent scikit-learn / scipy / numpy
-re-implementation.
-
-This is the credibility backbone for the confound-inflation simulation
-(``scripts/confound_inflation_demo.py``): it proves that
-
-  * the vectorised torch edge statistics (Pearson, partial/semipartial, Spearman)
-    equal the textbook definitions computed with scipy/numpy,
-  * the batched torch OLS solvers behind the four CPM model variants
-    (connectome / covariates / full / residuals) equal sklearn's
-    ``LinearRegression`` when given the same selected edges, and
-  * the full cross-validated pipeline (Pearson / partial selection, optional
-    X-residualisation, sum score, OLS) reproduces an independent sklearn pipeline,
-    yielding the raw > partial > residualised ≈ true ordering.
-
-All tests run on CPU with float64/float32 tolerances.
-"""
+"""Credibility backbone for the confound-inflation simulation: the toolbox's
+torch edge statistics, OLS model solvers, and full CV pipeline must agree
+with an independent scikit-learn/scipy/numpy re-implementation."""
 
 import numpy as np
 import pytest
@@ -36,9 +20,6 @@ from cccpm.simulation.simulate_sem import simulate_data_given_kappa
 P_THRESHOLD = 0.05
 
 
-# --------------------------------------------------------------------------- #
-# Independent reference implementations (numpy / scipy)                        #
-# --------------------------------------------------------------------------- #
 def ref_pearson(X, y):
     """Per-column Pearson r and two-sided t-test p-value."""
     n = len(y)
@@ -55,18 +36,18 @@ def ref_pearson(X, y):
 
 
 def ref_semipartial(X, y, Z):
-    """Per-column semipartial (part) correlation (Z removed from the edge only)
+    """Per-column semipartial (part) correlation, Z removed from the edge only,
     and the partial-correlation t-test p-value (df = n - k - 2)."""
     n, k = len(y), Z.shape[1]
     Z1 = np.column_stack([np.ones(n), Z])
     yc = y - y.mean()
     by = np.linalg.lstsq(Z1, y, rcond=None)[0]
-    yr = y - Z1 @ by                       # y residualised on Z (for partial r)
+    yr = y - Z1 @ by  # y residualised on Z, for partial r
     r_sp = np.empty(X.shape[1])
     p = np.empty(X.shape[1])
     for j in range(X.shape[1]):
         bx = np.linalg.lstsq(Z1, X[:, j], rcond=None)[0]
-        xr = X[:, j] - Z1 @ bx             # edge residualised on Z
+        xr = X[:, j] - Z1 @ bx  # edge residualised on Z
         r_sp[j] = (xr @ yc) / (np.linalg.norm(xr) * np.linalg.norm(yc))
         r_pt = (xr @ yr) / (np.linalg.norm(xr) * np.linalg.norm(yr))
         df = n - k - 2
@@ -87,9 +68,6 @@ def _sim(kappa=0.6, r2=0.36, n=1000, seed=0, n_features=105):
             sim["Z"].astype(np.float64))
 
 
-# --------------------------------------------------------------------------- #
-# 1. Edge selection statistics                                                #
-# --------------------------------------------------------------------------- #
 def test_pearson_matches_scipy():
     X, y, _ = _sim(seed=1)
     r_tb, p_tb = correlations_and_pvalues(
@@ -99,7 +77,6 @@ def test_pearson_matches_scipy():
 
     np.testing.assert_allclose(r_tb, r_ref, atol=1e-6)
     np.testing.assert_allclose(p_tb, p_ref, rtol=1e-6, atol=1e-12)
-    # And the selected-edge masks must be identical.
     np.testing.assert_array_equal(p_tb < P_THRESHOLD, p_ref < P_THRESHOLD)
 
 
@@ -110,7 +87,6 @@ def test_partial_matches_reference():
     r_tb, p_tb = r_tb.numpy().ravel(), p_tb.numpy().ravel()
     r_ref, p_ref = ref_semipartial(X, y, Z)
 
-    # Reported effect size is the semipartial (part) correlation.
     np.testing.assert_allclose(r_tb, r_ref, atol=1e-6)
     np.testing.assert_allclose(p_tb, p_ref, rtol=1e-6, atol=1e-12)
     np.testing.assert_array_equal(p_tb < P_THRESHOLD, p_ref < P_THRESHOLD)
@@ -126,11 +102,7 @@ def test_spearman_matches_scipy():
     np.testing.assert_allclose(r_tb, r_ref, atol=1e-6)
 
 
-# --------------------------------------------------------------------------- #
-# 2. CPM model variants (torch solvers) vs sklearn, given identical edges      #
-# --------------------------------------------------------------------------- #
 def _make_edges(pos_mask, neg_mask):
-    """Build a [F, 2, 1] edge tensor from boolean network masks."""
     edges = np.zeros((len(pos_mask), 2, 1), dtype=np.float32)
     edges[:, Networks.positive, 0] = pos_mask
     edges[:, Networks.negative, 0] = neg_mask
@@ -144,8 +116,7 @@ def test_model_variants_match_sklearn():
     ytr = y[:ntr]
     Ztr, Zte = Z[:ntr], Z[ntr:]
 
-    # Fixed edge mask from Pearson selection on the training split (same mask
-    # fed to BOTH implementations, so this isolates the model solvers).
+    # Same fixed edge mask fed to both implementations isolates the model solvers.
     r_ref, p_ref = ref_pearson(Xtr, ytr)
     pos = (p_ref < P_THRESHOLD) & (r_ref > 0)
     neg = (p_ref < P_THRESHOLD) & (r_ref < 0)
@@ -156,7 +127,6 @@ def test_model_variants_match_sklearn():
     model.fit(Xtr, ytr.reshape(-1, 1), Ztr)
     pred = model.predict(Xte, Zte).numpy()[:, :, Networks.both, 0]  # [N, n_models]
 
-    # sklearn references -----------------------------------------------------
     pos_tr, neg_tr = Xtr[:, pos].sum(1), Xtr[:, neg].sum(1)
     pos_te, neg_te = Xte[:, pos].sum(1), Xte[:, neg].sum(1)
     str_tr = np.column_stack([pos_tr, neg_tr])
@@ -174,9 +144,6 @@ def test_model_variants_match_sklearn():
     np.testing.assert_allclose(pred[:, Models.full], p_full, atol=2e-3)
 
 
-# --------------------------------------------------------------------------- #
-# 3. End-to-end cross-validated pipeline: toolbox vs sklearn + inflation story #
-# --------------------------------------------------------------------------- #
 def _toolbox_connectome_ev(X, y, Z, selection_input, model_input, cv, tmp_path):
     ue = UnivariateEdgeSelection(
         selection_statistic="pearson", selection_input=selection_input,
@@ -191,13 +158,9 @@ def _toolbox_connectome_ev(X, y, Z, selection_input, model_input, cv, tmp_path):
 
 
 def _sklearn_connectome_ev(X, y, Z, selection_input, model_input, cv):
-    """The same recipe in sklearn, with the two confound choices independent.
-
-    `selection_input` decides whether edge selection controls for Z; per-edge
-    that is the regression y ~ 1 + Z + edge, which is what ref_semipartial
-    computes. `model_input` decides whether the covariate variance is taken out
-    of the connectome the model consumes.
-    """
+    """Same recipe in sklearn: `selection_input` controls whether edge
+    selection partials out Z (ref_semipartial); `model_input` controls whether
+    the covariate variance is removed from the connectome the model consumes."""
     evs = []
     for tr, te in cv.split(X, y):
         Xtr, Xte = X[tr], X[te]
@@ -222,7 +185,7 @@ def _sklearn_connectome_ev(X, y, Z, selection_input, model_input, cv):
     return float(np.mean(evs))
 
 
-# The confound 2x2: two independent run-level choices.
+# Confound 2x2: two independent run-level choices.
 CONFIGS = [
     ("raw",     "raw",          "raw"),
     ("partial", "residualized", "raw"),
@@ -234,43 +197,35 @@ def test_pipeline_matches_sklearn_and_shows_inflation(tmp_path):
     r2, kappa = 0.36, 0.6
     X, y, Z = _sim(kappa=kappa, r2=r2, n=1500, seed=5)
 
-    # Identical fold structure for both implementations.
     cv_tb = KFold(n_splits=5, shuffle=True, random_state=0)
-    cv_sk = KFold(n_splits=5, shuffle=True, random_state=0)
+    cv_sk = KFold(n_splits=5, shuffle=True, random_state=0)  # identical fold structure
 
     ev = {}
     for name, selection_input, model_input in CONFIGS:
         tb = _toolbox_connectome_ev(X, y, Z, selection_input, model_input, cv_tb, tmp_path)
         sk = _sklearn_connectome_ev(X, y, Z, selection_input, model_input, cv_sk)
-        # Toolbox and independent sklearn pipeline agree (small tolerance absorbs
-        # boundary-of-threshold noise edges that carry ~no signal).
+        # Tolerance absorbs boundary-of-threshold noise edges that carry ~no signal.
         assert abs(tb - sk) < 0.02, f"{name}: toolbox {tb:.3f} vs sklearn {sk:.3f}"
         ev[name] = tb
 
     true_r2 = (1 - kappa) * r2  # = 0.144
 
-    # Inflation story: raw is maximally inflated, partial only partially
-    # deconfounds (below raw, still above truth), residualisation recovers truth.
+    # raw maximally inflated; partial only partially deconfounds; resid recovers truth.
     assert ev["raw"] > ev["resid"] + 0.10
     assert ev["partial"] > ev["resid"] + 0.05
     assert ev["partial"] <= ev["raw"] + 0.02
     assert abs(ev["resid"] - true_r2) < 0.06
 
 
-# --------------------------------------------------------------------------- #
-# 4. End-to-end cross-validated pipeline, classification                       #
-# --------------------------------------------------------------------------- #
 def _sklearn_classification_metrics(X, y, Z, cv):
-    """The same CPM recipe written directly in sklearn: point-biserial edge
-    selection on the training split, positive/negative sum scores, logistic
-    regression, scored out of sample."""
+    """CPM recipe in sklearn: point-biserial edge selection on the training
+    split, positive/negative sum scores, logistic regression, out-of-sample."""
     accs, aucs = [], []
     for tr, te in cv.split(X, y):
         Xtr, Xte = X[tr], X[te]
         ytr, yte = y[tr], y[te]
 
-        # Point-biserial is Pearson against a 0/1 target.
-        r, p = ref_pearson(Xtr, ytr)
+        r, p = ref_pearson(Xtr, ytr)  # point-biserial = Pearson vs 0/1 target
         pos = (p < P_THRESHOLD) & (r > 0)
         neg = (p < P_THRESHOLD) & (r < 0)
 
@@ -287,14 +242,9 @@ def _sklearn_classification_metrics(X, y, Z, cv):
 
 
 def test_classification_pipeline_matches_sklearn(tmp_path):
-    """The classification path end to end -- edge selection, sum scores, IRLS
-    logistic fit, out-of-sample scoring -- against the same recipe in sklearn.
-
-    The regression pipeline has had this check since the beginning; the
-    classification pipeline was only ever verified at the model level
-    (test_classification.py), leaving selection, aggregation and the
-    classification metrics unverified end to end.
-    """
+    """Unlike the regression pipeline, the classification path was previously
+    only verified at the model level (test_classification.py); selection,
+    aggregation and classification metrics were unverified end to end."""
     X, y_cont, Z = _sim(kappa=0.3, r2=0.36, n=1200, seed=11)
     y = (y_cont > np.median(y_cont)).astype(np.float64)
 
@@ -302,7 +252,6 @@ def test_classification_pipeline_matches_sklearn(tmp_path):
     cv_sk = KFold(n_splits=5, shuffle=True, random_state=0)
 
     ue = UnivariateEdgeSelection(
-        # Pearson against a 0/1 target is the point-biserial correlation.
         selection_statistic="pearson",
         edge_selection=[PThreshold(threshold=P_THRESHOLD, correction=[None])])
     cpm = CPMAnalysis(
@@ -316,27 +265,18 @@ def test_classification_pipeline_matches_sklearn(tmp_path):
 
     sk_acc, sk_auc = _sklearn_classification_metrics(X, y, Z, cv_sk)
 
-    # The signal must be real, not a coin flip -- otherwise agreement is vacuous.
+    # Signal must be real, not a coin flip -- otherwise agreement is vacuous.
     assert sk_auc > 0.65, f"reference pipeline found no signal (auc={sk_auc:.3f})"
     assert abs(tb_acc - sk_acc) < 0.02, f"accuracy: toolbox {tb_acc:.3f} vs sklearn {sk_acc:.3f}"
     assert abs(tb_auc - sk_auc) < 0.02, f"roc_auc:  toolbox {tb_auc:.3f} vs sklearn {sk_auc:.3f}"
 
 
-# --------------------------------------------------------------------------- #
-# 5. Edge selection is exact at small n                                        #
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("n", [30, 60, 500])
 def test_edge_selection_matches_the_exact_t_test_at_small_n(n):
-    """The pipeline selects exactly the edges whose exact t-test p is below the
-    threshold, at every cohort size.
-
-    Regression test. The edge-selection p-value used to go through
-    the normal tail rather than the t tail, which is anti-conservative by
-    ~1/n: max |p_exact - p_approx| was 0.018 at n=30, so an edge with exact
-    p = 0.065 could be selected at a 0.05 threshold. With 2000 null-ish edges
-    at n=30 roughly thirty land in that band, so this fails on the old code.
-    The reference is scipy's t tail on a per-column Pearson r.
-    """
+    """Regression test: the edge-selection p-value used to go through the
+    normal tail rather than the t tail, anti-conservative by ~1/n (at n=30,
+    max |p_exact - p_approx| = 0.018, enough for ~30 of 2000 null-ish edges
+    to cross a 0.05 threshold they shouldn't)."""
     from cccpm import UnivariateEdgeSelection, PThreshold
 
     rng = np.random.RandomState(7)
@@ -350,6 +290,6 @@ def test_edge_selection_matches_the_exact_t_test_at_small_n(n):
     edges = sel.fit_transform(X=X, y=y.reshape(-1, 1), covariates=None) \
                .return_selected_edges()[:, :, 0, 0].numpy()
 
-    r_ref, p_exact = ref_pearson(X, y)      # uses scipy.stats.t.sf
+    r_ref, p_exact = ref_pearson(X, y)
     np.testing.assert_array_equal(edges[:, 0], (p_exact < P_THRESHOLD) & (r_ref > 0))
     np.testing.assert_array_equal(edges[:, 1], (p_exact < P_THRESHOLD) & (r_ref < 0))

@@ -1,10 +1,4 @@
-"""
-Input validation and naming.
-
-Everything that inspects user-supplied ``X`` / ``y`` / ``covariates`` before
-the pipeline touches them: task-type detection, the connectome-shape contract,
-and the variable names carried through to the report.
-"""
+"""Validates user-supplied X/y/covariates and detects/names things before the pipeline touches them."""
 import math
 import logging
 
@@ -22,43 +16,23 @@ logger = logging.getLogger(__name__)
 
 
 def detect_task_type(y):
-    """
-    Automatically detect whether the task is regression or classification.
-
-    Args:
-        y: Target variable (array-like)
-
-    Returns:
-        TaskType.regression or TaskType.classification
-
-    Raises:
-        ValueError: If y is not suitable for either regression or binary classification
-    """
+    """Classification if y has exactly 2 unique values coded {0,1} or {-1,1}, else regression."""
     y_arr = np.asarray(y).ravel()
+    unique_vals = np.unique(y_arr[~np.isnan(y_arr)])
 
-    # Get unique values
-    unique_vals = np.unique(y_arr[~np.isnan(y_arr)])  # Exclude NaNs
-
-    # Check if binary (exactly 2 unique values)
     if len(unique_vals) == 2:
-        # Check if values are 0/1 or -1/1
         if set(unique_vals) == {0, 1} or set(unique_vals) == {-1, 1}:
             logger.info(f"Detected binary classification task (unique values: {unique_vals})")
             return TaskType.classification
         else:
-            # Two unique values but not standard binary encoding
             logger.warning(
                 f"Target has only 2 unique values {unique_vals} but not in {0,1} or {-1,1} format. "
                 f"Treating as regression. For classification, please encode as 0/1."
             )
             return TaskType.regression
-
-    # More than 2 unique values -> regression
     elif len(unique_vals) > 2:
         logger.info(f"Detected regression task ({len(unique_vals)} unique values)")
         return TaskType.regression
-
-    # Less than 2 unique values (constant target)
     else:
         raise ValueError(
             f"Target variable has only {len(unique_vals)} unique value(s): {unique_vals}. "
@@ -67,16 +41,7 @@ def detect_task_type(y):
 
 
 def validate_task_type(y, task_type):
-    """
-    Validate that the specified task type matches the target variable.
-
-    Args:
-        y: Target variable (array-like)
-        task_type: Specified TaskType
-
-    Raises:
-        ValueError: If task_type doesn't match the data
-    """
+    """Raises if the specified task_type doesn't match what `detect_task_type` would infer from y."""
     detected_task = detect_task_type(y)
 
     if task_type != detected_task:
@@ -90,12 +55,7 @@ def validate_task_type(y, task_type):
 
 
 def infer_n_nodes(n_features: int):
-    """
-    Return the number of nodes ``n`` for which ``n * (n - 1) / 2 == n_features``,
-    i.e. the connectome size whose upper triangle has exactly ``n_features`` edges.
-
-    Returns ``None`` if ``n_features`` is not a valid upper-triangular edge count.
-    """
+    """Returns the node count n such that n*(n-1)/2 == n_features, or None if not a valid edge count."""
     if n_features is None or n_features < 1:
         return None
     discriminant = 1 + 8 * n_features
@@ -106,33 +66,10 @@ def infer_n_nodes(n_features: int):
 
 
 def check_data(X, y, covariates=None, impute_missings: bool = False):
-    """
-    Validate and format input data for modeling.
+    """Validates/formats X, y, covariates; vectorizes 3D connectomes, one-hot encodes DataFrame covariates.
 
-    Parameters
-    ----------
-    X: array-like
-        Feature data of shape (n_samples, n_features) or
-        connectivity matrices of shape (n_samples, n, n). 3D matrices are vectorized.
-    y: array-like
-        Target values; 1D array of shape (n_samples,) or
-        2D array of shape (n_samples, 1) to be squeezed.
-    covariates: array-like, pandas.Series, pandas.DataFrame or None
-        Covariate data. Series are converted to 2D; DataFrames are one-hot encoded.
-        ``None`` means vanilla CPM with no confound control.
-    impute_missings: bool, default=False
-        If True, allow NaNs in X for imputation; NaNs in y always raise an error.
-
-    Returns
-    -------
-    X_checked: np.ndarray
-        2D array of validated (and vectorized) feature data.
-    y_checked: np.ndarray
-        1D array of target values.
-    cov_arr: np.ndarray or None
-        2D array of covariates, or ``None`` if none were supplied.
+    ``impute_missings`` allows NaNs in X for imputation; NaNs in y always raise.
     """
-    # Convert to numpy for dimension checks
     if isinstance(X, torch.Tensor):
         X = X.detach().cpu().numpy()
     if isinstance(y, torch.Tensor):
@@ -140,16 +77,13 @@ def check_data(X, y, covariates=None, impute_missings: bool = False):
     if isinstance(covariates, torch.Tensor):
         covariates = covariates.detach().cpu().numpy()
     X_arr = np.asarray(X)
-    # Handle 3D connectivity matrices
     if X_arr.ndim == 3:
         X_arr = matrix_to_vector_3d(X_arr)
     elif X_arr.ndim != 2:
         raise ValueError(f"X must be 2D or 3D, got shape {X_arr.shape}")
 
-    # Connectome features must be the upper triangle of a symmetric node-by-node
-    # matrix, i.e. n_features == n_nodes * (n_nodes - 1) / 2. Otherwise edge
-    # selection/stability cannot map edges back to a connectome and the run would
-    # later fail with a cryptic shape-mismatch error. Fail fast with a clear message.
+    # Fail fast with a clear message rather than a cryptic shape mismatch
+    # later in edge selection/stability.
     n_features = X_arr.shape[1]
     if infer_n_nodes(n_features) is None:
         n_lower = int((1 + (1 + 8 * n_features) ** 0.5) / 2)
@@ -165,7 +99,6 @@ def check_data(X, y, covariates=None, impute_missings: bool = False):
             f"vectorize them for you."
         )
 
-    # Ensure y is 1D vector
     y_arr = np.asarray(y)
     if y_arr.ndim == 2:
         if 1 in y_arr.shape:
@@ -175,7 +108,6 @@ def check_data(X, y, covariates=None, impute_missings: bool = False):
     elif y_arr.ndim != 1:
         raise ValueError(f"y must be 1D array, got shape {y_arr.shape}")
 
-    # Validate X and y with sklearn
     if impute_missings:
         try:
             X_checked, y_checked = check_X_y(
@@ -203,8 +135,7 @@ def check_data(X, y, covariates=None, impute_missings: bool = False):
             )
             raise
 
-    # Process covariates. None is a first-class value: vanilla CPM with no
-    # confound control, where the covariates/full/increment models do not exist.
+    # None is first-class: vanilla CPM with no confound control.
     if covariates is None:
         return X_checked, y_checked, None
 
@@ -220,7 +151,6 @@ def check_data(X, y, covariates=None, impute_missings: bool = False):
     else:
         cov_arr = np.asarray(cov_df)
 
-    # Ensure covariates are 2D
     if cov_arr.ndim == 1:
         cov_arr = cov_arr.reshape(-1, 1)
     elif cov_arr.ndim != 2:
@@ -230,45 +160,16 @@ def check_data(X, y, covariates=None, impute_missings: bool = False):
 
 
 def get_variable_names(X, y, covariates):
-    """
-    Generate names for features, target, and covariates based on input types.
-
-    Parameters
-    ----------
-    X : array-like or pandas.DataFrame
-        Feature data. If DataFrame, column names are returned; otherwise,
-        generic names "feature_{i}" are generated for each feature (i from
-        0 to n_features - 1).
-    y : array-like, pandas.Series, or pandas.DataFrame
-        Target vector. If Series, its name is used; if DataFrame, the first
-        column name is used; otherwise, the default name "target" is returned.
-    covariates : array-like, pandas.Series, pandas.DataFrame or None
-        Covariate data. If Series, its name is returned as a single-element
-        list; if DataFrame, its column names are returned; if None, an empty
-        list; otherwise, generic names "covariate_{i}" are generated for each
-        covariate column.
-
-    Returns
-    -------
-    X_names : list of str
-        Names for each feature column.
-    y_name : str
-        Name for the target variable.
-    covar_names : list of str
-        Names for each covariate column.
-    """
-    # Features
+    """Returns (feature names, target name, covariate names), using DataFrame/Series names where available."""
     X_names = list(X.columns) if isinstance(X, pd.DataFrame) else [
         f"feature_{i}" for i in range(X.shape[1])
     ]
 
-    # Target
     if isinstance(y, (pd.Series, pd.DataFrame)):
         y_name = y.name if isinstance(y, pd.Series) else y.columns[0]
     else:
         y_name = "target"
 
-    # Covariates
     if covariates is None:
         covar_names = []
     elif isinstance(covariates, (pd.Series, pd.DataFrame)):

@@ -1,3 +1,4 @@
+"""Inner cross-validation loop for edge-selection hyperparameter tuning."""
 import torch
 
 from cccpm.preprocessing import torch_train_test_split
@@ -8,16 +9,10 @@ from cccpm.edge_selection import (BaseEdgeSelector, filter_connected_components,
 
 
 def _group_params_by_correction(param_grid):
-    """
-    Group param_grid entries by (edge_selection instance, correction method),
-    preserving original param_grid order across and within groups.
+    """Groups param_grid entries by (edge_selection instance, correction), since `PThreshold.select` batches thresholds only within one such group.
 
-    `PThreshold.select` evaluates many threshold values in one call, but only
-    within a single selector + correction method (different corrections use
-    different formulas). Returns a list of dicts:
-    {'selector', 'correction', 'indices': [param_grid index, ...],
-     'thresholds': [threshold, ...]} -- 'indices' preserves each threshold's
-    original param_grid position, so results are written back to the right slot.
+    Returns a list of dicts {'selector', 'correction', 'indices': [param_grid
+    index, ...], 'thresholds': [...]}; 'indices' maps results back to their slot.
     """
     groups = {}
     order = []
@@ -36,21 +31,15 @@ def _group_params_by_correction(param_grid):
 
 def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseEdgeSelector,
                     results_directory, device, task_type):
-    """
-    Inner cross-validation over the edge-selection hyperparameter grid.
-
-    Returns the winning configuration per run, plus the per-edge selection
-    stability of that configuration (used for stable-edge selection).
-    """
+    """Runs inner CV over the edge-selection hyperparameter grid; returns (winning config per run, its per-edge selection stability)."""
     param_grid = edge_selection.param_grid
     n_features = X.shape[1]
     n_params = len(param_grid)
     n_folds = inner_cv.get_n_splits()
     n_perms = y.shape[1]
 
-    # Inner CV only needs the fold-averaged stability of the best param, so keep
-    # just the fold-sum (no per-fold edges.npy) -- cheaper for many
-    # params/folds/perms, and this runs once per outer fold.
+    # Only the fold-averaged stability of the best param is needed, so keep
+    # just the fold-sum (no per-fold edges.npy) -- this runs once per outer fold.
     results_manager = ResultsManager(
         output_dir=results_directory, n_runs=n_perms, n_folds=n_folds,
         n_features=n_features, n_params=n_params, device=device,
@@ -67,8 +56,7 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
         X_train, X_test, y_train, y_test, cov_train, cov_test = torch_train_test_split(
             train, test, X_dev, y_dev, cov_dev)
 
-        # The statistics don't depend on the selection threshold, so they are
-        # computed once per fold and reused across every parameter group below.
+        # Statistics don't depend on the threshold, so computed once per fold.
         r_edges, t_edges, df = edge_selection.statistic.fit_transform(
             X=X_train, y=y_train, covariates=cov_train, device=device)
 
@@ -80,13 +68,9 @@ def run_inner_folds(cpm_model, X, y, covariates, inner_cv, edge_selection: BaseE
             if min_edges is not None:
                 selected_edges = filter_connected_components(selected_edges, min_edges)
 
-            # selected_edges is [Features, 2, N_thresholds, Runs]; the model
-            # fits one configuration at a time. Thresholding is batched (the
-            # multiple-comparison correction is applied once for the whole
-            # group); the model fit is not, because it is a handful of OLS
-            # solves on a design matrix ~3 columns wide -- batching it was
-            # measured to be worth nothing on the much larger folds axis
-            # (scripts/benchmark_batching.py), and this axis is smaller still.
+            # Thresholding is batched per group, but the model fit is not:
+            # batching was measured to be worth nothing here
+            # (scripts/benchmark_batching.py).
             for local_idx, param_idx in enumerate(group['indices']):
                 edges_p = selected_edges[:, :, local_idx, :]
 

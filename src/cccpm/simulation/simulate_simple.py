@@ -1,23 +1,24 @@
+"""Simple confound-outcome-link simulations for testing deconfounding."""
+
 import numpy as np
 
 
 def simulate_confounded_data_chyzhyk(link_type='direct_link',
                                      n_samples=100, n_features=100):
-    """
-    This is code by Darya Chyzhyk et al. 2022
+    """Simulate confounded data following Chyzhyk et al. (2022).
+
+    Adapted from
     https://github.com/darya-chyzhyk/confound_prediction/blob/master/confound_prediction/data_simulation.py
-    :param link_type: str,
-        Type of the links between target and confound. Options: "no_link",
-        "direct_link", "weak_link"
-    :param n_samples: int,
-        number of samples
-    :param n_features: int,
-        number of features
-    :return:
+
+    Args:
+        link_type: One of "no_link", "direct_link", "weak_link".
+
+    Returns:
+        ``(X, y, z)``, with ``z`` shaped ``(n_samples, 1)``.
     """
     np.random.seed(42)
 
-    mu, sigma = 0, 1.0  # mean and standard deviation
+    mu, sigma = 0, 1.0
     x_rand = np.random.normal(mu, sigma, [n_samples, n_features])
     y_rand = np.random.normal(mu, sigma, n_samples)
     z_rand = np.random.normal(mu, sigma, n_samples)
@@ -44,21 +45,7 @@ def simulate_confounded_data_chyzhyk(link_type='direct_link',
 
 def simulate_confounded_binary_data_chyzhyk(link_type='direct_link',
                                             n_samples=100, n_features=100):
-    """
-    Simulate confounded data with a binary target variable.
-
-    Uses the same generative process as simulate_confounded_data_chyzhyk
-    but binarises the continuous target y at its median.
-
-    :param link_type: str,
-        Type of the links between target and confound. Options: "no_link",
-        "direct_link", "weak_link"
-    :param n_samples: int,
-        number of samples
-    :param n_features: int,
-        number of features
-    :return: X, y_binary, covariates
-    """
+    """Like ``simulate_confounded_data_chyzhyk``, but ``y`` is binarised at its median."""
     X, y, covariates = simulate_confounded_data_chyzhyk(
         link_type=link_type, n_samples=n_samples, n_features=n_features
     )

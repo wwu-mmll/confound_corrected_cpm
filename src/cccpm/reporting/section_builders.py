@@ -1,10 +1,4 @@
-"""
-Section builders for the Jinja2-based HTML report.
-
-Each function returns an HTML fragment string (or a simple value) that is
-inserted directly into the Jinja2 template context.  The data layer
-(ReportDataLoader) and figure-generation code (plots/) are reused unchanged.
-"""
+"""Section builders for the Jinja2-based HTML report: each function returns a dict of template context values."""
 
 from __future__ import annotations
 
@@ -40,30 +34,20 @@ from cccpm.reporting.plots.plots import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------------------
-
 def _png_to_html(png_path: str) -> str:
-    """Embed a PNG as an <img> data-URI or return a placeholder."""
     return embed_image_base64(png_path)
 
 
 def _svg_to_html(svg_path: str) -> str:
-    """Inline an SVG file or fall back to embedding as base64 PNG."""
+    """Inline an SVG file, falling back to its PNG counterpart, or a placeholder."""
     p = Path(svg_path)
     if p.exists():
         return embed_svg(str(p))
-    # try the corresponding PNG
     png_path = p.with_suffix(".png")
     if png_path.exists():
         return embed_image_base64(str(png_path))
     return f'<p class="missing-asset">Figure not found: {p.name}</p>'
 
-
-# ---------------------------------------------------------------------------
-# Config / headline helpers
-# ---------------------------------------------------------------------------
 
 def _config_items(results_directory: str) -> list[tuple[str, str]]:
     log_path = os.path.join(results_directory, "cpm_log.txt")
@@ -85,9 +69,7 @@ def _format_p(p: float) -> str:
     return f"p = {p:.3f}".replace("0.", ".")
 
 
-# How the confound 2x2 reads to a human. `selection_input` controls whether edge
-# selection accounts for the covariates; `model_input` whether the connectome the
-# model consumes is deconfounded.
+# Keyed by (selection_input, model_input) -- see CLAUDE.md "Confound control".
 _CONFOUND_CONTROL_LABELS = {
     ('raw', 'raw'): ("none",
                      "Confounds were not accounted for anywhere. Any association "
@@ -108,14 +90,7 @@ _CONFOUND_CONTROL_LABELS = {
 
 
 def describe_confound_control(run_config: Optional[dict]):
-    """
-    ``(label, explanation)`` for this run's confound configuration.
-
-    Returns ``(None, None)`` when the configuration is unknown -- a results
-    directory written before it was recorded -- rather than guessing, because
-    claiming "none" for a run that was in fact controlled is worse than saying
-    nothing at all.
-    """
+    """Returns (label, explanation), or (None, None) if run_config is unknown -- never guessed, since a wrong "none" is worse than nothing."""
     if not run_config:
         return None, None
     if run_config.get('has_covariates') is False:
@@ -135,10 +110,6 @@ def _summary_value(summary_df: Optional[pd.DataFrame], label: str) -> Optional[s
         return None
 
 
-# ---------------------------------------------------------------------------
-# 1. Hero / executive summary
-# ---------------------------------------------------------------------------
-
 def build_hero_context(
     df_mean: pd.DataFrame,
     df_p_values: Optional[pd.DataFrame],
@@ -154,10 +125,7 @@ def build_hero_context(
     available_models: Optional[list] = None,
     run_config: Optional[dict] = None,
 ) -> dict:
-    """
-    Build the hero: a one-sentence verdict, key-stat chips, and the prominent
-    predicted-vs-observed scatter for the headline (connectome, both) model.
-    """
+    """Build the hero: verdict sentence, key-stat chips, and headline scatters."""
     import re
 
     available_models = available_models or MODEL_ORDER
@@ -166,7 +134,6 @@ def build_hero_context(
     cfg = _config_dict(results_directory)
     raw = "\n".join(f"{k}: {v}" for k, v in _config_items(results_directory))
 
-    # Headline metric per task type, with graceful fallback.
     if task_type == "classification":
         metric, metric_label = "roc_auc", "AUC"
     else:
@@ -190,7 +157,6 @@ def build_hero_context(
         except Exception:
             pval = None
 
-    # CV folds + permutations from the config block.
     n_folds = None
     m = re.search(r"n_splits\s*=\s*(\d+)", raw)
     if m:
@@ -202,9 +168,7 @@ def build_hero_context(
         cv_part = f"{n_folds}-fold CV" if n_folds else "cross-validation"
         perm_part = f", {n_perm} permutations" if n_perm else ""
         p_part = f", {_format_p(pval)}" if pval is not None else ""
-        # Name the confound configuration in the headline itself. Without it a
-        # naive run and a fully controlled one open with the same sentence, and
-        # whoever is handed the HTML cannot tell them apart.
+        # So a naive run and a fully controlled one don't open with the same sentence.
         confound_part = (f" Confound control: {confound_label}."
                          if confound_label else "")
         headline = (
@@ -215,7 +179,6 @@ def build_hero_context(
     else:
         headline = ""
 
-    # Stat chips.
     n_features = _summary_value(summary_df, "Number of features (connectivity values)")
     n_nodes = None
     if n_features is not None:
@@ -248,9 +211,7 @@ def build_hero_context(
     if n_edges is not None:
         chips.append(("Stable edges", str(n_edges)))
     ncov = _summary_value(summary_df, "Number of covariates")
-    # "Covariates: 0" is noise; the Model Comparison section already says the
-    # analysis ran without them.
-    if ncov and str(ncov).strip() not in ("0", "0.0"):
+    if ncov and str(ncov).strip() not in ("0", "0.0"):  # "Covariates: 0" is noise
         chips.append(("Covariates", ncov))
     if confound_label:
         chips.append(("Confound control", confound_label))
@@ -259,9 +220,6 @@ def build_hero_context(
     if n_perm:
         chips.append(("Permutations", n_perm))
 
-    # Summary scatters — connectome on each network (both/positive/negative)
-    # plus the covariates-only model, all the same square size and style, each
-    # annotated with its cross-validated effect size and permutation p.
     def _value_p(model: str, network: str):
         v = None
         try:
@@ -319,21 +277,12 @@ def build_hero_context(
     }
 
 
-# ---------------------------------------------------------------------------
-# 2. Data section
-# ---------------------------------------------------------------------------
-
 def build_data_context(
     summary_df: Optional[pd.DataFrame],
     scatter_matrix_path: str,
     results_directory: str = "",
 ) -> dict:
-    """
-    Build context for the Data & Methods appendix.
-
-    The numeric data summary is intentionally omitted — the same facts (samples,
-    nodes, edges, covariates) are already the stat chips at the top of the report.
-    """
+    """Build context for the Data & Methods appendix (numeric summary omitted -- it's already the hero's stat chips)."""
     scatter_html = ""
     if os.path.exists(scatter_matrix_path):
         scatter_html = embed_image_base64(scatter_matrix_path)
@@ -352,10 +301,6 @@ def build_data_context(
     }
 
 
-# ---------------------------------------------------------------------------
-# 3. Predictive Performance section
-# ---------------------------------------------------------------------------
-
 def build_performance_context(
     df_full: pd.DataFrame,
     df_mean: pd.DataFrame,
@@ -366,7 +311,6 @@ def build_performance_context(
     plots_dir: str,
 ) -> dict:
     """Build context for the Model Comparison section (faceted figure + table)."""
-    # APA results table (mean[sd] + permutation p)
     results_table_html = ""
     if df_p_values is not None:
         try:
@@ -405,12 +349,8 @@ def build_performance_context(
     }
 
 
-# ---------------------------------------------------------------------------
-# Hyperparameters (appendix)
-# ---------------------------------------------------------------------------
-
 def build_hyperparameters_context(df_full: pd.DataFrame) -> dict:
-    """Restore the hyperparameters tables (per-fold + summary) for the appendix."""
+    """Build the hyperparameters tables (per-fold + summary) for the appendix; has_hyperparameters is False without a params column."""
     if "params" not in df_full.columns:
         return {"has_hyperparameters": False, "hyper_table": "", "hyper_summary": ""}
 
@@ -438,10 +378,6 @@ def build_hyperparameters_context(df_full: pd.DataFrame) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# 4. Network Strengths section
-# ---------------------------------------------------------------------------
-
 def build_network_strengths_context(
     df_network_strengths: pd.DataFrame,
     y_name: str,
@@ -468,10 +404,6 @@ def build_network_strengths_context(
     }
 
 
-# ---------------------------------------------------------------------------
-# 5. Brain Plots section
-# ---------------------------------------------------------------------------
-
 def build_brain_plots_context(
     results_directory: str,
     plots_dir: str,
@@ -479,12 +411,10 @@ def build_brain_plots_context(
     edge_stability: Optional[np.ndarray] = None,
     edge_significance: Optional[np.ndarray] = None,
 ) -> dict:
-    """
-    Build context for the Brain & Edges section.
+    """Build context for the Brain & Edges section.
 
-    Connectivity matrix and node-degree work without an atlas. The
-    network-summary matrix and chord diagram need a ``network`` column. The
-    glass-brain render additionally needs node coordinates (x, y, z).
+    Connectivity matrix and node-degree work without an atlas; network-summary
+    matrix and chord diagram need a 'network' column; glass-brain needs x/y/z.
     """
     from cccpm.reporting.plots import brain_figures as bf
     from cccpm.reporting.plots.connectome_utils import masked_signed_stability_matrix
@@ -523,7 +453,6 @@ def build_brain_plots_context(
                   "conn_matrix": "", "node_degree": "", "network_summary": "",
                   "chord": "", "brain_positive": "", "brain_negative": ""}
 
-        # ── Matrix-based figures (cheap SVGs) ──
         try:
             figset["conn_matrix"] = _svg_to_html(bf.connectivity_matrix(
                 signed, plots_dir, atlas=atlas_labels, name=f"connectivity_matrix_{key}"))
@@ -550,20 +479,18 @@ def build_brain_plots_context(
             except Exception:
                 pass
 
-        # ── Glass-brain renders (netplotbrain; need atlas with x/y/z) ──
-        # Only for the default subset: netplotbrain is slow (~seconds/render), so
-        # rendering it for every mode would triple report time for little gain.
-        # The cheap matrix/chord figures above still switch across all modes.
-        if has_atlas and default:
+        # netplotbrain takes a couple seconds/render; with top_n capping the edge
+        # count this is affordable for every mode, not just the default subset.
+        if has_atlas:
             for mat, color, fname, fkey in [
-                (np.where(signed > 0, 1.0, 0.0), POS, f"netplotbrain_positive_{key}", "brain_positive"),
-                (np.where(signed < 0, 1.0, 0.0), NEG, f"netplotbrain_negative_{key}", "brain_negative"),
+                (np.where(signed > 0, signed, 0.0), POS, f"netplotbrain_positive_{key}", "brain_positive"),
+                (np.where(signed < 0, signed, 0.0), NEG, f"netplotbrain_negative_{key}", "brain_negative"),
             ]:
                 if not mat.any():
                     continue
                 try:
                     path = bf.glass_brain(mat, atlas_labels, plots_dir,
-                                          edge_color=color, name=fname)
+                                          edge_color=color, name=fname, top_n=10)
                     if path:
                         figset[fkey] = _png_to_html(path)
                 except Exception:
@@ -576,13 +503,8 @@ def build_brain_plots_context(
     return ctx
 
 
-# ---------------------------------------------------------------------------
-# 6. Stable Edges section
-# ---------------------------------------------------------------------------
-
 def _method_summary(meta: Optional[dict]) -> dict:
-    """Human-readable summary of the edge-significance method + per-network
-    headline diagnostics, for the Stable Edges section header."""
+    """Human-readable summary of the edge-significance method, for the Stable Edges section header."""
     if not meta:
         return {}
     method = str(meta.get("method", "")).lower()
@@ -627,15 +549,7 @@ def build_stable_edges_context(
     plots_dir: Optional[str] = None,
     alpha: float = 0.05,
 ) -> dict:
-    """
-    Build context for the Stable Edges section.
-
-    Displays *all* significant edges (p < *alpha*) per network — no cap — and
-    provides a downloadable CSV of every selected edge with its stability and
-    significance. When permutation diagnostics are available (see
-    :meth:`ReportDataLoader.load_edge_significance_meta`) the method is named
-    and a null-distribution figure is rendered per network.
-    """
+    """Build context for the Stable Edges section: all significant edges (p < alpha) per network, no cap, plus a downloadable CSV."""
     if edge_stability is None or edge_stability_significance is None:
         return {
             "has_edge_data": False,
@@ -679,7 +593,6 @@ def build_stable_edges_context(
                 ctx[f"edge_table_{network}"] = sig_df.to_html(
                     classes="data-table", border=0)
 
-            # Null-distribution figure.
             nm = (significance_meta or {}).get("networks", {}).get(network)
             if nm and plots_dir and nm.get("max_null"):
                 from cccpm.reporting.plots.stats_figures import null_distribution_plot

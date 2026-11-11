@@ -14,21 +14,17 @@ def test_reproducibility():
 
 
 def test_no_link_structure():
-    """
-    no_link:
-    y → z → X
-    no direct y → X effect
-    """
+    """no_link: y -> z -> X, with no direct y -> X edge."""
     X, y, z = simulate_confounded_data_chyzhyk(
         link_type="no_link",
         n_samples=2000,
     )
 
-    # Marginal dependence exists (mediated)
+    # Marginal dependence exists, mediated through z.
     corr_yX = np.mean(np.abs(np.corrcoef(y, X.T)[0, 1:]))
     assert corr_yX > 0.4
 
-    # Conditional independence: y ⟂ X | z
+    # Conditional independence: y ⟂ X | z.
     y_res = y - np.linalg.lstsq(z, y, rcond=None)[0] * z[:, 0]
     X_res = X - z @ np.linalg.lstsq(z, X, rcond=None)[0]
 
@@ -37,12 +33,7 @@ def test_no_link_structure():
 
 
 def test_direct_link_structure():
-    """
-    direct_link:
-    y → z
-    y → X
-    z → X
-    """
+    """direct_link: y -> z, y -> X, and z -> X all present."""
     X, y, z = simulate_confounded_data_chyzhyk(
         link_type="direct_link",
         n_samples=2000,
@@ -73,9 +64,6 @@ def test_weak_link_has_weaker_yz_than_direct():
 
 
 def test_features_are_exchangeable():
-    """
-    No feature should behave differently from others
-    """
     X, y, z = simulate_confounded_data_chyzhyk(
         link_type="direct_link",
         n_samples=1000,

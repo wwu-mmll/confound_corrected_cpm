@@ -15,19 +15,9 @@ from cccpm.constants import Networks
 @pytest.mark.parametrize("selection_input", ["raw", "residualized"])
 @pytest.mark.parametrize("statistic", ["pearson", "spearman"])
 def test_batched_edge_statistics_match_per_column(statistic, selection_input):
-    """Computing (r, t) for all target columns at once must equal computing
-    each column separately (up to float32 rounding).
-
-    The pipeline batches edge-statistic computation over all runs/permutations
-    in a single call (cpm_analysis._select_edges), relying on the fact that the
-    statistic for one target column does not depend on the others. This guards
-    that assumption: a regression here would change which edges get selected
-    across permutations. The two paths are not bit-identical because a batched
-    matrix-matrix product accumulates in a different order than the per-column
-    matrix-vector product, but they agree to float32 precision (which does not
-    change the downstream |t|>critical edge selection in practice — this is also
-    exactly what the inner-CV path has always computed).
-    """
+    """Guards the pipeline's batching assumption (cpm_analysis._select_edges): one
+    column's statistic must not depend on the others. Not bit-identical -- a batched
+    matmul accumulates in a different order -- but must agree to float32 precision."""
     rng = np.random.RandomState(0)
     n_samples, n_features, n_runs = 90, 15, 8
     X = rng.randn(n_samples, n_features).astype(np.float32)
@@ -38,10 +28,8 @@ def test_batched_edge_statistics_match_per_column(statistic, selection_input):
                          selection_input=selection_input)
     device = torch.device('cpu')
 
-    # Batched: all columns at once.
     r_all, t_all, df_all = stat.fit_transform(X=X, y=Y, covariates=covariates, device=device)
 
-    # Per column, exactly as the old loop did.
     for run_id in range(n_runs):
         r_col, t_col, df_col = stat.fit_transform(
             X=X, y=Y[:, [run_id]], covariates=covariates, device=device)
@@ -54,17 +42,12 @@ def test_batched_edge_statistics_match_per_column(statistic, selection_input):
 @pytest.mark.parametrize("statistic,binary_target", [
     ("pearson", False),
     ("spearman", False),
-    ("pearson", True),      # a 0/1 target: the point-biserial correlation
+    ("pearson", True),  # 0/1 target -> point-biserial correlation
 ])
 def test_edge_selection_recovers_signed_edges(statistic, binary_target,
                                               selection_input):
-    """
-    End-to-end test of the production edge-selection path
-    (UnivariateEdgeSelection -> EdgeStatistic dispatch -> PThreshold.select)
-    for every supported edge statistic: a strongly positive edge must be
-    selected as positive, a strongly negative edge as negative, and the sign
-    must not be confused.
-    """
+    """End-to-end through UnivariateEdgeSelection -> EdgeStatistic -> PThreshold.select:
+    sign must not be confused for any supported statistic."""
     rng = np.random.RandomState(42)
     n_samples, n_features = 200, 10
     X = rng.randn(n_samples, n_features).astype(np.float32)
@@ -85,17 +68,13 @@ def test_edge_selection_recovers_signed_edges(statistic, binary_target,
     sel.set_params(**list(sel.param_grid)[0])
 
     edges = sel.fit_transform(X=X, y=y, covariates=covariates).return_selected_edges()
-    # edges shape: [n_features, 2, n_runs]
     assert bool(edges[0, Networks.positive, 0]), f"{statistic}: feature 0 should be positive"
     assert bool(edges[1, Networks.negative, 0]), f"{statistic}: feature 1 should be negative"
     assert not bool(edges[0, Networks.negative, 0]), f"{statistic}: feature 0 should not be negative"
     assert not bool(edges[1, Networks.positive, 0]), f"{statistic}: feature 1 should not be positive"
 
 
-# --- Presence filter (sparse/structural-zero edge removal) ---------------------
-
 def test_resolve_presence_threshold():
-    """bool/float/None inputs map to the right nonzero-fraction threshold."""
     assert resolve_presence_threshold(False) is None
     assert resolve_presence_threshold(None) is None
     assert resolve_presence_threshold(True) == 0.5
@@ -108,12 +87,8 @@ def test_resolve_presence_threshold():
 
 
 def _sparse_presence_data(seed=0):
-    """X whose columns are nonzero in known fractions of the 100 subjects.
-
-    Column j is nonzero in exactly ``(j + 1) * 10 %`` of subjects (10%..100%),
-    with strong correlation to y on the nonzero rows so that, absent the
-    presence filter, every column would be selectable.
-    """
+    """Column j nonzero in (j+1)*10% of 100 subjects, strongly correlated with y on
+    those rows -- so absent the presence filter, every column would be selectable."""
     rng = np.random.RandomState(seed)
     n = 100
     y = rng.randn(n).astype(np.float32)
@@ -132,7 +107,6 @@ def _sparse_presence_data(seed=0):
     (0.75, 0.75),
 ])
 def test_presence_filter_drops_sparse_edges(threshold, expected_min_fraction):
-    """Only edges nonzero in >= threshold of subjects survive the filter."""
     X, y = _sparse_presence_data()
     stat = EdgeStatistic(selection_statistic='pearson', presence_filter=threshold)
     r, t, _ = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
@@ -147,17 +121,15 @@ def test_presence_filter_drops_sparse_edges(threshold, expected_min_fraction):
 
 
 def test_presence_filter_off_by_default_keeps_all():
-    """With the filter off, sparse-but-variable edges are still evaluated."""
     X, y = _sparse_presence_data()
-    stat = EdgeStatistic(selection_statistic='pearson')  # default: no presence filter
+    stat = EdgeStatistic(selection_statistic='pearson')
     r, t, _ = stat.fit_transform(X=X, y=y, covariates=None, device=torch.device('cpu'))
-    # Every column has variance > 0, so none is dropped by the variance gate.
     assert bool((t[:, 0].numpy() != 0.0).all()), "no edge should be filtered when off"
 
 
 def test_presence_filter_adds_to_variance_gate():
-    """An edge with variance but present in a minority is kept by the variance
-    gate yet dropped by the presence filter (shows the filter is additive)."""
+    """Edge kept by the variance gate but dropped by the presence filter -- shows
+    the filter is additive, not redundant with the variance gate."""
     rng = np.random.RandomState(1)
     n = 100
     y = rng.randn(n, 1).astype(np.float32)
@@ -173,8 +145,6 @@ def test_presence_filter_adds_to_variance_gate():
     assert t_on[0, 0].item() == 0.0  # dropped by the presence filter
 
 
-# --- Connected-component edge filtering ---------------------------------------
-
 def test_resolve_min_component_size():
     assert resolve_min_component_size(False) is None
     assert resolve_min_component_size(None) is None
@@ -187,11 +157,7 @@ def test_resolve_min_component_size():
 
 
 def test_filter_connected_components_drops_lone_edges():
-    """A lone edge is dropped; a connected chain of edges is kept.
-
-    5 nodes -> 10 upper-triangular edges. Feature index 0 = (0,1), 4 = (1,2)
-    (a 2-edge chain sharing node 1), and 9 = (3,4) (an isolated pair).
-    """
+    """5 nodes -> 10 edges. 0=(0,1), 4=(1,2) form a chain sharing node 1; 9=(3,4) is isolated."""
     mask = torch.zeros(10, 2, 1, dtype=torch.bool)
     mask[[0, 4, 9], Networks.positive, 0] = True
 
@@ -202,14 +168,14 @@ def test_filter_connected_components_drops_lone_edges():
 
 
 def _sel_with_edges(connected_components):
+    """Selector pre-loaded with r/t for the same 5-node/10-edge graph as above
+    (0,4 a chain; 9 isolated), all strongly, significantly positive."""
     sel = UnivariateEdgeSelection(
         selection_statistic='pearson',
         connected_components=connected_components,
         edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
     )
     sel.set_params(**list(sel.param_grid)[0])
-    # 5 nodes / 10 edges: positive edges 0=(0,1), 4=(1,2) form a chain; 9=(3,4)
-    # is isolated. All are strongly, significantly positive.
     r = torch.zeros(10, 1)
     t = torch.zeros(10, 1)
     for e in (0, 4, 9):
@@ -220,7 +186,6 @@ def _sel_with_edges(connected_components):
 
 
 def test_connected_components_filter_end_to_end():
-    """With connected_components on, the isolated edge is not selected; off, it is."""
     edges_on = _sel_with_edges(True).return_selected_edges()
     assert bool(edges_on[0, Networks.positive, 0])
     assert bool(edges_on[4, Networks.positive, 0])
@@ -231,7 +196,7 @@ def test_connected_components_filter_end_to_end():
 
 
 def _t_and_exact_p(rng, n_features, n_runs, df):
-    """Random t statistics spanning the selection boundary, with their exact p."""
+    """t statistics spanning the selection boundary, with exact p."""
     from scipy import stats
     t = rng.standard_t(df, size=(n_features, n_runs)) * 2.5
     return t, 2 * stats.t.sf(np.abs(t), df)
@@ -239,11 +204,8 @@ def _t_and_exact_p(rng, n_features, n_runs, df):
 
 @pytest.mark.parametrize("correction", [None, "bonferroni", "sidak", "holm", "fdr_bh"])
 def test_pthreshold_matches_statsmodels_per_run(correction):
-    """Selection equals exact p-values, corrected by statsmodels one run at a time.
-
-    The reference is independent of the code under test: scipy's exact t tail,
-    then statsmodels' correction applied separately to each column.
-    """
+    """Reference is independent of the code under test: scipy's exact t tail,
+    then statsmodels' correction applied separately to each column."""
     from statsmodels.stats import multitest
 
     rng = np.random.RandomState(11)
@@ -264,7 +226,7 @@ def test_pthreshold_matches_statsmodels_per_run(correction):
     selector = PThreshold(threshold=threshold, correction=correction)
     edges = selector.select(r=torch.as_tensor(r), t=torch.as_tensor(t), df=df)
 
-    # select() returns [Features, 2, N_thresholds, Runs]; one threshold here.
+    # select() returns [Features, 2, N_thresholds, Runs]
     assert edges.shape == (n_features, 2, 1, n_runs)
     np.testing.assert_array_equal(edges[:, 0, 0].numpy(), expected_pos)
     np.testing.assert_array_equal(edges[:, 1, 0].numpy(), expected_neg)
@@ -272,14 +234,9 @@ def test_pthreshold_matches_statsmodels_per_run(correction):
 
 @pytest.mark.parametrize("correction", ["bonferroni", "sidak", "holm", "fdr_bh"])
 def test_a_runs_selection_does_not_depend_on_its_batch(correction):
-    """A run is corrected over its own edges, not over every run in the batch.
-
-    Regression test. The correction used to run over ``p.flatten()``, so a
-    permutation chunk of shape [F, P] was corrected as F x P tests: each permuted
-    run faced a far stricter threshold than the real run (and one that changed
-    with the chunk size), making the permutation null weaker than the procedure
-    it was meant to be a null of.
-    """
+    """Regression: correction used to run over p.flatten(), so a permutation chunk
+    [F, P] was corrected as F x P tests -- each permuted run faced a stricter,
+    chunk-size-dependent threshold, weakening the permutation null."""
     rng = np.random.RandomState(5)
     df, n_features, n_runs = 40, 150, 50
     t, _ = _t_and_exact_p(rng, n_features, n_runs, df)
@@ -293,12 +250,7 @@ def test_a_runs_selection_does_not_depend_on_its_batch(correction):
         assert torch.equal(batched[..., [run]], alone), f"run {run} changed with its batch"
 
 
-# --- Threshold-grid (params axis) tests --------------------------------
-
-
 def test_select_params_axis_matches_per_threshold_calls():
-    """PThreshold.select's params dim must reproduce independent
-    select() calls, one per threshold, exactly."""
     rng = np.random.RandomState(21)
     r = torch.as_tensor(rng.randn(30, 4))
     t = torch.as_tensor(rng.randn(30, 4) * 4)

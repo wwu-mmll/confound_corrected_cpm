@@ -1,13 +1,4 @@
-"""
-Quickstart: Connectome-based Predictive Modeling for a *binary classification*
-target.
-
-This mirrors ``regression_quickstart.py`` but predicts a 0/1 class label instead
-of a continuous score. The only real differences are:
-
-  * the target ``y`` is binary,
-  * a stratified cross-validation splitter, and
-  * classification metrics in the report (accuracy, balanced accuracy, F1, AUC).
+"""Quickstart: CPM for a binary classification target (see regression_quickstart.py).
 
 Run it with:
 
@@ -20,70 +11,40 @@ from sklearn.model_selection import StratifiedKFold
 from cccpm import CPMAnalysis, UnivariateEdgeSelection, PThreshold
 from cccpm.simulation.simulate_sem import simulate_data_given_kappa
 
-# ---------------------------------------------------------------------------
-# 1. Get some data
-# ---------------------------------------------------------------------------
-# X          : connectome edges, shape (n_samples, n_features)
-# y          : the binary outcome (0/1), shape (n_samples,)
-# covariates : nuisance variables to control for, shape (n_samples, n_covariates)
-#
-# The SEM-based simulator generates a *continuous* outcome with a known amount of
-# confounding (see regression_quickstart.py). ``kappa`` is the fraction of the
-# apparent brain–outcome R² that is actually confound-driven. We then binarise the
-# continuous outcome at its median to obtain a balanced two-class label — so the
-# confound is still baked into the connectome and confound control matters here too.
+# Binarise the continuous SEM outcome at its median; the confound is still baked
+# into the connectome, so confound control matters here too.
 sim = simulate_data_given_kappa(
-    R2_X_y=0.4,          # naive R²(y ~ X): apparent brain–outcome strength
-    kappa=0.3,           # 30% of that R² is driven by the confound
-    n_features=4950,     # a 100-node connectome (100*99/2 = 4950 edges),
-                         # matching the built-in Schaefer100 atlas used below
-    n_features_informative=40,    # "mixed" edges: real signal + confound leakage
-    n_pure_signal_features=20,    # edges tied to y but NOT the confound
-    n_confound_only_features=20,  # edges tied to y ONLY through the confound
+    R2_X_y=0.4,
+    kappa=0.3,
+    n_features=4950,  # matches the built-in Schaefer100 atlas used below
+    n_features_informative=40,
+    n_pure_signal_features=20,
+    n_confound_only_features=20,
     n_confounds=2,
     n_samples=200,
     random_state=42,
 )
 X, covariates = sim["X"], sim["Z"]
-y = (sim["y"].ravel() > np.median(sim["y"])).astype(float)   # median split → 0/1
+y = (sim["y"].ravel() > np.median(sim["y"])).astype(float)
 
-# ---------------------------------------------------------------------------
-# 2. Configure edge selection
-# ---------------------------------------------------------------------------
-# A binary 0/1 target through the Pearson path *is* the point-biserial
-# correlation, so there is no separate statistic to pick. Confound control works
-# exactly as in the regression quickstart: `selection_input` here, `model_input`
-# on CPMAnalysis.
+# A binary target through the Pearson path *is* the point-biserial correlation,
+# so there is no separate statistic to pick.
 edge_selection = UnivariateEdgeSelection(
     selection_statistic="pearson",
     selection_input="residualized",
     edge_selection=[PThreshold(threshold=[0.05], correction=[None])],
 )
 
-# ---------------------------------------------------------------------------
-# 3. Configure and run the analysis
-# ---------------------------------------------------------------------------
 cpm = CPMAnalysis(
     results_directory="./results/classification_quickstart",
-    task_type="classification",                   # or leave as None to auto-detect
+    task_type="classification",
     cv=StratifiedKFold(n_splits=10, shuffle=True, random_state=42),
     edge_selection=edge_selection,
-    n_permutations=1000,                           # use 1000+ for a real analysis
-    atlas="Schaefer100-17",                       # built-in atlas → brain plots in the
-                                                  # report; or pass a path to a custom
-                                                  # CSV (region,x,y,z[,network]).
-                                                  # See cccpm.atlases.list_atlases().
-    device="cpu",                                 # "cuda" uses the GPU if available
+    n_permutations=1000,
+    atlas="Schaefer100-17",
+    device="cpu",
 )
 
 cpm.run(X=X, y=y, covariates=covariates)
 
-# ---------------------------------------------------------------------------
-# 4. Inspect the results
-# ---------------------------------------------------------------------------
-# Everything is written under the results_directory, including:
-#   - cv_results_summary.csv : metrics (accuracy, balanced accuracy, F1, ROC AUC)
-#   - p_values.csv           : permutation-based significance
-#   - cv_predictions.csv     : out-of-sample predictions per subject
-#   - report.html            : a full, human-readable HTML report
 print("Done. Open ./results/classification_quickstart/report.html to explore the results.")

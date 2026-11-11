@@ -1,15 +1,8 @@
-"""
-Fast iteration loop for HTML report development.
-
-Regenerates report.html from a fixed results fixture and opens it in the
-default browser so visual edits to templates/styles.css or section_builders.py
-can be previewed in a few seconds.
+"""Regenerate report.html from a fixed results fixture and open it in the browser.
 
 Usage:
     poetry run python scripts/preview_report.py
     poetry run python scripts/preview_report.py --results examples/results/classification_quickstart
-    poetry run python scripts/preview_report.py --open  # open after generation (default)
-    poetry run python scripts/preview_report.py --no-open
 """
 
 import argparse
@@ -17,7 +10,6 @@ import sys
 import webbrowser
 from pathlib import Path
 
-# Ensure the src layout is importable when running from the repo root
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 

@@ -1,9 +1,3 @@
-"""
-Tests for all CPM model classes: LinearCPM, DecisionTreeCPM, RandomForestCPM, GAMCPM.
-Validates the tensor-based pipeline interface (fit/predict shapes, chaining,
-get_network_strengths) and full pipeline integration for non-linear models.
-"""
-
 import numpy as np
 import pytest
 import torch
@@ -22,7 +16,6 @@ NONLINEAR_MODELS = [DecisionTreeCPM, RandomForestCPM, GAMCPM]
 
 @pytest.fixture
 def simple_data():
-    """Small synthetic dataset for unit tests."""
     rng = np.random.RandomState(42)
     N_samples, N_features, N_runs = 30, 10, 3
     X = rng.randn(N_samples, N_features).astype(np.float32)
@@ -36,21 +29,15 @@ def simple_data():
 
 
 def test_linear_cpm_defaults_to_cpu(simple_data):
-    """LinearCPM must default to CPU so it works on machines without CUDA."""
     _, _, _, edges = simple_data
     model = LinearCPM(edges=edges)
     assert torch.device(model.device) == torch.device("cpu")
 
 
-# ============================================================
-# TestModelInterface — parametrized over all 4 model classes
-# ============================================================
-
 class TestModelInterface:
 
     @pytest.mark.parametrize("model_cls", ALL_MODELS)
     def test_fit_predict_shape(self, model_cls, simple_data):
-        """predict returns [N_samples, N_models, N_networks, N_runs]."""
         X, y, cov, edges = simple_data
         N_samples, N_runs = y.shape
 
@@ -61,7 +48,6 @@ class TestModelInterface:
 
     @pytest.mark.parametrize("model_cls", ALL_MODELS)
     def test_single_run(self, model_cls, simple_data):
-        """With a 1-column y the last dimension should be 1."""
         X, y, cov, edges = simple_data
         N_samples = X.shape[0]
 
@@ -75,7 +61,6 @@ class TestModelInterface:
 
     @pytest.mark.parametrize("model_cls", ALL_MODELS)
     def test_get_network_strengths(self, model_cls, simple_data):
-        """get_network_strengths returns correct keys and tensor values."""
         X, y, cov, edges = simple_data
 
         model = model_cls(edges=edges, device='cpu', task_type=TaskType.regression)
@@ -91,15 +76,10 @@ class TestModelInterface:
             assert ns[group]["positive"].shape[0] == X.shape[0]
 
 
-# ============================================================
-# TestNonLinearModelsWithPipeline
-# ============================================================
-
 class TestNonLinearModelsWithPipeline:
 
     @pytest.mark.parametrize("model_cls", NONLINEAR_MODELS)
     def test_full_pipeline_run(self, model_cls, tmp_path):
-        """CPMAnalysis with each non-linear model runs end-to-end on simulated data."""
         from cccpm.simulation.simulate_simple import simulate_confounded_data_chyzhyk
 
         X, y, covariates = simulate_confounded_data_chyzhyk(n_samples=60, n_features=45)
@@ -124,10 +104,6 @@ class TestNonLinearModelsWithPipeline:
         assert cpm.results_manager is not None
         assert cpm.results_manager.agg_results is not None
 
-
-# ============================================================
-# LinearCPM params/runs batching
-# ============================================================
 
 def _uneven_splits(n_total, n_folds, seed):
     rng = np.random.RandomState(seed)

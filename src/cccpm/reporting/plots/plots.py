@@ -1,3 +1,5 @@
+"""Report figures comparing model predictions and performance across CV folds."""
+
 import os
 
 import pandas as pd
@@ -20,8 +22,7 @@ from cccpm.reporting.plots.figure_style import (
 
 MODEL_ORDER = ["covariates", "connectome", "full", "increment"]
 
-# Metrics with a fixed, meaningful reference value, drawn as a dashed line.
-# Classification: chance level. Regression: "no relationship".
+# Chance level (classification) / no-relationship (regression) reference, drawn as a dashed line.
 _REFERENCE_LINE = {
     "pearson_score": 0.0,
     "explained_variance_score": 0.0,
@@ -30,7 +31,6 @@ _REFERENCE_LINE = {
     "roc_auc": 0.5,
 }
 
-# df column name -> bool, is `increment` (full - covariates) defined for this metric.
 _INCREMENTABLE_NAMES = {m.name for m in INCREMENTABLE_METRICS}
 
 
@@ -55,20 +55,12 @@ def scatter_plot_main(
     annotate_p: str | None = None,
     name: str = "hero_scatter",
 ) -> str:
-    """
-    Single square predicted-vs-observed panel for the summary section.
+    """Single square predicted-vs-observed panel for the summary section.
 
-    Regression: scatter + identity line + annotated effect size (and p).
-    Classification: predicted-probability distribution per true class
-    (overlaid histograms) + 0.5 decision line. A scatter/strip plot puts the
-    binary true label on an axis as if it were continuous; the two classes'
-    probability distributions are the thing that is actually informative
-    here, so they are the plot, with true class as colour instead of an axis.
-
-    If *annotate_value* is given it is shown verbatim (e.g. the cross-validated
-    mean r reported in the hero verdict, so the two agree); otherwise the pooled
-    correlation across all plotted points is computed and shown. The data area is
-    forced square (equal x/y) via ``set_box_aspect``.
+    Regression: scatter + identity line + annotated effect size. Classification: predicted-
+    probability distribution per true class (true label as colour, not axis, since it is
+    binary) + 0.5 decision line. If *annotate_value* is omitted, the pooled correlation
+    across plotted points is computed instead.
     """
     apply_nature_style()
 
@@ -92,7 +84,6 @@ def scatter_plot_main(
         ax.set_xlabel("predicted probability")
         ax.set_ylabel("count")
         ax.set_xlim(-0.02, 1.02)
-        # Annotations (effect size / p) anchor top-left; keep the legend clear of them.
         if ax.get_legend() is not None:
             sns.move_legend(
                 ax, "upper right", title=y_name,
@@ -105,7 +96,6 @@ def scatter_plot_main(
             line_kws={"color": color, "linewidth": 1.0},
             ax=ax,
         )
-        # Identity line (perfect prediction reference)
         lims = [
             min(sub["y_true"].min(), sub["y_pred"].min()),
             max(sub["y_true"].max(), sub["y_pred"].max()),
@@ -114,7 +104,6 @@ def scatter_plot_main(
         ax.set_xlabel(y_name)
         ax.set_ylabel(f"predicted {y_name}")
 
-    # Effect-size annotation (r, with p underneath when provided).
     if annotate_value is not None:
         eff = f"{annotate_label} = {annotate_value:.2f}"
     elif task_type != "classification":
@@ -128,7 +117,6 @@ def scatter_plot_main(
         ax.annotate(annotate_p, xy=(0.05, 0.84), xycoords="axes fraction",
                     fontsize=7, color=color)
 
-    # Force a square data area so x and y get equal space.
     ax.set_box_aspect(1)
     sns.despine(ax=ax)
     fig.tight_layout(pad=0.4)
@@ -136,6 +124,7 @@ def scatter_plot_main(
 
 
 def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
+    """Faceted predicted-vs-observed scatter for the connectome model, by network and model."""
     apply_nature_style()
 
     df = df[df['model'].isin(['connectome'])]
@@ -162,18 +151,13 @@ def scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
 
 
 def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name) -> str:
-    """
-    Generate a single scatter plot with regression line for the 'covariates' model.
-    """
+    """Scatter plot with regression line for the 'covariates' model."""
     apply_nature_style()
 
     df = df[df["model"] == "covariates"]
 
-    # Create a figure with GridSpec
     fig = plt.figure(figsize=(6, 2))
     gs = gridspec.GridSpec(1, 3, figure=fig)
-
-    # Create one subplot in the center cell
     ax = fig.add_subplot(gs[0, 1])
 
     sns.regplot(
@@ -195,18 +179,13 @@ def scatter_plot_covariates_model(df: pd.DataFrame, results_folder: str, y_name)
 
 
 def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
-    """
-    Create a 2x2 grid of histograms showing the distribution of network_strength
-    for the connectome model and two networks ('positive', 'negative').
-    """
+    """2x2 grid of network_strength histograms for the connectome model, by network."""
     apply_nature_style()
 
-    # Filter relevant data
     df = df[df["model"] == "connectome"]
     df = df[df["network"].isin(["positive", "negative"])]
 
     def histplot_colored(data, color=None, **kwargs):
-        # Override color based on 'network' value
         network = data["network"].iloc[0]
         color = {"positive": "#FF5768", "negative": "#6C88C4"}[network]
         sns.histplot(
@@ -215,11 +194,10 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) 
             bins=30,
             edgecolor="white",
             linewidth=0.3,
-            color=color,  # This now safely overrides the one passed by FacetGrid
+            color=color,  # overrides the color FacetGrid passes via kwargs
             **kwargs
         )
 
-    # Create 2x2 facet grid
     g = sns.FacetGrid(
         df,
         row="model",
@@ -238,19 +216,14 @@ def histograms_network_strengths(df: pd.DataFrame, results_folder: str, y_name) 
 
 
 def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name) -> str:
-    """
-    Create a 2x2 scatter plot of y_true vs network_strength
-    for the connectome model and two networks ('positive', 'negative').
-    """
+    """2x2 scatter plot of y_true vs network_strength for the connectome model, by network."""
     apply_nature_style()
 
-    # Define color mapping
     color_map = {
-        "positive": "#FF5768",  # red
-        "negative": "#6C88C4"   # blue
+        "positive": "#FF5768",
+        "negative": "#6C88C4",
     }
 
-    # Plotting function with custom color per network
     def regplot_colored(data, **kwargs):
         network = data["network"].iloc[0]
         color = color_map.get(network, "black")
@@ -263,7 +236,6 @@ def scatter_plot_network_strengths(df: pd.DataFrame, results_folder: str, y_name
             **kwargs
         )
 
-    # Create 2x2 facet grid: rows = model, cols = network
     g = sns.FacetGrid(
         df,
         row="model",
@@ -287,21 +259,11 @@ def boxplot_model_performance(
     models: list[str],
     filename_suffix: str = ""
 ) -> str:
-    """
-    Creates a horizontal boxplot comparing models across network types.
-
-    Parameters:
-        df: Input dataframe.
-        metric: Name of the column to be plotted on the x-axis.
-        results_folder: Output folder path.
-        models: List of model names to include (e.g. ['increment'] or others).
-        filename_suffix: Optional string to append to the output filename.
-    """
+    """Horizontal boxplot of *metric* by model (in *models* order), with network as hue."""
     apply_nature_style()
 
     df = df[df["model"].isin(models)]
 
-    # Adjust figure size based on model count
     height = 0.75 if len(models) == 1 else 2
     fig, ax = plt.subplots(figsize=(7, height))
 
@@ -327,7 +289,6 @@ def boxplot_model_performance(
     sns.despine(trim=True)
     ax.set_xlabel(metric.replace("_", " "))
     ax.set_ylabel("")
-    # Move legend outside the plot
     ax.legend(
         title="",
         loc="center left",
@@ -335,7 +296,6 @@ def boxplot_model_performance(
         frameon=False,
         handletextpad=0.5
     )
-    # Save plot
     suffix = f"_{filename_suffix}" if filename_suffix else ""
     fig.tight_layout(pad=0.2)
     return save_figure(fig, os.path.join(results_folder, f"boxplot_{metric}{suffix}"))
@@ -348,21 +308,11 @@ def boxplot_models(
     models: list[str],
     filename_suffix: str = ""
 ) -> str:
-    """
-    Creates a horizontal boxplot comparing models across network types.
-
-    Parameters:
-        df: Input dataframe.
-        metric: Name of the column to be plotted on the x-axis.
-        results_folder: Output folder path.
-        models: List of model names to include (e.g. ['increment'] or others).
-        filename_suffix: Optional string to append to the output filename.
-    """
+    """Vertical boxplot of *metric* by network; rows from *models* are pooled, not shown as separate boxes."""
     apply_nature_style()
 
     df = df[df["model"].isin(models)]
 
-    # Adjust figure size based on model count
     fig, ax = plt.subplots(figsize=(3, 2))
 
     sns.boxplot(
@@ -384,7 +334,6 @@ def boxplot_models(
     ax.set_xlabel("network")
     sns.despine(ax=ax)
 
-    # Save plot
     suffix = f"_{filename_suffix}" if filename_suffix else ""
     fig.tight_layout(pad=0.2)
     return save_figure(fig, os.path.join(results_folder, f"boxplot_{metric}{suffix}"))
@@ -396,18 +345,11 @@ def performance_grid(
     results_folder: str,
     models: list[str] | None = None,
 ) -> str:
-    """
-    One small-multiples figure summarising model performance.
+    """Small-multiples figure: metrics as columns, models on the y-axis, network as hue.
 
-    Metrics are columns; models are on the y-axis; network is the hue. When
-    ``increment`` (full - covariates) is one of the models, it gets its own
-    x-axis per metric column, separate from covariates/connectome/full: the
-    increment is a *difference* of the metric and can be negative or exceed
-    the metric's own natural range (e.g. a balanced-accuracy increment can run
-    from -0.2 to 1), while chance-level for the other three models already
-    sits at 0.5 (accuracy/balanced accuracy/ROC AUC) or 0 (Pearson r/explained
-    variance) — sharing one x-axis would force one of the two onto a scale
-    that hides its structure.
+    ``increment`` (full - covariates) gets its own x-axis per column, separate from the
+    other models: it is a difference and can run outside the metric's natural range
+    (e.g. -0.2 to 1 for balanced accuracy), so sharing an axis would hide one scale.
     """
     apply_nature_style()
 
@@ -507,17 +449,11 @@ def roc_curve_grid(
     results_folder: str,
     models: list[str] | None = None,
 ) -> str:
-    """
-    ROC curve per model (columns), one curve per network (colour), from the
-    pooled out-of-sample predictions.
+    """ROC curve per model (columns), one curve per network (colour), pooled across folds.
 
-    ``performance_grid`` already shows ROC AUC as a boxplot across folds; this
-    shows the curve that number comes from, pooled across all folds (as the
-    hero scatters do for their effect size) rather than per-fold, since a
-    single fold's 10-20 held-out cases makes for a visually noisy curve. Two
-    models can share the same AUC with different curve shapes (e.g. one
-    trades sensitivity for specificity differently) -- that trade-off is the
-    one thing the boxplot cannot show.
+    Pooled rather than per-fold since a single fold's held-out cases make a noisy curve;
+    this also shows the curve shape behind performance_grid's ROC-AUC boxplot, which two
+    models can share while trading sensitivity for specificity differently.
     """
     from sklearn.metrics import auc, roc_curve
 
@@ -532,8 +468,7 @@ def roc_curve_grid(
     axes = [axes] if n_cols == 1 else list(axes)
 
     for ax, model in zip(axes, models):
-        # The covariates model doesn't touch the connectome, so its prediction
-        # is identical across "networks" -- one curve, not three overlapping ones.
+        # covariates model ignores the connectome -> identical across networks, one curve
         networks = ["both"] if model == "covariates" else hue_order
         for network in networks:
             sub = df_predictions[
@@ -563,9 +498,7 @@ def roc_curve_grid(
 
 
 def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -> str:
-    """
-    Generate a strip/swarm plot of predicted probabilities by true class for classification.
-    """
+    """Strip plot of predicted probability by true class, for the connectome model."""
     apply_nature_style()
 
     df = df[df['model'].isin(['connectome'])]
@@ -595,16 +528,11 @@ def classification_scatter_plot(df: pd.DataFrame, results_folder: str, y_name) -
 
 
 def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
-    """
-    Pairplot where each cell picks scatter / histogram-by-group / crosstab
-    based on whether the two variables are continuous or categorical.
+    """Pairplot where each cell picks scatter / histogram-by-group / crosstab by variable type.
 
-    A numeric column with only 2 distinct values (e.g. a 0/1 classification
-    target, or a binary covariate like sex) is treated as categorical, not
-    continuous: plotting it on a scatter axis produces two overlapping strips
-    of points with no readable structure, so it is routed to the
-    histogram-by-group / crosstab branches instead, matching how this
-    codebase defines "binary" elsewhere (``validation.detect_task_type``).
+    A numeric column with only 2 distinct values is treated as categorical (matching
+    ``validation.detect_task_type``), since scattering a binary axis gives two
+    unreadable overlapping strips.
     """
     sns.set_theme(style="white")
     variables = df.columns
@@ -635,13 +563,12 @@ def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
                     sns.barplot(
                         x=counts.index.astype(str),
                         y=counts.values,
-                        hue=counts.index.astype(str),  # ← now we have a hue
+                        hue=counts.index.astype(str),
                         palette="pastel",
                         legend=False,
                         ax=ax
                     )
 
-                    # rotate labels (you can also use tick_params as shown earlier)
                     ax.set_xticks(range(len(counts)))
                     ax.set_xticklabels(counts.index.astype(str), rotation=45, ha="right")
                 ax.set_title(row_var, fontsize=9)
@@ -665,8 +592,7 @@ def pairplot_flexible(df: pd.DataFrame, output_path: str) -> str:
             ax.tick_params(axis='both', labelsize=6)
             sns.despine(ax=ax)
 
-    # Reduce label collisions: only show tick labels on the outer edge
-    # (bottom row for x, left column for y), like a conventional pairplot.
+    # only show tick labels on the outer edge, like a conventional pairplot
     for i in range(n):
         for j in range(n):
             ax = axes[i, j]

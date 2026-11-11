@@ -1,3 +1,4 @@
+"""Enums and lookup tables shared across the CCCPM pipeline."""
 from enum import IntEnum, Enum
 
 
@@ -15,27 +16,13 @@ class Networks(IntEnum):
 
 
 class EdgeSignificance(str, Enum):
-    """Method for testing edge-stability significance under permutation.
-
-    ``nbs``  — Network-Based Statistic: connected-component test controlling
-               FWER via a permutation max-component null (subnetwork-level).
-    ``tfce`` — Threshold-Free Cluster Enhancement: per-edge FWER control with
-               no arbitrary primary threshold.
-    """
+    """Method for testing edge-stability significance under permutation: ``nbs`` (connected-component) or ``tfce`` (per-edge, no primary threshold)."""
     nbs = "nbs"
     tfce = "tfce"
 
 
 class Models(IntEnum):
-    """
-    Model types in CPM analysis.
-
-    Whether the connectome fed to these models has been deconfounded is a
-    property of the run (``CPMAnalysis(model_input=...)``), not a separate
-    model. See that parameter for why: the non-linear backends are not
-    invariant to it, so it cannot be a model name without meaning different
-    things for different backends.
-    """
+    """Model types in CPM analysis. Whether the connectome is deconfounded is `CPMAnalysis(model_input=...)`, not a separate model (non-linear backends aren't invariant to it)."""
     connectome = 0
     covariates = 1
     full = 2
@@ -43,26 +30,18 @@ class Models(IntEnum):
 
 
 class Metrics(IntEnum):
-    """
-    Metrics for model evaluation.
-
-    Indices 0-3 are for regression tasks.
-    Indices 4-7 are for classification tasks.
-    """
-    # Regression metrics
+    """Metrics for model evaluation (0-3 regression, 4-7 classification)."""
     explained_variance_score = 0
     pearson_score = 1
     mean_squared_error = 2
     mean_absolute_error = 3
 
-    # Classification metrics
     accuracy = 4
     balanced_accuracy = 5
     f1_score = 6
     roc_auc = 7
 
 
-# Metric groups for different task types
 REGRESSION_METRICS = [
     Metrics.explained_variance_score,
     Metrics.pearson_score,
@@ -78,25 +57,9 @@ CLASSIFICATION_METRICS = [
 ]
 
 # Metrics for which `increment` (full - covariates) is a meaningful number.
-#
-# `increment` is a *difference of two metrics*, which is only interpretable when
-# differences of that quantity are themselves a standard statistic:
-#
-#   explained variance   difference of R^2 -- the squared semipartial correlation
-#   MSE / MAE            error reduction (negative when the connectome helps)
-#   accuracy             difference of proportions
-#   balanced accuracy    difference of a mean of two proportions
-#   ROC AUC              difference of AUCs (as in a DeLong comparison)
-#
-# Excluded:
-#
-#   Pearson r            a difference of two correlations is not a standard
-#                        statistic; comparing correlations needs Fisher z or
-#                        Steiger's test, not subtraction
-#   F1                   a harmonic mean of precision and recall, whose
-#                        difference has no established interpretation
-#
-# The excluded slots are written as NaN rather than a plausible-looking number.
+# Excluded (NaN instead): Pearson r (a difference of correlations is not a
+# standard statistic -- needs Fisher z/Steiger's test, not subtraction) and
+# F1 (a harmonic mean whose difference has no established interpretation).
 INCREMENTABLE_METRICS = [
     Metrics.explained_variance_score,
     Metrics.mean_squared_error,
@@ -106,7 +69,6 @@ INCREMENTABLE_METRICS = [
     Metrics.roc_auc,
 ]
 
-# Metric names for display
 METRIC_NAMES = {
     Metrics.explained_variance_score: "Explained Variance",
     Metrics.pearson_score: "Pearson r",
@@ -120,15 +82,7 @@ METRIC_NAMES = {
 
 
 def get_metrics_for_task(task_type: TaskType):
-    """
-    Get the appropriate metrics for a given task type.
-
-    Args:
-        task_type: Type of task (regression or classification)
-
-    Returns:
-        List of metric enum values
-    """
+    """Returns the metric enum list for a task type."""
     if task_type == TaskType.regression:
         return REGRESSION_METRICS
     elif task_type == TaskType.classification:

@@ -1,9 +1,4 @@
-"""
-Data loading utilities for HTML report generation.
-
-This module handles all data loading operations for the CPM HTML reporter,
-including results files, predictions, network strengths, and metadata.
-"""
+"""Data loading utilities for HTML report generation."""
 
 import os
 import json
@@ -14,22 +9,9 @@ from cccpm.reporting.plots.plots import MODEL_ORDER
 
 
 class ReportDataLoader:
-    """
-    Loads and prepares all data required for HTML report generation.
-
-    Attributes:
-        results_directory: Path to the directory containing CPM results
-        atlas_labels: DataFrame containing atlas region labels (optional)
-    """
+    """Loads and prepares all data required for HTML report generation."""
 
     def __init__(self, results_directory: str, atlas_labels: Optional[str] = None):
-        """
-        Initialize the data loader.
-
-        Args:
-            results_directory: Path to directory containing CPM analysis results
-            atlas_labels: Path to CSV file containing atlas region labels (optional)
-        """
         self.results_directory = results_directory
         self.atlas_labels = self._load_atlas_labels(atlas_labels)
 
@@ -40,12 +22,7 @@ class ReportDataLoader:
         return None
 
     def load_variable_names(self) -> Tuple[list, str, list]:
-        """
-        Load variable names from saved CSV files.
-
-        Returns:
-            Tuple of (feature_names, target_name, covariate_names)
-        """
+        """Returns (feature_names, target_name, covariate_names) from saved CSV files."""
         data_insights_dir = os.path.join(self.results_directory, 'data_insights')
 
         X_names = pd.read_csv(
@@ -69,14 +46,7 @@ class ReportDataLoader:
         return X_names, y_name, covar_names
 
     def load_available_models(self) -> list:
-        """
-        The model variants this run defines, in report order.
-
-        A run without covariates NaN-fills the variants that need them rather
-        than reshaping the results tensor, so the report filters on this list
-        instead of on what columns exist. Result directories written before
-        this file existed fall back to the full model set.
-        """
+        """Model variants this run defines, in report order; falls back to the full set if absent (old result dirs)."""
         path = os.path.join(self.results_directory, 'available_models.json')
         if not os.path.exists(path):
             return list(MODEL_ORDER)
@@ -85,13 +55,7 @@ class ReportDataLoader:
         return [m for m in MODEL_ORDER if m in available]
 
     def load_run_config(self) -> dict:
-        """
-        The confound configuration this run used.
-
-        Empty for result directories written before `run_config.json` existed;
-        callers must treat a missing key as "unknown" rather than as a default,
-        so an old report does not claim a configuration it cannot know.
-        """
+        """The confound configuration this run used; {} for old result dirs (treat missing keys as unknown, not default)."""
         path = os.path.join(self.results_directory, 'run_config.json')
         if not os.path.exists(path):
             return {}
@@ -99,50 +63,32 @@ class ReportDataLoader:
             return json.load(f)
 
     def load_cv_results(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Load cross-validation results (full and summary).
-
-        Returns:
-            Tuple of (full_results_df, summary_results_df)
-        """
+        """Returns (full_results_df, summary_results_df)."""
         from cccpm.reporting.reporting_utils import load_results_from_folder
 
-        # Load full CV results
         df_full = pd.read_csv(
             os.path.join(self.results_directory, 'cv_results_full.csv')
         ).drop("run", axis=1)
         df_full = self._keep_available_models(df_full)
 
-        # Load summary results
         df_summary = load_results_from_folder(
             self.results_directory,
             'cv_results_summary.csv'
         )
-
-        # Reorder and sort the multi-index
         df_summary = self._sort_summary_results(df_summary)
 
         return df_full, df_summary
 
     def _sort_summary_results(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Sort summary results by model and network type in standard order.
-
-        Args:
-            df: DataFrame with multi-index (model, network, run)
-
-        Returns:
-            Sorted DataFrame with run level dropped
-        """
+        """Sort by model/network in standard order and drop the run level."""
         df = df.reorder_levels(["model", "network", "run"])
 
-        # Drop the NaN placeholder rows for variants this run does not define,
+        # Drop NaN placeholder rows for variants this run does not define,
         # rather than printing a table of blanks.
         model_order = self.load_available_models()
         df = df[df.index.get_level_values("model").isin(model_order)]
         network_order = ["positive", "negative", "both"]
 
-        # Create categorical index for proper sorting
         df.index = pd.MultiIndex.from_frame(
             df.index.to_frame().assign(
                 model=pd.Categorical(
@@ -194,12 +140,7 @@ class ReportDataLoader:
             load_data_from_folder(self.results_directory, 'cv_network_strengths.csv'))
 
     def load_edge_stability(self) -> Tuple:
-        """
-        Load edge stability matrices.
-
-        Returns:
-            Tuple of (edge_stability, edge_stability_significance)
-        """
+        """Returns (edge_stability, edge_stability_significance) matrices."""
         import numpy as np
 
         stability_path = os.path.join(self.results_directory, "stability_edges.npy")
@@ -211,8 +152,7 @@ class ReportDataLoader:
         return edge_stability, edge_stability_significance
 
     def load_edge_significance_meta(self) -> Optional[dict]:
-        """Load the edge-significance diagnostics (method, null distributions,
-        components) written by the permutation step, or ``None`` if absent."""
+        """Load edge-significance diagnostics written by the permutation step, or None if absent."""
         import json
 
         path = os.path.join(self.results_directory, "stability_edges_significance_meta.json")
@@ -222,12 +162,7 @@ class ReportDataLoader:
         return None
 
     def load_data_insights(self) -> Tuple[Optional[pd.DataFrame], str, str]:
-        """
-        Load data insight files (summary stats and scatter matrix).
-
-        Returns:
-            Tuple of (summary_df, scatter_matrix_path, exists_flag)
-        """
+        """Returns (summary_df, scatter_matrix_path, summary_csv_path)."""
         insights_dir = os.path.join(self.results_directory, "data_insights")
         summary_path = os.path.join(insights_dir, "summary.csv")
         scatter_path = os.path.join(insights_dir, "scatter_matrix.png")
@@ -239,12 +174,7 @@ class ReportDataLoader:
         return summary_df, scatter_path, summary_path
 
     def load_task_type(self) -> str:
-        """
-        Load task type from results directory.
-
-        Returns:
-            Task type string ('regression' or 'classification')
-        """
+        """Returns 'regression' or 'classification'."""
         task_type_path = os.path.join(self.results_directory, 'task_type.txt')
         if os.path.exists(task_type_path):
             with open(task_type_path, 'r', encoding='utf-8') as f:
@@ -252,12 +182,7 @@ class ReportDataLoader:
         return 'regression'
 
     def load_all(self) -> dict:
-        """
-        Load all data needed for report generation.
-
-        Returns:
-            Dictionary containing all loaded data
-        """
+        """Load all data needed for report generation."""
         X_names, y_name, covariates_names = self.load_variable_names()
         df_full, df_summary = self.load_cv_results()
 

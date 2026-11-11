@@ -1,27 +1,15 @@
-"""
-CPU-vs-GPU timing harness for the CCCPM hot path.
+"""CPU-vs-GPU timing harness for the CCCPM hot path (edge selection + model fit/predict).
 
-Times the two numerically heavy steps — univariate edge selection
-(`EdgeStatistic.fit_transform`) and linear-model fit+predict (`LinearCPM`) — on
-CPU and, when available, CUDA, across problem sizes and permutation counts.
-
-Why this exists: users observe that CPU and GPU runs take almost the same wall
-time. This harness shows why. The GPU only wins when there is enough parallel
-work to hide kernel-launch and host↔device-transfer overhead — i.e. large
-permutation batches and/or many edges. At `perms=1` (a plain run with no
-permutation test) the matrices are small and the GPU is typically no faster (or
-slower) than the CPU. Sweep `--perms` to see the crossover.
-
-Note: this measures the compute kernels only. A full `CPMAnalysis.run` also
-spends fixed, CPU-bound time on data validation, imputation, permutation
-generation, the connected-component filter (networkx), scoring, CSV/IO and the
-HTML report — none of which the GPU accelerates — so end-to-end speedups are
-smaller than the kernel speedups reported here.
+The GPU only wins once there is enough parallel work (large `--perms` and/or
+many edges) to hide kernel-launch/transfer overhead; at `perms=1` CPU and GPU
+are typically comparable. Measures compute kernels only — a full
+`CPMAnalysis.run` also spends fixed CPU time on validation, imputation,
+permutation generation, NBS/TFCE and the HTML report, so end-to-end speedups
+are smaller than the kernel speedups reported here.
 
 Usage:
     python scripts/benchmark_cpu_gpu.py
     python scripts/benchmark_cpu_gpu.py --nodes 100 200 --samples 300 --perms 1 100 1000
-    python scripts/benchmark_cpu_gpu.py --repeat 5
 """
 
 import argparse
@@ -31,7 +19,6 @@ from pathlib import Path
 
 import numpy as np
 
-# Ensure the src layout is importable when running from the repo root.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
@@ -42,14 +29,14 @@ from cccpm.models.linear_model import LinearCPM
 
 
 def _make_data(n_samples, n_nodes, n_perms, seed=0):
-    """Synthetic connectome-shaped data and a random edge mask for the model."""
+    """Build synthetic connectome-shaped data and a random edge mask."""
     rng = np.random.RandomState(seed)
     n_features = n_nodes * (n_nodes - 1) // 2
     X = rng.randn(n_samples, n_features).astype(np.float32)
     Y = rng.randn(n_samples, n_perms).astype(np.float32)
     cov = rng.randn(n_samples, 3).astype(np.float32)
 
-    # ~5% of edges selected per network (positive / negative), same across perms.
+    # ~5% of edges selected per network, same across perms.
     edges = torch.zeros(n_features, 2, n_perms, dtype=torch.bool)
     k = max(1, n_features // 20)
     for layer in (0, 1):
@@ -59,7 +46,7 @@ def _make_data(n_samples, n_nodes, n_perms, seed=0):
 
 
 def _time(fn, device, n_repeat):
-    """Mean seconds per call, with a warmup and CUDA synchronisation."""
+    """Time `fn`, discounting a warmup call and syncing CUDA if needed."""
     fn()  # warmup (kernel compile / allocator / transfer paths)
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -72,7 +59,7 @@ def _time(fn, device, n_repeat):
 
 
 def run_benchmark(nodes, samples, perms, devices, n_repeat=3):
-    """Return a list of timing rows (dicts) for the size × device grid."""
+    """Time the edge-selection and model hot paths across a parameter grid."""
     rows = []
     for n_nodes in nodes:
         for n_samples in samples:
@@ -100,11 +87,11 @@ def run_benchmark(nodes, samples, perms, devices, n_repeat=3):
 
 
 def _print_table(rows):
+    """Print benchmark rows as a table, with GPU speedup vs CPU per cell."""
     header = f"{'nodes':>5} {'feat':>7} {'N':>5} {'perms':>6} {'device':>6} " \
              f"{'edge ms':>9} {'model ms':>9} {'total ms':>9} {'vs CPU':>7}"
     print(header)
     print("-" * len(header))
-    # group by (nodes, samples, perms) so we can print the GPU speedup vs CPU.
     cpu_total = {}
     for r in rows:
         if r["device"] == "cpu":

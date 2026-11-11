@@ -1,3 +1,4 @@
+"""Confound-Corrected Connectome-based Predictive Modeling (CCCPM) public API."""
 from importlib.metadata import PackageNotFoundError, version
 
 from cccpm.cpm_analysis import CPMAnalysis

@@ -1,29 +1,18 @@
 """
-Capture a numerical baseline of the quickstart outputs, for regression-testing
-a refactor that is supposed to change nothing.
+Capture a numerical baseline of the quickstart outputs, to regression-test a
+refactor that is supposed to change nothing.
 
-Runs both quickstart examples on every requested device and archives the files
-that encode the actual numbers -- not the HTML report, not the plots, which
-carry timestamps and are not meaningfully diffable.
+Archives the files that encode actual numbers, not the HTML report or plots
+(timestamped, not diffable). `--compare` always prints the observed max
+difference per file, pass or fail — an earlier silent-on-success version let a
+3.3e-6 drift sit undetected under threshold for two commits. CSV tolerance is
+1e-5 (float32 accumulation order shifts with tensor shape across a refactor);
+.npy edge/stability arrays must still be bit-identical.
 
 Usage:
     poetry run python scripts/capture_baseline.py --out baselines/pre-refactor
-    poetry run python scripts/capture_baseline.py --out baselines/post-phase4
     poetry run python scripts/capture_baseline.py --compare \
         baselines/pre-refactor baselines/post-phase4
-
-`--compare` is the point of the whole thing. It always prints the observed
-maximum difference per file, passing or failing, and fails above CSV_TOLERANCE.
-
-That reporting matters: an earlier version printed nothing on success, and a
-3.3e-6 drift in predicted values sat undetected under a 5e-5 threshold for two
-commits. A regression check that only says "pass" hides exactly the information
-you need to judge whether the pass was meaningful.
-
-The tolerance exists because float32 accumulation order changes whenever tensor
-shapes change, which is unavoidable in a refactor; 1e-5 is far below anything
-that could represent a logic error in these outputs, and .npy edge/stability
-arrays are still required to be bit identical.
 """
 import argparse
 import shutil
@@ -36,8 +25,7 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = ["regression_quickstart", "classification_quickstart"]
-# Files that encode numbers. Not every run produces all of them (permutation
-# outputs only exist when n_permutations > 0).
+# Not every run produces all of these (permutation outputs need n_permutations > 0).
 ARTIFACTS = [
     "cv_results_summary.csv",
     "cv_results_full.csv",
@@ -50,6 +38,7 @@ ARTIFACTS = [
 
 
 def run_and_archive(example: str, device: str, out_dir: Path) -> None:
+    """Run one quickstart example on `device` and archive its numeric artifacts."""
     script = REPO_ROOT / "examples" / f"{example}.py"
     results = REPO_ROOT / "results" / example
 
@@ -85,7 +74,7 @@ CSV_TOLERANCE = 1e-5
 
 
 def compare(ref_dir: Path, new_dir: Path) -> int:
-    """Diff two baselines. Returns the number of mismatches found."""
+    """Diff two baselines; returns the number of mismatches found."""
     mismatches = 0
     checked = 0
     worst_overall = 0.0
@@ -102,9 +91,7 @@ def compare(ref_dir: Path, new_dir: Path) -> int:
 
         checked += 1
         if ref_file.suffix == ".npy":
-            # Edge masks, stability and significance must be bit identical:
-            # they are discrete selections, not accumulated sums, so float
-            # reassociation cannot legitimately move them.
+            # Discrete selections, not accumulated sums -> must be bit identical.
             a, b = np.load(ref_file), np.load(new_file)
             if a.shape != b.shape:
                 print(f"SHAPE    {rel}: {a.shape} vs {b.shape}")
@@ -146,6 +133,7 @@ def compare(ref_dir: Path, new_dir: Path) -> int:
 
 
 def main() -> int:
+    """Capture a baseline, or compare two existing ones."""
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", type=Path, help="directory to write the baseline into")

@@ -1,11 +1,4 @@
-"""
-Statistics figures for the CCCPM HTML report.
-
-Currently: the permutation null-distribution plot for edge-stability
-significance (NBS max-component or TFCE max-TFCE null), with the critical
-value and the observed statistic marked. Self-contained (input = numpy /
-plain values, output = SVG path) to match the other report-figure modules.
-"""
+"""Statistics figures for the CCCPM HTML report (permutation null-distribution plots)."""
 
 from __future__ import annotations
 
@@ -33,31 +26,9 @@ def null_distribution_plot(
     critical_value: float | None = None,
     statistic_label: str = "Max statistic",
 ) -> str:
-    """
-    Plot the permutation max-statistic null distribution for one network.
+    """Plot the permutation max-statistic (FWER) null distribution for one network.
 
-    Parameters
-    ----------
-    max_null : sequence of float
-        The per-permutation maximum statistic (max component size for NBS, max
-        TFCE score for TFCE) — i.e. the FWER null distribution.
-    results_folder : str
-        Directory to write the figure into.
-    name : str
-        Extension-less figure name.
-    network : {'positive', 'negative'}
-        Selects the accent colour.
-    observed : float, optional
-        The observed statistic to mark (largest true component / max TFCE).
-    critical_value : float, optional
-        The (1 - alpha) quantile of the null; drawn as the significance cutoff.
-    statistic_label : str
-        X-axis label describing the statistic.
-
-    Returns
-    -------
-    str
-        Path to the saved SVG.
+    max_null is the per-permutation max component size (NBS) or max TFCE score (TFCE).
     """
     apply_nature_style()
     color = COLOR_MAP.get(network, COLOR_MAP["both"])

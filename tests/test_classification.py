@@ -1,10 +1,4 @@
-"""
-Tests for classification support: task type detection, classification model outputs,
-and IRLS logistic regression correctness (compared against sklearn).
-
-Classification scoring metrics are validated in test_scoring.py.
-Full classification pipeline ground-truth tests are in test_ground_truth.py.
-"""
+"""Classification scoring metrics: test_scoring.py. Full pipeline: test_ground_truth.py."""
 
 import numpy as np
 import pytest
@@ -19,13 +13,9 @@ from cccpm.validation import detect_task_type, validate_task_type
 from cccpm.models.linear_model import LinearCPM
 
 
-# ============================================================
-# Task type detection
-# ============================================================
-
 @pytest.mark.parametrize("y,expected", [
-    (np.array([0, 1, 0, 1, 1, 0]), TaskType.classification),     # 0/1
-    (np.array([-1, 1, -1, 1, 1, -1]), TaskType.classification),  # any two levels
+    (np.array([0, 1, 0, 1, 1, 0]), TaskType.classification),
+    (np.array([-1, 1, -1, 1, 1, -1]), TaskType.classification),
     (np.array([1.0, 2.5, 3.7, 4.2, 5.1]), TaskType.regression),
 ])
 def test_detect_task_type(y, expected):
@@ -33,25 +23,19 @@ def test_detect_task_type(y, expected):
 
 
 def test_detect_task_type_rejects_a_constant_target():
-    """Neither task is defined without variation in y."""
     with pytest.raises(ValueError):
         detect_task_type(np.array([1, 1, 1, 1]))
 
 
 def test_validate_task_type_accepts_the_matching_type_and_rejects_the_other():
     y = np.array([0, 1, 0, 1])
-    validate_task_type(y, TaskType.classification)        # must not raise
+    validate_task_type(y, TaskType.classification)
     with pytest.raises(ValueError):
         validate_task_type(y, TaskType.regression)
 
 
-# ============================================================
-# Classification model outputs
-# ============================================================
-
 class TestClassificationModel:
     def test_model_classification_output(self):
-        """Test that classification model outputs probabilities in [0, 1]."""
         N_samples, N_features, N_runs = 20, 10, 1
         edges = torch.randint(0, 2, (N_features, 2, N_runs), dtype=torch.bool)
 
@@ -67,7 +51,6 @@ class TestClassificationModel:
         assert (proba >= 0).all() and (proba <= 1).all(), "Probabilities should be in [0, 1]"
 
     def test_regression_unchanged(self):
-        """Verify that regression mode still uses OLS (not IRLS)."""
         np.random.seed(42)
         X_train = np.random.randn(100, 3).astype(np.float32)
         y_train = (X_train @ np.array([1.0, -0.5, 0.3]) + np.random.randn(100) * 0.1).astype(np.float32)
@@ -81,20 +64,14 @@ class TestClassificationModel:
         model.fit(X_train, y_train.reshape(-1, 1), cov)
         preds = model.predict(X_train, cov)
 
-        # For regression, predictions should NOT be squashed through sigmoid
         preds_np = preds[:, Models.connectome, Networks.positive, 0].numpy()
         assert preds_np.max() > 1.0 or preds_np.min() < 0.0, (
             "Regression predictions seem sigmoid-squashed — they should be unbounded"
         )
 
 
-# ============================================================
-# IRLS logistic regression vs sklearn
-# ============================================================
-
 @pytest.fixture
 def binary_classification_data():
-    """Generate a binary classification dataset with a single informative feature."""
     X, y = make_classification(
         n_samples=200, n_features=1, n_informative=1, n_redundant=0,
         n_clusters_per_class=1, random_state=42
@@ -107,7 +84,6 @@ def binary_classification_data():
 
 @pytest.fixture
 def multi_feature_data():
-    """Generate a binary classification dataset with multiple features."""
     X, y = make_classification(
         n_samples=500, n_features=5, n_informative=3, n_redundant=1,
         n_clusters_per_class=1, random_state=42
@@ -119,10 +95,7 @@ def multi_feature_data():
 
 
 def _fit_cpm_logistic(X_train, y_train, X_test):
-    """
-    Fit a LinearCPM in classification mode using the 'connectome_positive' path
-    (all edges selected), with no covariates. Returns predicted probabilities on X_test.
-    """
+    """LinearCPM in classification mode, all edges, no covariates; returns proba on X_test."""
     n_features = X_train.shape[1]
 
     edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
@@ -142,7 +115,7 @@ def _fit_cpm_logistic(X_train, y_train, X_test):
 
 
 def _fit_cpm_logistic_full(X_train, y_train, X_test):
-    """Same as above but returns the model as well for coefficient inspection."""
+    """Like _fit_cpm_logistic, but also returns the model for coefficient inspection."""
     n_features = X_train.shape[1]
     edges = torch.zeros(n_features, 2, 1, dtype=torch.bool)
     edges[:, Networks.positive, 0] = True
@@ -159,7 +132,6 @@ def _fit_cpm_logistic_full(X_train, y_train, X_test):
 
 
 def _fit_sklearn_logistic(X_train, y_train, X_test, penalty=None):
-    """Fit sklearn LogisticRegression (unregularized) and return predicted probabilities."""
     clf = LogisticRegression(max_iter=1000, random_state=42, penalty=penalty, solver='lbfgs')
     clf.fit(X_train, y_train)
     proba = clf.predict_proba(X_test)[:, 1]
@@ -167,10 +139,7 @@ def _fit_sklearn_logistic(X_train, y_train, X_test, penalty=None):
 
 
 class TestLogisticRegressionVsSklearn:
-    """Compare CPM's IRLS logistic regression with sklearn's implementation."""
-
     def test_predicted_probabilities_close(self, binary_classification_data):
-        """Predicted probabilities from CPM IRLS and sklearn should be nearly identical."""
         X_train, X_test, y_train, y_test = binary_classification_data
 
         cpm_proba = _fit_cpm_logistic(X_train, y_train, X_test)
@@ -187,7 +156,6 @@ class TestLogisticRegressionVsSklearn:
         )
 
     def test_coefficients_match(self, binary_classification_data):
-        """IRLS coefficients should closely match sklearn's unregularized logistic regression (both MLE)."""
         X_train, X_test, y_train, y_test = binary_classification_data
 
         _, cpm_model = _fit_cpm_logistic_full(X_train, y_train, X_test)
@@ -206,10 +174,7 @@ class TestLogisticRegressionVsSklearn:
             err_msg="Intercepts differ significantly between CPM IRLS and sklearn")
 
     def test_multi_feature_probabilities(self, multi_feature_data):
-        """
-        With multiple features, CPM sums them into network strengths before fitting.
-        For a fair comparison, give sklearn the same summed input.
-        """
+        """CPM sums features into network strengths before fitting; sklearn gets the same summed input."""
         X_train, X_test, y_train, y_test = multi_feature_data
 
         X_train_summed = X_train.sum(axis=1, keepdims=True)
@@ -229,7 +194,6 @@ class TestLogisticRegressionVsSklearn:
         )
 
     def test_class_predictions(self, binary_classification_data):
-        """predict_class returns 0/1 matching thresholded probabilities."""
         X_train, X_test, y_train, y_test = binary_classification_data
         n_features = X_train.shape[1]
 

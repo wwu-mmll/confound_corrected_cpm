@@ -1,11 +1,5 @@
-"""
-Tests for the permutation inference in cccpm.inference.
-
-These check the p-value definitions directly -- the +1 correction, the
-direction flip for lower-is-better metrics, and the NBS/TFCE cluster statistics
-against hand-constructed graphs whose component structure is known by
-construction.
-"""
+"""Checks the p-value definitions directly (+1 correction, direction flip for
+lower-is-better metrics) and NBS/TFCE against graphs with known component structure."""
 import pytest
 import numpy as np
 import pandas as pd
@@ -15,27 +9,19 @@ from cccpm.inference import PermutationManager
 
 class TestPermutationManager:
     P_VALUE_CASES = [
-        # Higher is better: p = (count(observed < null) + 1) / (n + 1).
-        # 0.5 < 0.6, 0.7 -> 2 of 4 -> 3/5.
+        # Higher is better: p = (count(observed < null) + 1) / (n + 1). 0.5 < 0.6, 0.7 -> 3/5.
         ('pearson_score', 0.5, [0.3, 0.6, 0.4, 0.7], 3 / 5),
-        # Lower is better: the comparison flips. 1.5 > 1.4 -> 1 of 4 -> 2/5.
+        # Lower is better: comparison flips. 1.5 > 1.4 -> 1 of 4 -> 2/5.
         ('mean_squared_error', 1.5, [1.4, 1.6, 1.5, 1.7], 2 / 5),
-        # Every permutation beats the observation: p = 1, never above it.
         ('pearson_score', 0.0, [0.5, 0.6, 0.7], 1.0),
-        # An undefined statistic has no null to compare against. Every
-        # comparison with NaN is False, so a naive count comes out 0 and the +1
-        # correction reports 1/(n+1) -- the *most* significant p-value the test
-        # can produce -- for a model that does not exist. A run without
-        # covariates hits this: its covariates/full/increment rows are NaN
-        # placeholders, and they were being reported as p = 0.02.
+        # Regression: NaN vs NaN null naively counted as 0 matches, giving the
+        # most-significant p=1/(n+1) for a model that doesn't exist (e.g. a run
+        # without covariates, whose covariates/full/increment rows are NaN).
         ('pearson_score', float('nan'), [float('nan')] * 50, float('nan')),
-        # Defensive: a real observation against an all-NaN null is undefined too.
         ('pearson_score', 0.4, [float('nan')] * 50, float('nan')),
     ]
 
     def test_calculate_group_p_value(self):
-        """The p-value definition, in one place: the direction flip for
-        lower-is-better metrics, the +1 correction, and NaN in, NaN out."""
         for column, observed, null, expected in self.P_VALUE_CASES:
             p = PermutationManager._calculate_group_p_value(
                 pd.DataFrame({column: [observed]}), pd.DataFrame({column: null}))
@@ -47,7 +33,6 @@ class TestPermutationManager:
                 assert 0 < p[column] <= 1
 
     def test_calculate_p_values_groups(self):
-        """Test grouped p-value calculation across model/network combinations."""
         df_true = pd.DataFrame({
             'network': ['positive', 'negative'],
             'model': ['connectome', 'connectome'],
@@ -83,10 +68,9 @@ class TestPermutationManager:
 
 def _make_stability_arrays(n_nodes, n_perms, clique, isolated, seed=0,
                            clique_val=0.9, isolated_val=0.8, null_density=0.05):
-    """Build (true, permutation) stability arrays of the stored shape
-    [n_nodes, n_nodes, 2, runs]. A dense positive-network clique and a few
-    isolated positive-network edges are planted in the observed data; the null
-    is sparse low-stability noise. The negative network is left empty."""
+    """(true, permutation) stability arrays [n_nodes, n_nodes, 2, runs]: a dense
+    positive-network clique + isolated edges planted in `true`, sparse noise in
+    `perm`. Negative network left empty."""
     rng = np.random.default_rng(seed)
     triu = np.triu_indices(n_nodes, k=1)
 
@@ -111,8 +95,7 @@ def _make_stability_arrays(n_nodes, n_perms, clique, isolated, seed=0,
 
 class TestEdgeSignificance:
     def test_nbs_output_contract(self):
-        """Shape, per-layer symmetry, and p-values in (0, 1] with the
-        permutation floor at 1 / (n_perms + 1)."""
+        """p-values in (0, 1], with the permutation floor at 1/(n_perms+1)."""
         n_perms = 100
         true, perm = _make_stability_arrays(20, n_perms, clique=range(6),
                                             isolated=[(10, 11)])
@@ -165,11 +148,8 @@ class TestEdgeSignificance:
         assert np.all(sig > 0) and np.all(sig <= 1)
 
     def test_tfce_strong_isolated_edge_can_be_significant(self):
-        # A strongly-stable isolated edge (0.8) beats a sparse null capped at
-        # 0.6, with no primary threshold needed. The null density is kept low so
-        # it cannot form a large connected 0.6-stability cluster: extent-weighted
-        # TFCE legitimately lets such a cluster outscore a single strong edge, so
-        # a dense null would (correctly) mask the isolated edge.
+        # Null density kept low: a dense null could form a large connected cluster
+        # that legitimately outscores this single strong edge under extent-weighted TFCE.
         true, perm = _make_stability_arrays(20, 200, clique=range(6),
                                             isolated=[(10, 11)],
                                             isolated_val=0.8, null_density=0.02)
@@ -231,18 +211,12 @@ class TestStableEdgesContext:
         assert ctx["null_plot_positive"]  # figure embedded
 
 
-# ============================================================
-# The top-level entry point.
-#
-# calculate_permutation_results reads the true and permuted results back off
-# disk and writes the p-value files the report reads. Until this test it was
-# covered only indirectly, by the example scripts in test_integration.py --
-# which is how a missing import survived a file split undetected for a full
-# test run. This exercises it directly, in under a second.
-# ============================================================
+# calculate_permutation_results was previously covered only indirectly via the
+# example scripts in test_integration.py -- how a missing import survived a file
+# split undetected for a full test run. These exercise it directly.
 
 def _write_cv_summary(folder, n_runs, seed):
-    """Write a cv_results_summary.csv in the two-level format the pipeline saves."""
+    """cv_results_summary.csv in the two-level format the pipeline saves."""
     from cccpm.constants import Models, Networks
 
     rng = np.random.RandomState(seed)
@@ -260,7 +234,7 @@ def _write_cv_summary(folder, n_runs, seed):
 
 
 def _permutation_results_dir(tmp_path, n_perms=8, n_nodes=10):
-    """A minimal results directory: true run plus a permutation subdirectory."""
+    """Minimal results directory: true run plus a permutation subdirectory."""
     rng = np.random.RandomState(0)
     perm_dir = tmp_path / 'permutation'
     _write_cv_summary(tmp_path, n_runs=1, seed=0)

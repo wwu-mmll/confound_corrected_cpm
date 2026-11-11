@@ -1,20 +1,6 @@
-"""
-Guard against CUDA-only code paths that crash on machines without a GPU.
-
-Most contributors develop on a CUDA machine, where a bare ``torch.cuda.*`` call
-runs fine. On a CPU-only machine -- which is every GitHub Actions runner -- the
-same call raises (``RuntimeError: No CUDA GPUs are available`` on a CUDA-enabled
-torch build with no device, ``AssertionError: Torch not compiled with CUDA
-enabled`` on the CPU-only wheel). That is invisible locally and breaks CI.
-
-This happened: two bare ``torch.cuda.synchronize()`` calls in
-``cpm_analysis._select_edges`` failed six tests on CPU while the full suite
-passed on GPU. The scan below catches the whole class rather than that one
-instance.
-
-Only calls that are genuinely safe without a GPU are allowed; see
-``CPU_SAFE_CUDA_CALLS``.
-"""
+"""Guards against torch.cuda.* calls that run fine on a CUDA dev box but raise on
+CPU-only CI runners -- regression: two bare torch.cuda.synchronize() calls in
+cpm_analysis._select_edges failed six tests on CPU while passing on GPU."""
 import ast
 from pathlib import Path
 
@@ -22,27 +8,20 @@ from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "cccpm"
 
-# ``torch.cuda`` attributes that do NOT require an available GPU.
+# torch.cuda attributes that do NOT require an available GPU: is_available
+# returns False rather than raising; the nvtx no-ops work with no device;
+# mem_get_info is guarded by a device.type == 'cuda' check at its call site.
 CPU_SAFE_CUDA_CALLS = {
-    # The capability check itself -- returns False rather than raising.
     "torch.cuda.is_available",
-    # A no-op annotation when no profiler is attached; verified to work with
-    # CUDA_VISIBLE_DEVICES="" on a CUDA-enabled build.
     "torch.cuda.nvtx.range",
     "torch.cuda.nvtx.range_push",
     "torch.cuda.nvtx.range_pop",
-    # Guarded by an explicit `device.type == 'cuda'` check in
-    # memory.available_memory_bytes.
     "torch.cuda.mem_get_info",
 }
 
 
 def _dotted_name(node):
-    """Return the dotted source spelling of an attribute chain, or None.
-
-    ``torch.cuda.nvtx.range`` -> "torch.cuda.nvtx.range". Returns None for
-    anything not rooted in a plain name (e.g. ``f().cuda.foo``).
-    """
+    """Dotted spelling of an attribute chain rooted in a Name, else None (e.g. f().cuda.foo)."""
     parts = []
     while isinstance(node, ast.Attribute):
         parts.append(node.attr)
@@ -54,7 +33,9 @@ def _dotted_name(node):
 
 
 def _cuda_attribute_uses(source, filename):
-    """Yield (lineno, dotted_name) for every ``torch.cuda.*`` attribute used."""
+    """Yield (lineno, dotted_name) for every torch.cuda.* attribute used. ast.walk visits
+    every prefix of a chain (torch.cuda.nvtx.range also yields torch.cuda.nvtx); the
+    caller keeps the longest spelling per line."""
     tree = ast.parse(source, filename=filename)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute):
@@ -62,9 +43,6 @@ def _cuda_attribute_uses(source, filename):
         name = _dotted_name(node)
         if name is None or not name.startswith("torch.cuda."):
             continue
-        # ast.walk visits every prefix of a chain, so torch.cuda.nvtx.range
-        # also yields torch.cuda.nvtx. The caller keeps the longest spelling
-        # per line.
         yield node.lineno, name
 
 
@@ -75,20 +53,14 @@ def _package_python_files():
 
 
 def test_no_gpu_only_cuda_calls():
-    """No ``torch.cuda.*`` call in the package may require an available GPU.
-
-    One test over every module rather than one test per module: the report below
-    already names the file and line, so a per-file parametrisation only inflated
-    the collected count (37 tests for one check).
-    """
+    """One test over every module, not one per module: the failure message already
+    names file and line, so per-file parametrisation only inflated the count."""
     violations = []
     for path in _package_python_files():
         source = path.read_text(encoding="utf-8")
         if "torch.cuda" not in source:
             continue
 
-        # ast.walk visits every prefix of a chain, so torch.cuda.nvtx.range also
-        # yields torch.cuda.nvtx. Keep the longest spelling per line.
         by_line = {}
         for lineno, name in _cuda_attribute_uses(source, str(path)):
             current = by_line.get(lineno)

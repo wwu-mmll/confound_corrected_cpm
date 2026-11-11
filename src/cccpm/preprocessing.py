@@ -1,31 +1,19 @@
-"""
-Per-fold data preparation.
-
-The transformations applied between splitting a fold and fitting a model:
-train/test indexing on device, mean imputation fitted on train, confound
-residualisation fitted on train, and thresholding edge stability into a mask.
-
-Everything here follows the same rule -- anything estimated from the data is
-estimated on the training split and only applied to the test split.
-"""
+"""Per-fold data preparation: anything estimated from the data is fit on train and only applied to test."""
 import torch
 
 
 def to_device(array, device):
-    """Copy the caller's array into a float32 tensor on ``device``.
+    """Copies array into a float32 tensor on device.
 
-    Always a copy. ``torch.as_tensor`` shares memory when the input is already
-    float32 on the CPU, so the run's working tensor would alias the user's own
-    data -- a pandas copy-on-write view is read-only, and torch warns that
-    writing to it is undefined. Nothing writes in place today (the first op is
-    fold indexing, which copies), but that is a property of the code downstream,
-    not a guarantee. Float64 input, the common case, was always copied anyway.
+    Always a copy, even when ``torch.as_tensor`` would alias memory --
+    the run's working tensor must never alias the caller's own data (e.g.
+    a read-only pandas copy-on-write view).
     """
     return torch.tensor(array, dtype=torch.float32, device=device)
 
 
 def torch_train_test_split(train, test, X, y, covariates):
-    """Wie utils.train_test_split, aber X/y/covariates sind bereits GPU-Tensoren."""
+    """Splits X/y/covariates into train/test by index (tensor version of ``utils.train_test_split``)."""
     train_idx = torch.as_tensor(train, device=X.device)
     test_idx = torch.as_tensor(test, device=X.device)
     return (X[train_idx], X[test_idx], y[train_idx], y[test_idx],
@@ -33,6 +21,7 @@ def torch_train_test_split(train, test, X, y, covariates):
 
 
 def torch_impute_missing_values(X_train, X_test, cov_train, cov_test):
+    """Mean-imputes NaNs in X and covariates, using column means fit on train."""
     def _impute(train, test):
         train = torch.as_tensor(train, dtype=torch.float32)
         test = torch.as_tensor(test, dtype=torch.float32)
@@ -48,22 +37,7 @@ def torch_impute_missing_values(X_train, X_test, cov_train, cov_test):
 
 
 def residualize_train_test(X_train, X_test, confounds_train, confounds_test):
-    """
-    Regress X ~ intercept + confounds via OLS on the training set only, then
-    subtract the fitted values from both train and test (residualizing test
-    with the train-fit model, never fitting on test data). Pure torch,
-    dtype/device-agnostic (works equally on CPU or GPU tensors) -- same
-    closed-form pseudo-inverse approach as statistics.get_residuals,
-    generalized to the fit-on-train/apply-to-both split CPMAnalysis needs
-    for `model_input='residualized'`.
-
-    Args:
-        X_train, X_test: [N_train, F], [N_test, F].
-        confounds_train, confounds_test: [N_train, C], [N_test, C].
-
-    Returns:
-        X_train_resid, X_test_resid: same shapes as X_train, X_test.
-    """
+    """Regresses X ~ intercept + confounds via OLS fit on train, subtracts fitted values from both splits."""
     dtype = X_train.dtype
     device = X_train.device
     confounds_train = torch.as_tensor(confounds_train, dtype=dtype, device=device)
@@ -83,18 +57,5 @@ def residualize_train_test(X_train, X_test, confounds_train, confounds_test):
 
 
 def select_stable_edges(stability_edges, stability_threshold):
-    """
-    Threshold per-edge selection stability into a boolean edge mask.
-
-    Args:
-        stability_edges: Tensor [N_features, 2, N_runs] (fraction of folds each
-                          edge was selected in; dim 1 = [Positive, Negative]),
-                          as returned by ResultsManager.calculate_edge_stability.
-        stability_threshold: float; edges selected in more than this fraction
-                              of folds are kept.
-
-    Returns:
-        Boolean tensor [N_features, 2, N_runs], same convention as every other
-        edge mask in the pipeline (e.g. PThreshold.select's return value).
-    """
+    """Thresholds per-edge selection stability (fraction of folds selected) into a boolean edge mask."""
     return stability_edges > stability_threshold

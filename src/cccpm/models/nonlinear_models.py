@@ -1,3 +1,4 @@
+"""Non-linear CPM backends (decision tree, random forest, GAM)."""
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -10,29 +11,15 @@ from cccpm.constants import Networks, Models, TaskType
 
 
 class BaseCPM(ABC):
-    """
-    Base class for non-linear CPM models.
-
-    Matches the tensor-based pipeline interface of LinearCPM but delegates
-    the connectome and full model fitting to subclass-defined estimators
-    (sklearn, pygam, etc.).  The covariates model always uses ordinary
-    least-squares (LinearRegression).
+    """Matches ``LinearCPM``'s pipeline interface but delegates connectome/full fitting to a subclass estimator.
 
     Whether the connectome has been deconfounded is decided by the caller
-    (``CPMAnalysis(model_input=...)``). It cannot be a model variant here: a
-    tree or GAM is not invariant to shifting a feature by its covariate fit the
-    way OLS is, so a "residualised" model name would mean something different
-    for every backend. Measured on the same edges, fitting `full` on raw versus
-    residualised connectivity moves predictions by 391% of sd(y) for a decision
-    tree, 65% for a random forest and 19% for a GAM -- against 0.0% for
-    LinearCPM.
-
-    Constructor
-    -----------
-    edges : tensor [N_features, 2, N_runs]
-    device : str ('cpu' or 'cuda') — used only for output tensors
-    task_type : TaskType — stored but not currently used (subclasses are
-                regression-only; classification uses LinearCPM's IRLS)
+    (``CPMAnalysis(model_input=...)``); it cannot be a model variant here,
+    since a tree or GAM is not invariant to shifting a feature by its
+    covariate fit the way OLS is. Measured on the same edges, fitting
+    ``full`` on raw versus residualized connectivity moves predictions by
+    391% of sd(y) for a decision tree, 65% for a random forest, and 19% for
+    a GAM -- against 0.0% for ``LinearCPM``.
     """
 
     name = "BaseCPM"
@@ -43,32 +30,15 @@ class BaseCPM(ABC):
         self.edges = torch.as_tensor(edges, device=self.device)
         self._fitted = []
 
-    # ------------------------------------------------------------------
-    # Abstract / overridable
-    # ------------------------------------------------------------------
-
     @abstractmethod
     def fit_model(self, X, y):
-        """Return a fitted estimator for (X, y).  *X* and *y* are numpy."""
+        """Fits and returns an estimator for X, y (numpy arrays)."""
 
     def predict_model(self, estimator, X):
-        """Predict with a fitted estimator.  Override for non-sklearn APIs."""
         return estimator.predict(X)
 
-    # ------------------------------------------------------------------
-    # Pipeline interface
-    # ------------------------------------------------------------------
-
     def fit(self, X, y, covariates):
-        """
-        Fit all CPM model variants for every permutation run.
-
-        Parameters
-        ----------
-        X : array-like [N_samples, N_features]
-        y : array-like [N_samples, N_runs]
-        covariates : array-like [N_samples, N_cov]
-        """
+        """Fits all CPM model variants for every permutation run."""
         X = np.asarray(X, dtype=np.float32)
         y = np.asarray(y, dtype=np.float32)
         covariates = np.asarray(covariates, dtype=np.float32)
@@ -95,7 +65,7 @@ class BaseCPM(ABC):
                 'both': np.hstack([pos_str, neg_str]),
             }
 
-            # Covariates model — same for all networks, fit once
+            # Covariates model is the same for all networks; fit once.
             run_models['covariates'] = LinearRegression().fit(covariates, y_run)
 
             for net in ['positive', 'negative', 'both']:
@@ -108,13 +78,7 @@ class BaseCPM(ABC):
         return self
 
     def predict(self, X, covariates, return_proba=False):
-        """
-        Predict for all runs.
-
-        Returns
-        -------
-        torch.Tensor [N_samples, N_models, N_networks, N_runs]
-        """
+        """Predicts for all runs -> [N_samples, N_models, N_networks, N_runs]."""
         X = np.asarray(X, dtype=np.float32)
         covariates = np.asarray(covariates, dtype=np.float32)
 
@@ -160,16 +124,7 @@ class BaseCPM(ABC):
         return torch.from_numpy(predictions).to(self.device)
 
     def get_network_strengths(self, X, covariates):
-        """
-        Calculate network strengths for all runs.
-
-        Returns
-        -------
-        dict with a "connectome" sub-dict mapping "positive"/"negative" to
-        tensors [N_samples, N_runs]. These are the strengths of whatever
-        connectivity the model was given -- under ``model_input='residualized'``
-        that is already the deconfounded connectome.
-        """
+        """Per-subject positive/negative network strengths of X, for every run."""
         X = np.asarray(X, dtype=np.float32)
 
         edges_np = self.edges.cpu().numpy()
@@ -197,6 +152,8 @@ class BaseCPM(ABC):
 
 
 class DecisionTreeCPM(BaseCPM):
+    """CPM backend using a decision tree regressor (sklearn) for the connectome and full models."""
+
     name = "DecisionTreeCPM"
 
     def __init__(self, edges, device='cpu', task_type=TaskType.regression, **tree_kwargs):
@@ -210,6 +167,8 @@ class DecisionTreeCPM(BaseCPM):
 
 
 class RandomForestCPM(BaseCPM):
+    """CPM backend using a random forest regressor (sklearn) for the connectome and full models."""
+
     name = "RandomForestCPM"
 
     def __init__(self, edges, device='cpu', task_type=TaskType.regression, **rf_kwargs):
@@ -223,6 +182,8 @@ class RandomForestCPM(BaseCPM):
 
 
 class GAMCPM(BaseCPM):
+    """CPM backend using a linear GAM (pygam) for the connectome and full models."""
+
     name = "GAMCPM"
 
     def __init__(self, edges, device='cpu', task_type=TaskType.regression, **gam_kwargs):

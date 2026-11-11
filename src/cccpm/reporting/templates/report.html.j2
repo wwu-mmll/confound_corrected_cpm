@@ -287,6 +287,9 @@
           <p class="caption">Chord diagram of between-network connectivity.</p>
         </div>
         {% endif %}
+      </div>
+      {% if m.brain_positive or m.brain_negative %}
+      <div class="figure-stack brain-mode-panel{% if not m.default %} hidden{% endif %}" data-mode="{{ m.key }}">
         {% if m.brain_positive %}
         <div class="figure-wrap">
           {{ m.brain_positive }}
@@ -300,6 +303,7 @@
         </div>
         {% endif %}
       </div>
+      {% endif %}
       {% endfor %}
       {% endif %}
 
