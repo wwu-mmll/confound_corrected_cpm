@@ -407,10 +407,11 @@ a.download-link {
 }
 a.download-link:hover { background: var(--accent-strong); color: #fff; }
 
-/* Uniform card grid for figures */
+/* Uniform card grid for figures -- fixed at 2 columns so 4 figures lay out
+   as 2x2 rather than auto-fill wrapping an odd one (3 + 1) at report width. */
 .figure-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-5);
   margin: var(--sp-4) 0;
 }
